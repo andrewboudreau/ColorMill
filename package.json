@@ -9,10 +9,9 @@
     "preview": "vite preview",
     "test": "vitest run"
   },
-  "dependencies": {
-    "vite": "latest",
-    "typescript": "latest",
-    "vitest": "latest"
-  },
-  "devDependencies": {}
+  "devDependencies": {
+    "typescript": "5.8.3",
+    "vite": "6.3.5",
+    "vitest": "3.2.4"
+  }
 }

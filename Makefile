@@ -3,6 +3,7 @@ BUILD_DIR := build
 DIST_DIR := dist
 SRC := src/main.c src/sim/material_sim.c
 CFLAGS := -std=c99 -Wall -Wextra -Isrc
+WEB_CFLAGS := $(CFLAGS) -Iraylib/src
 RAYLIB_WEB_A ?= raylib/src/libraylib.a
 
 .PHONY: native web clean
@@ -13,7 +14,7 @@ native:
 
 web:
 	mkdir -p $(DIST_DIR)
-	emcc $(CFLAGS) $(SRC) -o $(DIST_DIR)/index.html -DPLATFORM_WEB -Os -s USE_GLFW=3 -s ASYNCIFY $(RAYLIB_WEB_A)
+	emcc $(WEB_CFLAGS) $(SRC) -o $(DIST_DIR)/index.html -DPLATFORM_WEB -Os -s USE_GLFW=3 -s ASYNCIFY $(RAYLIB_WEB_A) -lm
 
 clean:
 	rm -rf $(BUILD_DIR) $(DIST_DIR)

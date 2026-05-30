@@ -10,7 +10,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
     "vite": "latest",
     "typescript": "latest",
     "vitest": "latest"

@@ -42,6 +42,19 @@ if (!canvas || !context) {
 let state = createInitialMillState();
 let previousTime = performance.now();
 
+function addRoundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+}
+
 function drawRoller(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, angle: number, label: string): void {
   ctx.save();
   ctx.translate(x, y);
@@ -86,7 +99,7 @@ function drawMaterial(ctx: CanvasRenderingContext2D, millState: MillState): void
   for (const strip of millState.strips) {
     ctx.fillStyle = toCssRgb(strip.color);
     ctx.beginPath();
-    ctx.roundRect(strip.x, strip.y, strip.width, strip.height, 9);
+    addRoundedRectPath(ctx, strip.x, strip.y, strip.width, strip.height, 9);
     ctx.fill();
   }
 

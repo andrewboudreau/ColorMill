@@ -2,6 +2,8 @@
 
 #include "sim/material_sim.h"
 
+#include <math.h>
+
 #if defined(PLATFORM_WEB)
 #include <emscripten/emscripten.h>
 #endif
@@ -15,7 +17,7 @@
 
 typedef struct AppState {
     MaterialSim sim;
-    RenderTexture2D fieldTexture;
+    Texture2D fieldTexture;
     Image fieldImage;
     Color *pixels;
 } AppState;
@@ -55,7 +57,7 @@ static void UpdateFieldTexture(void) {
         }
     }
 
-    UpdateTexture(app.fieldTexture.texture, app.pixels);
+    UpdateTexture(app.fieldTexture, app.pixels);
 }
 
 static void DrawRoller(Vector2 center, float radius, float angle, const char *label) {
@@ -85,6 +87,19 @@ static void DrawControls(void) {
     DrawText(TextFormat("diffusion %.3f", app.sim.diffusion), 402, 590, 16, (Color){ 71, 85, 105, 255 });
 }
 
+static bool MouseInField(Vector2 mouse) {
+    return mouse.x >= FIELD_X && mouse.x <= FIELD_X + FIELD_W && mouse.y >= FIELD_Y && mouse.y <= FIELD_Y + FIELD_H;
+}
+
+static void AddPigmentAtMouse(float red, float blue) {
+    const Vector2 mouse = GetMousePosition();
+    if (!MouseInField(mouse)) return;
+
+    const float x = (mouse.x - FIELD_X) / (float)FIELD_W;
+    const float y = (mouse.y - FIELD_Y) / (float)FIELD_H;
+    MaterialSim_AddPigment(&app.sim, x, y, red, blue, 0.045f);
+}
+
 static void HandleInput(void) {
     if (IsKeyPressed(KEY_SPACE)) app.sim.paused = !app.sim.paused;
     if (IsKeyPressed(KEY_R)) MaterialSim_Reset(&app.sim);
@@ -99,23 +114,8 @@ static void HandleInput(void) {
     app.sim.rollerSpeed = Clamp01f(app.sim.rollerSpeed);
     app.sim.gap = 0.12f + Clamp01f((app.sim.gap - 0.12f) / 0.38f) * 0.38f;
 
-    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        const Vector2 mouse = GetMousePosition();
-        if (mouse.x >= FIELD_X && mouse.x <= FIELD_X + FIELD_W && mouse.y >= FIELD_Y && mouse.y <= FIELD_Y + FIELD_H) {
-            const float x = (mouse.x - FIELD_X) / (float)FIELD_W;
-            const float y = (mouse.y - FIELD_Y) / (float)FIELD_H;
-            MaterialSim_AddPigment(&app.sim, x, y, 1.0f, 0.05f, 0.045f);
-        }
-    }
-
-    if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
-        const Vector2 mouse = GetMousePosition();
-        if (mouse.x >= FIELD_X && mouse.x <= FIELD_X + FIELD_W && mouse.y >= FIELD_Y && mouse.y <= FIELD_Y + FIELD_H) {
-            const float x = (mouse.x - FIELD_X) / (float)FIELD_W;
-            const float y = (mouse.y - FIELD_Y) / (float)FIELD_H;
-            MaterialSim_AddPigment(&app.sim, x, y, 0.05f, 1.0f, 0.045f);
-        }
-    }
+    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) AddPigmentAtMouse(1.0f, 0.05f);
+    if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) AddPigmentAtMouse(0.05f, 1.0f);
 }
 
 static void UpdateDrawFrame(void) {
@@ -131,8 +131,8 @@ static void UpdateDrawFrame(void) {
 
     DrawRectangleRounded((Rectangle){ 48, 100, 864, 430 }, 0.035f, 14, (Color){ 203, 213, 225, 255 });
     DrawTexturePro(
-        app.fieldTexture.texture,
-        (Rectangle){ 0, 0, (float)app.fieldTexture.texture.width, -(float)app.fieldTexture.texture.height },
+        app.fieldTexture,
+        (Rectangle){ 0, 0, (float)app.fieldTexture.width, (float)app.fieldTexture.height },
         (Rectangle){ FIELD_X, FIELD_Y, FIELD_W, FIELD_H },
         (Vector2){ 0, 0 },
         0.0f,
@@ -157,7 +157,7 @@ int main(void) {
 
     MaterialSim_Init(&app.sim);
     app.fieldImage = GenImageColor(SIM_WIDTH, SIM_HEIGHT, BLANK);
-    app.fieldTexture = LoadRenderTexture(SIM_WIDTH, SIM_HEIGHT);
+    app.fieldTexture = LoadTextureFromImage(app.fieldImage);
     app.pixels = (Color *)MemAlloc(sizeof(Color) * SIM_CELL_COUNT);
     UpdateFieldTexture();
 
@@ -170,7 +170,7 @@ int main(void) {
 #endif
 
     MemFree(app.pixels);
-    UnloadRenderTexture(app.fieldTexture);
+    UnloadTexture(app.fieldTexture);
     UnloadImage(app.fieldImage);
     CloseWindow();
     return 0;

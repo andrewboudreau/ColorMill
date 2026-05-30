@@ -21,19 +21,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
         with:
-          node-version: 22
+          version: latest
 
-      - name: Install dependencies
-        run: npm install
+      - name: Fetch raylib
+        run: git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib
 
-      - name: Test
-        run: npm test
+      - name: Build raylib for web
+        run: make -C raylib/src PLATFORM=PLATFORM_WEB
 
-      - name: Build
-        run: npm run build
+      - name: Build ColorMill web app
+        run: make web
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

@@ -34,14 +34,21 @@ static unsigned char ToByte(float value) {
     return (unsigned char)(Clamp01f(value) * 255.0f);
 }
 
-static Color PigmentColor(float red, float blue) {
-    const float mixed = red < blue ? red : blue;
-    const float material = Clamp01f(0.34f + (red + blue) * 0.34f);
+static Color PigmentColor(float material, float red, float blue) {
+    if (material < 0.015f) {
+        return (Color){ 226, 232, 240, 255 };
+    }
+
+    const float invMaterial = 1.0f / fmaxf(material, 0.001f);
+    const float redConcentration = Clamp01f(red * invMaterial);
+    const float blueConcentration = Clamp01f(blue * invMaterial);
+    const float mixed = redConcentration < blueConcentration ? redConcentration : blueConcentration;
+    const float base = 0.54f + material * 0.22f;
 
     Color color = {
-        ToByte(material + red * 0.62f + mixed * 0.22f),
-        ToByte(material * 0.88f - mixed * 0.18f),
-        ToByte(material + blue * 0.68f + mixed * 0.28f),
+        ToByte(base + redConcentration * 0.54f + mixed * 0.18f),
+        ToByte(base * 0.86f - mixed * 0.15f),
+        ToByte(base + blueConcentration * 0.60f + mixed * 0.22f),
         255
     };
 
@@ -51,9 +58,10 @@ static Color PigmentColor(float red, float blue) {
 static void UpdateFieldTexture(void) {
     for (int y = 0; y < SIM_HEIGHT; y++) {
         for (int x = 0; x < SIM_WIDTH; x++) {
+            const float material = MaterialSim_MaterialAt(&app.sim, x, y);
             const float red = MaterialSim_RedAt(&app.sim, x, y);
             const float blue = MaterialSim_BlueAt(&app.sim, x, y);
-            app.pixels[MaterialSim_Index(x, y)] = PigmentColor(red, blue);
+            app.pixels[MaterialSim_Index(x, y)] = PigmentColor(material, red, blue);
         }
     }
 
@@ -127,7 +135,7 @@ static void UpdateDrawFrame(void) {
     ClearBackground((Color){ 238, 242, 247, 255 });
 
     DrawText("ColorMill", 72, 34, 42, (Color){ 15, 23, 42, 255 });
-    DrawText("C / raylib / WASM pigment field simulator", 74, 82, 20, (Color){ 71, 85, 105, 255 });
+    DrawText("C / raylib / WASM CPU grid simulator", 74, 82, 20, (Color){ 71, 85, 105, 255 });
 
     DrawRectangleRounded((Rectangle){ 48, 100, 864, 430 }, 0.035f, 14, (Color){ 203, 213, 225, 255 });
     DrawTexturePro(

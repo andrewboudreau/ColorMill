@@ -9,11 +9,15 @@ static float Clamp01(float value) {
     return value;
 }
 
+static float Smooth01(float edge0, float edge1, float value) {
+    const float t = Clamp01((value - edge0) / (edge1 - edge0));
+    return t * t * (3.0f - 2.0f * t);
+}
+
 static float SampleField(const float *field, float x, float y) {
-    if (x < 0.0f) x = 0.0f;
-    if (y < 0.0f) y = 0.0f;
-    if (x > (float)(SIM_WIDTH - 1)) x = (float)(SIM_WIDTH - 1);
-    if (y > (float)(SIM_HEIGHT - 1)) y = (float)(SIM_HEIGHT - 1);
+    if (x < 0.0f || y < 0.0f || x > (float)(SIM_WIDTH - 1) || y > (float)(SIM_HEIGHT - 1)) {
+        return 0.0f;
+    }
 
     const int x0 = (int)x;
     const int y0 = (int)y;
@@ -45,23 +49,53 @@ static float DiffuseAt(const float *field, int x, int y, float center, float dif
 
 static void WriteRollerVelocity(MaterialSim *sim) {
     const float centerX = (float)(SIM_WIDTH - 1) * 0.5f;
-    const float centerY = (float)(SIM_HEIGHT - 1) * 0.5f;
-    const float gapPixels = sim->gap * (float)SIM_HEIGHT;
+    const float centerY = (float)(SIM_HEIGHT - 1) * 0.48f;
+    const float halfGap = 7.0f + sim->gap * 14.0f;
+    const float rollerRadius = 25.0f;
+    const float leftCenterX = centerX - halfGap - rollerRadius;
+    const float rightCenterX = centerX + halfGap + rollerRadius;
+    const float surfaceSpeed = 28.0f * sim->rollerSpeed;
 
     for (int y = 0; y < SIM_HEIGHT; y++) {
         for (int x = 0; x < SIM_WIDTH; x++) {
-            const float nx = ((float)x - centerX) / centerX;
-            const float ny = ((float)y - centerY) / centerY;
-            const float distanceToNip = fabsf((float)y - centerY);
-            const float nipInfluence = Clamp01(1.0f - distanceToNip / gapPixels);
-            const float feed = 4.5f + nipInfluence * 10.0f;
-            const float shear = nx * nipInfluence * sim->rollerSpeed * 34.0f;
-            const float squeeze = -ny * nipInfluence * sim->rollerSpeed * 16.0f;
-            const float rollWave = sinf(sim->rollerAngle * 3.0f + (float)y * 0.15f) * nipInfluence * 7.5f;
+            const float fx = (float)x;
+            const float fy = (float)y;
+            const float dxLeft = fx - leftCenterX;
+            const float dxRight = fx - rightCenterX;
+            const float dy = fy - centerY;
+            const float dLeft = sqrtf(dxLeft * dxLeft + dy * dy);
+            const float dRight = sqrtf(dxRight * dxRight + dy * dy);
+            const float leftSurface = 1.0f - Smooth01(rollerRadius, rollerRadius + 14.0f, dLeft);
+            const float rightSurface = 1.0f - Smooth01(rollerRadius, rollerRadius + 14.0f, dRight);
+            const float nipX = 1.0f - Smooth01(halfGap * 0.55f, halfGap * 2.2f, fabsf(fx - centerX));
+            const float nipY = 1.0f - Smooth01(0.0f, 28.0f, fabsf(dy));
+            const float nip = nipX * nipY;
             const int index = MaterialSim_Index(x, y);
 
-            sim->vx[index] = feed + shear + rollWave;
-            sim->vy[index] = squeeze;
+            float vx = 0.0f;
+            float vy = 0.0f;
+
+            if (dLeft > 0.001f) {
+                vx += (-dy / dLeft) * surfaceSpeed * leftSurface;
+                vy += (dxLeft / dLeft) * surfaceSpeed * leftSurface;
+            }
+
+            if (dRight > 0.001f) {
+                vx += (dy / dRight) * surfaceSpeed * rightSurface;
+                vy += (-dxRight / dRight) * surfaceSpeed * rightSurface;
+            }
+
+            vy += surfaceSpeed * (0.45f + nip * 1.05f);
+            vx += -((fx - centerX) / centerX) * nip * surfaceSpeed * 0.35f;
+
+            if (fy > centerY + 18.0f) {
+                const float returnBand = Smooth01(centerY + 18.0f, (float)SIM_HEIGHT - 4.0f, fy);
+                vx += -surfaceSpeed * 0.45f * returnBand;
+                vy += -surfaceSpeed * 0.24f * returnBand;
+            }
+
+            sim->vx[index] = vx;
+            sim->vy[index] = vy;
         }
     }
 }
@@ -86,17 +120,16 @@ void MaterialSim_Reset(MaterialSim *sim) {
     sim->gap = 0.26f;
     sim->paused = false;
 
-    for (int y = 18; y < 54; y++) {
-        for (int x = 10; x < 78; x++) {
+    for (int y = 4; y < 31; y++) {
+        for (int x = 45; x < 83; x++) {
             const int index = MaterialSim_Index(x, y);
             sim->material[index] = 0.92f;
         }
     }
 
-    MaterialSim_AddPigment(sim, 0.24f, 0.42f, 1.0f, 0.04f, 0.10f);
-    MaterialSim_AddPigment(sim, 0.46f, 0.45f, 0.04f, 1.0f, 0.11f);
-    MaterialSim_AddPigment(sim, 0.34f, 0.63f, 0.95f, 0.05f, 0.08f);
-    MaterialSim_AddPigment(sim, 0.56f, 0.64f, 0.05f, 0.95f, 0.08f);
+    MaterialSim_AddPigment(sim, 0.43f, 0.22f, 1.0f, 0.04f, 0.08f);
+    MaterialSim_AddPigment(sim, 0.57f, 0.25f, 0.04f, 1.0f, 0.08f);
+    MaterialSim_AddPigment(sim, 0.50f, 0.36f, 0.95f, 0.05f, 0.07f);
 }
 
 void MaterialSim_Init(MaterialSim *sim) {

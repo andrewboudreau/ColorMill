@@ -13,6 +13,8 @@ typedef struct MaterialSim {
     float blue[SIM_CELL_COUNT];
     float vx[SIM_CELL_COUNT];
     float vy[SIM_CELL_COUNT];
+    float bandMask[SIM_CELL_COUNT];
+    float mixMask[SIM_CELL_COUNT];
     float nextMaterial[SIM_CELL_COUNT];
     float nextRed[SIM_CELL_COUNT];
     float nextBlue[SIM_CELL_COUNT];
@@ -33,5 +35,7 @@ float MaterialSim_RedAt(const MaterialSim *sim, int x, int y);
 float MaterialSim_BlueAt(const MaterialSim *sim, int x, int y);
 float MaterialSim_VelocityXAt(const MaterialSim *sim, int x, int y);
 float MaterialSim_VelocityYAt(const MaterialSim *sim, int x, int y);
+float MaterialSim_BandMaskAt(const MaterialSim *sim, int x, int y);
+float MaterialSim_MixMaskAt(const MaterialSim *sim, int x, int y);
 
 #endif

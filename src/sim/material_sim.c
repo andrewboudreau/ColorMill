@@ -47,6 +47,14 @@ static float DiffuseAt(const float *field, int x, int y, float center, float dif
     return center + (neighbors - center) * diffusion;
 }
 
+static float MixingHorizonAt(int x, int y, float centerX, float centerY, float halfGap) {
+    const float fx = (float)x;
+    const float fy = (float)y;
+    const float nipX = 1.0f - Smooth01(halfGap * 0.65f, halfGap * 2.1f, fabsf(fx - centerX));
+    const float nipY = 1.0f - Smooth01(3.0f, 14.0f, fabsf(fy - centerY));
+    return nipX * nipY;
+}
+
 static void WriteRollerVelocity(MaterialSim *sim) {
     const float centerX = (float)(SIM_WIDTH - 1) * 0.5f;
     const float centerY = (float)(SIM_HEIGHT - 1) * 0.48f;
@@ -67,9 +75,7 @@ static void WriteRollerVelocity(MaterialSim *sim) {
             const float dRight = sqrtf(dxRight * dxRight + dy * dy);
             const float leftSurface = 1.0f - Smooth01(rollerRadius, rollerRadius + 14.0f, dLeft);
             const float rightSurface = 1.0f - Smooth01(rollerRadius, rollerRadius + 14.0f, dRight);
-            const float nipX = 1.0f - Smooth01(halfGap * 0.55f, halfGap * 2.2f, fabsf(fx - centerX));
-            const float nipY = 1.0f - Smooth01(0.0f, 28.0f, fabsf(dy));
-            const float nip = nipX * nipY;
+            const float nip = MixingHorizonAt(x, y, centerX, centerY, halfGap);
             const int index = MaterialSim_Index(x, y);
 
             float vx = 0.0f;
@@ -85,8 +91,8 @@ static void WriteRollerVelocity(MaterialSim *sim) {
                 vy += (-dxRight / dRight) * surfaceSpeed * rightSurface;
             }
 
-            vy += surfaceSpeed * (0.45f + nip * 1.05f);
-            vx += -((fx - centerX) / centerX) * nip * surfaceSpeed * 0.35f;
+            vy += surfaceSpeed * (0.35f + nip * 1.25f);
+            vx += -((fx - centerX) / centerX) * nip * surfaceSpeed * 0.42f;
 
             if (fy > centerY + 18.0f) {
                 const float returnBand = Smooth01(centerY + 18.0f, (float)SIM_HEIGHT - 4.0f, fy);
@@ -162,7 +168,10 @@ void MaterialSim_Step(MaterialSim *sim, float dt) {
     if (sim->paused) return;
 
     const float safeDt = dt > 0.04f ? 0.04f : dt;
-    const float diffusion = Clamp01(sim->diffusion * safeDt * 48.0f);
+    const float centerX = (float)(SIM_WIDTH - 1) * 0.5f;
+    const float centerY = (float)(SIM_HEIGHT - 1) * 0.48f;
+    const float halfGap = 7.0f + sim->gap * 14.0f;
+    const float baseDiffusion = Clamp01(sim->diffusion * safeDt * 70.0f);
 
     sim->rollerAngle += sim->rollerSpeed * safeDt;
     WriteRollerVelocity(sim);
@@ -175,6 +184,8 @@ void MaterialSim_Step(MaterialSim *sim, float dt) {
             const float material = SampleField(sim->material, sourceX, sourceY);
             const float red = SampleField(sim->red, sourceX, sourceY);
             const float blue = SampleField(sim->blue, sourceX, sourceY);
+            const float mix = MixingHorizonAt(x, y, centerX, centerY, halfGap);
+            const float diffusion = baseDiffusion * mix;
 
             sim->nextMaterial[index] = Clamp01(material);
             sim->nextRed[index] = Clamp01(DiffuseAt(sim->red, x, y, red, diffusion) * sim->nextMaterial[index]);

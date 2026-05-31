@@ -10,16 +10,18 @@
 
 #define SCREEN_WIDTH 960
 #define SCREEN_HEIGHT 640
-#define FIELD_X 72
-#define FIELD_Y 118
-#define FIELD_W 816
-#define FIELD_H 408
+#define FIELD_X 48
+#define FIELD_Y 96
+#define FIELD_W 864
+#define FIELD_H 486
 
 typedef struct AppState {
     MaterialSim sim;
     Texture2D fieldTexture;
     Image fieldImage;
     Color *pixels;
+    int viewMode;
+    bool showGrid;
 } AppState;
 
 static AppState app;
@@ -34,25 +36,50 @@ static unsigned char ToByte(float value) {
     return (unsigned char)(Clamp01f(value) * 255.0f);
 }
 
-static Color PigmentColor(float material, float red, float blue) {
-    if (material < 0.015f) {
-        return (Color){ 226, 232, 240, 255 };
+static Color CellColor(float material, float red, float blue, float vx, float vy) {
+    if (app.viewMode == 1) {
+        const unsigned char shade = ToByte(material);
+        return (Color){ shade, shade, shade, 255 };
     }
 
-    const float invMaterial = 1.0f / fmaxf(material, 0.001f);
-    const float redConcentration = Clamp01f(red * invMaterial);
-    const float blueConcentration = Clamp01f(blue * invMaterial);
-    const float mixed = redConcentration < blueConcentration ? redConcentration : blueConcentration;
-    const float base = 0.54f + material * 0.22f;
+    if (app.viewMode == 2) {
+        const float value = material > 0.001f ? red / material : 0.0f;
+        return (Color){ ToByte(value), 28, 36, 255 };
+    }
 
-    Color color = {
-        ToByte(base + redConcentration * 0.54f + mixed * 0.18f),
-        ToByte(base * 0.86f - mixed * 0.15f),
-        ToByte(base + blueConcentration * 0.60f + mixed * 0.22f),
+    if (app.viewMode == 3) {
+        const float value = material > 0.001f ? blue / material : 0.0f;
+        return (Color){ 28, 42, ToByte(value), 255 };
+    }
+
+    if (app.viewMode == 4) {
+        const float speed = Clamp01f(sqrtf(vx * vx + vy * vy) / 26.0f);
+        const float dir = atan2f(vy, vx) / 6.2831853f + 0.5f;
+        return (Color){ ToByte(speed), ToByte(dir), ToByte(1.0f - speed), 255 };
+    }
+
+    if (material < 0.015f) return (Color){ 226, 232, 240, 255 };
+
+    const float invMaterial = 1.0f / fmaxf(material, 0.001f);
+    const float redC = Clamp01f(red * invMaterial);
+    const float blueC = Clamp01f(blue * invMaterial);
+    const float mixed = redC < blueC ? redC : blueC;
+    const float base = 0.50f + material * 0.24f;
+
+    return (Color){
+        ToByte(base + redC * 0.56f + mixed * 0.18f),
+        ToByte(base * 0.86f - mixed * 0.16f),
+        ToByte(base + blueC * 0.62f + mixed * 0.22f),
         255
     };
+}
 
-    return color;
+static const char *ViewName(void) {
+    if (app.viewMode == 1) return "material";
+    if (app.viewMode == 2) return "red";
+    if (app.viewMode == 3) return "blue";
+    if (app.viewMode == 4) return "velocity";
+    return "mixed";
 }
 
 static void UpdateFieldTexture(void) {
@@ -61,38 +88,30 @@ static void UpdateFieldTexture(void) {
             const float material = MaterialSim_MaterialAt(&app.sim, x, y);
             const float red = MaterialSim_RedAt(&app.sim, x, y);
             const float blue = MaterialSim_BlueAt(&app.sim, x, y);
-            app.pixels[MaterialSim_Index(x, y)] = PigmentColor(material, red, blue);
+            const float vx = MaterialSim_VelocityXAt(&app.sim, x, y);
+            const float vy = MaterialSim_VelocityYAt(&app.sim, x, y);
+            app.pixels[MaterialSim_Index(x, y)] = CellColor(material, red, blue, vx, vy);
         }
     }
 
     UpdateTexture(app.fieldTexture, app.pixels);
 }
 
-static void DrawRoller(Vector2 center, float radius, float angle, const char *label) {
-    DrawCircleV(center, radius + 4.0f, (Color){ 31, 41, 55, 255 });
-    DrawCircleV(center, radius, (Color){ 148, 163, 184, 255 });
-    DrawCircleV((Vector2){ center.x - radius * 0.25f, center.y - radius * 0.25f }, radius * 0.42f, (Color){ 226, 232, 240, 120 });
+static void DrawGridOverlay(void) {
+    if (!app.showGrid) return;
 
-    for (int i = 0; i < 8; i++) {
-        const float theta = angle + (float)i * 0.7853982f;
-        const Vector2 a = { center.x + cosf(theta) * radius * 0.18f, center.y + sinf(theta) * radius * 0.18f };
-        const Vector2 b = { center.x + cosf(theta) * radius * 0.84f, center.y + sinf(theta) * radius * 0.84f };
-        DrawLineEx(a, b, 3.0f, (Color){ 248, 250, 252, 210 });
+    const float cellW = (float)FIELD_W / (float)SIM_WIDTH;
+    const float cellH = (float)FIELD_H / (float)SIM_HEIGHT;
+
+    for (int x = 0; x <= SIM_WIDTH; x += 8) {
+        const float px = FIELD_X + (float)x * cellW;
+        DrawLine((int)px, FIELD_Y, (int)px, FIELD_Y + FIELD_H, (Color){ 15, 23, 42, 42 });
     }
 
-    DrawText(label, (int)(center.x - MeasureText(label, 18) / 2), (int)(center.y + radius + 22), 18, (Color){ 15, 23, 42, 255 });
-}
-
-static void DrawControls(void) {
-    DrawRectangleRounded((Rectangle){ 72, 546, 816, 66 }, 0.18f, 12, (Color){ 255, 255, 255, 215 });
-    DrawText("SPACE pause  |  R reset  |  1 red pigment  |  2 blue pigment  |  UP/DOWN speed  |  LEFT/RIGHT gap", 96, 568, 18, (Color){ 51, 65, 85, 255 });
-
-    const char *status = app.sim.paused ? "Paused" : "Running";
-    DrawText(status, 96, 590, 16, app.sim.paused ? ORANGE : DARKGREEN);
-
-    DrawText(TextFormat("speed %.2f", app.sim.rollerSpeed), 198, 590, 16, (Color){ 71, 85, 105, 255 });
-    DrawText(TextFormat("gap %.2f", app.sim.gap), 310, 590, 16, (Color){ 71, 85, 105, 255 });
-    DrawText(TextFormat("diffusion %.3f", app.sim.diffusion), 402, 590, 16, (Color){ 71, 85, 105, 255 });
+    for (int y = 0; y <= SIM_HEIGHT; y += 8) {
+        const float py = FIELD_Y + (float)y * cellH;
+        DrawLine(FIELD_X, (int)py, FIELD_X + FIELD_W, (int)py, (Color){ 15, 23, 42, 42 });
+    }
 }
 
 static bool MouseInField(Vector2 mouse) {
@@ -105,14 +124,19 @@ static void AddPigmentAtMouse(float red, float blue) {
 
     const float x = (mouse.x - FIELD_X) / (float)FIELD_W;
     const float y = (mouse.y - FIELD_Y) / (float)FIELD_H;
-    MaterialSim_AddPigment(&app.sim, x, y, red, blue, 0.045f);
+    MaterialSim_AddPigment(&app.sim, x, y, red, blue, 0.04f);
 }
 
 static void HandleInput(void) {
     if (IsKeyPressed(KEY_SPACE)) app.sim.paused = !app.sim.paused;
     if (IsKeyPressed(KEY_R)) MaterialSim_Reset(&app.sim);
-    if (IsKeyPressed(KEY_ONE)) MaterialSim_AddPigment(&app.sim, 0.36f, 0.46f, 1.0f, 0.02f, 0.105f);
-    if (IsKeyPressed(KEY_TWO)) MaterialSim_AddPigment(&app.sim, 0.64f, 0.54f, 0.02f, 1.0f, 0.105f);
+    if (IsKeyPressed(KEY_G)) app.showGrid = !app.showGrid;
+
+    if (IsKeyPressed(KEY_ONE)) app.viewMode = 0;
+    if (IsKeyPressed(KEY_TWO)) app.viewMode = 1;
+    if (IsKeyPressed(KEY_THREE)) app.viewMode = 2;
+    if (IsKeyPressed(KEY_FOUR)) app.viewMode = 3;
+    if (IsKeyPressed(KEY_FIVE)) app.viewMode = 4;
 
     if (IsKeyDown(KEY_UP)) app.sim.rollerSpeed += GetFrameTime() * 0.55f;
     if (IsKeyDown(KEY_DOWN)) app.sim.rollerSpeed -= GetFrameTime() * 0.55f;
@@ -126,6 +150,14 @@ static void HandleInput(void) {
     if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) AddPigmentAtMouse(0.05f, 1.0f);
 }
 
+static void DrawHud(void) {
+    DrawText("ColorMill grid debugger", 48, 24, 30, (Color){ 15, 23, 42, 255 });
+    DrawText(TextFormat("view: %s", ViewName()), 50, 60, 18, (Color){ 51, 65, 85, 255 });
+    DrawText(TextFormat("speed %.2f   gap %.2f", app.sim.rollerSpeed, app.sim.gap), 260, 60, 18, (Color){ 51, 65, 85, 255 });
+    DrawText(app.sim.paused ? "paused" : "running", 800, 60, 18, app.sim.paused ? ORANGE : DARKGREEN);
+    DrawText("1 mixed  2 material  3 red  4 blue  5 velocity  |  G grid  SPACE pause  R reset", 54, 602, 16, (Color){ 51, 65, 85, 255 });
+}
+
 static void UpdateDrawFrame(void) {
     HandleInput();
     MaterialSim_Step(&app.sim, GetFrameTime());
@@ -134,10 +166,6 @@ static void UpdateDrawFrame(void) {
     BeginDrawing();
     ClearBackground((Color){ 238, 242, 247, 255 });
 
-    DrawText("ColorMill", 72, 34, 42, (Color){ 15, 23, 42, 255 });
-    DrawText("C / raylib / WASM CPU grid simulator", 74, 82, 20, (Color){ 71, 85, 105, 255 });
-
-    DrawRectangleRounded((Rectangle){ 48, 100, 864, 430 }, 0.035f, 14, (Color){ 203, 213, 225, 255 });
     DrawTexturePro(
         app.fieldTexture,
         (Rectangle){ 0, 0, (float)app.fieldTexture.width, (float)app.fieldTexture.height },
@@ -146,15 +174,10 @@ static void UpdateDrawFrame(void) {
         0.0f,
         WHITE
     );
-
-    DrawLineEx((Vector2){ 480, FIELD_Y }, (Vector2){ 480, FIELD_Y + FIELD_H }, 2.0f, (Color){ 15, 23, 42, 160 });
-    DrawText("nip / shear zone", 410, 126, 18, (Color){ 15, 23, 42, 220 });
-
-    DrawRoller((Vector2){ 360, 322 }, 82.0f, app.sim.rollerAngle, "left roller");
-    DrawRoller((Vector2){ 600, 322 }, 82.0f, -app.sim.rollerAngle, "right roller");
+    DrawGridOverlay();
     DrawRectangleLinesEx((Rectangle){ FIELD_X, FIELD_Y, FIELD_W, FIELD_H }, 2.0f, (Color){ 15, 23, 42, 180 });
+    DrawHud();
 
-    DrawControls();
     EndDrawing();
 }
 
@@ -164,6 +187,8 @@ int main(void) {
     SetTargetFPS(60);
 
     MaterialSim_Init(&app.sim);
+    app.viewMode = 0;
+    app.showGrid = true;
     app.fieldImage = GenImageColor(SIM_WIDTH, SIM_HEIGHT, BLANK);
     app.fieldTexture = LoadTextureFromImage(app.fieldImage);
     app.pixels = (Color *)MemAlloc(sizeof(Color) * SIM_CELL_COUNT);

@@ -55,6 +55,34 @@ static float MixingHorizonAt(int x, int y, float centerX, float centerY, float h
     return nipX * nipY;
 }
 
+static float BandMaskAt(int x, int y, float centerX, float centerY, float halfGap) {
+    const float fx = (float)x;
+    const float fy = (float)y;
+    const float feedWidth = 15.0f;
+    const float feed = (1.0f - Smooth01(feedWidth, feedWidth + 8.0f, fabsf(fx - centerX))) *
+                       (1.0f - Smooth01(4.0f, centerY + 3.0f, fy));
+    const float nip = MixingHorizonAt(x, y, centerX, centerY, halfGap);
+    const float dx = (fx - centerX) / 37.0f;
+    const float dy = (fy - (centerY + 18.0f)) / 30.0f;
+    const float curtain = 1.0f - Smooth01(0.82f, 1.18f, dx * dx + dy * dy);
+    const float lower = Smooth01(centerY - 4.0f, centerY + 8.0f, fy);
+    return Clamp01(feed + nip + curtain * lower);
+}
+
+static void BuildGridMasks(MaterialSim *sim) {
+    const float centerX = (float)(SIM_WIDTH - 1) * 0.5f;
+    const float centerY = (float)(SIM_HEIGHT - 1) * 0.48f;
+    const float halfGap = 7.0f + sim->gap * 14.0f;
+
+    for (int y = 0; y < SIM_HEIGHT; y++) {
+        for (int x = 0; x < SIM_WIDTH; x++) {
+            const int index = MaterialSim_Index(x, y);
+            sim->mixMask[index] = MixingHorizonAt(x, y, centerX, centerY, halfGap);
+            sim->bandMask[index] = BandMaskAt(x, y, centerX, centerY, halfGap);
+        }
+    }
+}
+
 static void WriteRollerVelocity(MaterialSim *sim) {
     const float centerX = (float)(SIM_WIDTH - 1) * 0.5f;
     const float centerY = (float)(SIM_HEIGHT - 1) * 0.48f;
@@ -75,8 +103,9 @@ static void WriteRollerVelocity(MaterialSim *sim) {
             const float dRight = sqrtf(dxRight * dxRight + dy * dy);
             const float leftSurface = 1.0f - Smooth01(rollerRadius, rollerRadius + 14.0f, dLeft);
             const float rightSurface = 1.0f - Smooth01(rollerRadius, rollerRadius + 14.0f, dRight);
-            const float nip = MixingHorizonAt(x, y, centerX, centerY, halfGap);
             const int index = MaterialSim_Index(x, y);
+            const float nip = sim->mixMask[index];
+            const float band = sim->bandMask[index];
 
             float vx = 0.0f;
             float vy = 0.0f;
@@ -100,8 +129,8 @@ static void WriteRollerVelocity(MaterialSim *sim) {
                 vy += -surfaceSpeed * 0.24f * returnBand;
             }
 
-            sim->vx[index] = vx;
-            sim->vy[index] = vy;
+            sim->vx[index] = vx * band;
+            sim->vy[index] = vy * band;
         }
     }
 }
@@ -116,6 +145,8 @@ void MaterialSim_Reset(MaterialSim *sim) {
     memset(sim->blue, 0, sizeof(sim->blue));
     memset(sim->vx, 0, sizeof(sim->vx));
     memset(sim->vy, 0, sizeof(sim->vy));
+    memset(sim->bandMask, 0, sizeof(sim->bandMask));
+    memset(sim->mixMask, 0, sizeof(sim->mixMask));
     memset(sim->nextMaterial, 0, sizeof(sim->nextMaterial));
     memset(sim->nextRed, 0, sizeof(sim->nextRed));
     memset(sim->nextBlue, 0, sizeof(sim->nextBlue));
@@ -126,10 +157,12 @@ void MaterialSim_Reset(MaterialSim *sim) {
     sim->gap = 0.26f;
     sim->paused = false;
 
+    BuildGridMasks(sim);
+
     for (int y = 4; y < 31; y++) {
         for (int x = 45; x < 83; x++) {
             const int index = MaterialSim_Index(x, y);
-            sim->material[index] = 0.92f;
+            sim->material[index] = 0.92f * sim->bandMask[index];
         }
     }
 
@@ -155,7 +188,7 @@ void MaterialSim_AddPigment(MaterialSim *sim, float normalizedX, float normalize
             const float distance2 = dx * dx + dy * dy;
             if (distance2 > r2) continue;
 
-            const float amount = 1.0f - sqrtf(distance2 / r2);
+            const float amount = (1.0f - sqrtf(distance2 / r2)) * sim->bandMask[MaterialSim_Index(x, y)];
             const int index = MaterialSim_Index(x, y);
             sim->material[index] = Clamp01(sim->material[index] + amount * 0.24f);
             sim->red[index] = Clamp01(sim->red[index] + red * amount * sim->material[index]);
@@ -168,12 +201,10 @@ void MaterialSim_Step(MaterialSim *sim, float dt) {
     if (sim->paused) return;
 
     const float safeDt = dt > 0.04f ? 0.04f : dt;
-    const float centerX = (float)(SIM_WIDTH - 1) * 0.5f;
-    const float centerY = (float)(SIM_HEIGHT - 1) * 0.48f;
-    const float halfGap = 7.0f + sim->gap * 14.0f;
     const float baseDiffusion = Clamp01(sim->diffusion * safeDt * 70.0f);
 
     sim->rollerAngle += sim->rollerSpeed * safeDt;
+    BuildGridMasks(sim);
     WriteRollerVelocity(sim);
 
     for (int y = 0; y < SIM_HEIGHT; y++) {
@@ -181,11 +212,11 @@ void MaterialSim_Step(MaterialSim *sim, float dt) {
             const int index = MaterialSim_Index(x, y);
             const float sourceX = (float)x - sim->vx[index] * safeDt;
             const float sourceY = (float)y - sim->vy[index] * safeDt;
-            const float material = SampleField(sim->material, sourceX, sourceY);
-            const float red = SampleField(sim->red, sourceX, sourceY);
-            const float blue = SampleField(sim->blue, sourceX, sourceY);
-            const float mix = MixingHorizonAt(x, y, centerX, centerY, halfGap);
-            const float diffusion = baseDiffusion * mix;
+            const float band = sim->bandMask[index];
+            const float material = SampleField(sim->material, sourceX, sourceY) * band;
+            const float red = SampleField(sim->red, sourceX, sourceY) * band;
+            const float blue = SampleField(sim->blue, sourceX, sourceY) * band;
+            const float diffusion = baseDiffusion * sim->mixMask[index];
 
             sim->nextMaterial[index] = Clamp01(material);
             sim->nextRed[index] = Clamp01(DiffuseAt(sim->red, x, y, red, diffusion) * sim->nextMaterial[index]);
@@ -216,4 +247,12 @@ float MaterialSim_VelocityXAt(const MaterialSim *sim, int x, int y) {
 
 float MaterialSim_VelocityYAt(const MaterialSim *sim, int x, int y) {
     return sim->vy[MaterialSim_Index(x, y)];
+}
+
+float MaterialSim_BandMaskAt(const MaterialSim *sim, int x, int y) {
+    return sim->bandMask[MaterialSim_Index(x, y)];
+}
+
+float MaterialSim_MixMaskAt(const MaterialSim *sim, int x, int y) {
+    return sim->mixMask[MaterialSim_Index(x, y)];
 }

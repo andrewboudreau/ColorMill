@@ -165,3 +165,11 @@ float MaterialSim_RedAt(const MaterialSim *sim, int x, int y) {
 float MaterialSim_BlueAt(const MaterialSim *sim, int x, int y) {
     return sim->blue[MaterialSim_Index(x, y)];
 }
+
+float MaterialSim_VelocityXAt(const MaterialSim *sim, int x, int y) {
+    return sim->vx[MaterialSim_Index(x, y)];
+}
+
+float MaterialSim_VelocityYAt(const MaterialSim *sim, int x, int y) {
+    return sim->vy[MaterialSim_Index(x, y)];
+}

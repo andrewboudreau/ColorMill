@@ -36,7 +36,7 @@ static unsigned char ToByte(float value) {
     return (unsigned char)(Clamp01f(value) * 255.0f);
 }
 
-static Color CellColor(float material, float red, float blue, float vx, float vy) {
+static Color CellColor(float material, float red, float blue, float vx, float vy, float bandMask, float mixMask) {
     if (app.viewMode == 1) {
         const unsigned char shade = ToByte(material);
         return (Color){ shade, shade, shade, 255 };
@@ -56,6 +56,15 @@ static Color CellColor(float material, float red, float blue, float vx, float vy
         const float speed = Clamp01f(sqrtf(vx * vx + vy * vy) / 26.0f);
         const float dir = atan2f(vy, vx) / 6.2831853f + 0.5f;
         return (Color){ ToByte(speed), ToByte(dir), ToByte(1.0f - speed), 255 };
+    }
+
+    if (app.viewMode == 5) {
+        const unsigned char shade = ToByte(bandMask);
+        return (Color){ shade, shade, shade, 255 };
+    }
+
+    if (app.viewMode == 6) {
+        return (Color){ ToByte(mixMask), ToByte(mixMask * 0.18f), ToByte(mixMask), 255 };
     }
 
     if (material < 0.015f) return (Color){ 226, 232, 240, 255 };
@@ -79,6 +88,8 @@ static const char *ViewName(void) {
     if (app.viewMode == 2) return "red";
     if (app.viewMode == 3) return "blue";
     if (app.viewMode == 4) return "velocity";
+    if (app.viewMode == 5) return "band mask";
+    if (app.viewMode == 6) return "mix mask";
     return "mixed";
 }
 
@@ -90,7 +101,9 @@ static void UpdateFieldTexture(void) {
             const float blue = MaterialSim_BlueAt(&app.sim, x, y);
             const float vx = MaterialSim_VelocityXAt(&app.sim, x, y);
             const float vy = MaterialSim_VelocityYAt(&app.sim, x, y);
-            app.pixels[MaterialSim_Index(x, y)] = CellColor(material, red, blue, vx, vy);
+            const float band = MaterialSim_BandMaskAt(&app.sim, x, y);
+            const float mix = MaterialSim_MixMaskAt(&app.sim, x, y);
+            app.pixels[MaterialSim_Index(x, y)] = CellColor(material, red, blue, vx, vy, band, mix);
         }
     }
 
@@ -112,6 +125,17 @@ static void DrawGridOverlay(void) {
         const float py = FIELD_Y + (float)y * cellH;
         DrawLine(FIELD_X, (int)py, FIELD_X + FIELD_W, (int)py, (Color){ 15, 23, 42, 42 });
     }
+}
+
+static void DrawDomainGuides(void) {
+    const int nipY = FIELD_Y + (int)((float)FIELD_H * 0.48f);
+    DrawRectangle(FIELD_X, FIELD_Y, FIELD_W, nipY - FIELD_Y - 28, (Color){ 37, 99, 235, 24 });
+    DrawRectangle(FIELD_X, nipY - 10, FIELD_W, 20, (Color){ 147, 51, 234, 58 });
+    DrawRectangle(FIELD_X, nipY + 20, FIELD_W, FIELD_Y + FIELD_H - nipY - 20, (Color){ 15, 118, 110, 22 });
+    DrawLineEx((Vector2){ FIELD_X, nipY }, (Vector2){ FIELD_X + FIELD_W, nipY }, 3.0f, (Color){ 126, 34, 206, 210 });
+    DrawText("feed / entry", FIELD_X + 12, FIELD_Y + 10, 16, (Color){ 30, 64, 175, 235 });
+    DrawText("nip / mixing horizon", FIELD_X + 12, nipY - 28, 16, (Color){ 88, 28, 135, 255 });
+    DrawText("return / transport", FIELD_X + 12, nipY + 28, 16, (Color){ 15, 95, 90, 235 });
 }
 
 static bool MouseInField(Vector2 mouse) {
@@ -137,6 +161,8 @@ static void HandleInput(void) {
     if (IsKeyPressed(KEY_THREE)) app.viewMode = 2;
     if (IsKeyPressed(KEY_FOUR)) app.viewMode = 3;
     if (IsKeyPressed(KEY_FIVE)) app.viewMode = 4;
+    if (IsKeyPressed(KEY_SIX)) app.viewMode = 5;
+    if (IsKeyPressed(KEY_SEVEN)) app.viewMode = 6;
 
     if (IsKeyDown(KEY_UP)) app.sim.rollerSpeed += GetFrameTime() * 0.55f;
     if (IsKeyDown(KEY_DOWN)) app.sim.rollerSpeed -= GetFrameTime() * 0.55f;
@@ -151,11 +177,11 @@ static void HandleInput(void) {
 }
 
 static void DrawHud(void) {
-    DrawText("ColorMill grid debugger", 48, 24, 30, (Color){ 15, 23, 42, 255 });
+    DrawText("ColorMill simulation grid", 48, 24, 30, (Color){ 15, 23, 42, 255 });
     DrawText(TextFormat("view: %s", ViewName()), 50, 60, 18, (Color){ 51, 65, 85, 255 });
     DrawText(TextFormat("speed %.2f   gap %.2f", app.sim.rollerSpeed, app.sim.gap), 260, 60, 18, (Color){ 51, 65, 85, 255 });
     DrawText(app.sim.paused ? "paused" : "running", 800, 60, 18, app.sim.paused ? ORANGE : DARKGREEN);
-    DrawText("1 mixed  2 material  3 red  4 blue  5 velocity  |  G grid  SPACE pause  R reset", 54, 602, 16, (Color){ 51, 65, 85, 255 });
+    DrawText("1 mixed 2 material 3 red 4 blue 5 velocity 6 band 7 mix | G grid SPACE pause R reset", 54, 602, 16, (Color){ 51, 65, 85, 255 });
 }
 
 static void UpdateDrawFrame(void) {
@@ -174,6 +200,7 @@ static void UpdateDrawFrame(void) {
         0.0f,
         WHITE
     );
+    DrawDomainGuides();
     DrawGridOverlay();
     DrawRectangleLinesEx((Rectangle){ FIELD_X, FIELD_Y, FIELD_W, FIELD_H }, 2.0f, (Color){ 15, 23, 42, 180 });
     DrawHud();

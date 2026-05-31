@@ -31,5 +31,7 @@ int MaterialSim_Index(int x, int y);
 float MaterialSim_MaterialAt(const MaterialSim *sim, int x, int y);
 float MaterialSim_RedAt(const MaterialSim *sim, int x, int y);
 float MaterialSim_BlueAt(const MaterialSim *sim, int x, int y);
+float MaterialSim_VelocityXAt(const MaterialSim *sim, int x, int y);
+float MaterialSim_VelocityYAt(const MaterialSim *sim, int x, int y);
 
 #endif

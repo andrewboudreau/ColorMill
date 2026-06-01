@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ColorMill Resources</title>
+    <style>
+      :root { color-scheme: dark; --bg:#0f172a; --panel:#111827; --ink:#e5e7eb; --muted:#94a3b8; --accent:#38bdf8; --line:#334155; }
+      body { margin:0; background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,Segoe UI,sans-serif; line-height:1.55; }
+      main { max-width:1040px; margin:0 auto; padding:32px 20px 64px; }
+      nav { display:flex; flex-wrap:wrap; gap:12px; margin:0 0 28px; }
+      nav a, .pill { color:var(--ink); text-decoration:none; border:1px solid var(--line); border-radius:999px; padding:8px 12px; background:#0b1220; }
+      h1 { font-size:clamp(2rem,5vw,4rem); line-height:1; margin:0 0 12px; }
+      h2 { margin-top:36px; border-top:1px solid var(--line); padding-top:24px; }
+      h3 { margin-top:24px; color:#7dd3fc; }
+      p, li { color:#d1d5db; }
+      .lead { color:#cbd5e1; font-size:1.12rem; max-width:760px; }
+      .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; }
+      .card { background:linear-gradient(180deg,#111827,#0b1220); border:1px solid var(--line); border-radius:18px; padding:18px; }
+      table { width:100%; border-collapse:collapse; margin:12px 0 24px; }
+      th, td { text-align:left; vertical-align:top; border-bottom:1px solid var(--line); padding:10px; }
+      th { color:#7dd3fc; }
+      code, pre { background:#020617; color:#e2e8f0; border-radius:8px; }
+      code { padding:2px 5px; }
+      pre { overflow:auto; padding:16px; border:1px solid var(--line); }
+      .callout { border-left:4px solid var(--accent); padding:12px 16px; background:#111827; border-radius:12px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav>
+        <a href="index.html">Simulator</a>
+        <a href="project.html">Project notes</a>
+        <a href="resources.html">Resources</a>
+        <a href="https://github.com/andrewboudreau/ColorMill/issues">GitHub issues</a>
+      </nav>
+
+      <p class="pill">Review and discussion resources</p>
+      <h1>ColorMill Resources</h1>
+      <p class="lead">This page collects the working vocabulary, visual references, open questions, and future resources we want available from the UI while designing the two-roll mill simulator.</p>
+
+      <section class="callout">
+        <strong>Reference angle:</strong> the simulator is based on a mostly front-on view of the mill, looking at the visible band where material feeds into the roller nip and returns along the lower/front region.
+      </section>
+
+      <h2>Visual reference notes</h2>
+      <ul>
+        <li>The active mixing area is the narrow nip line/horizon where the two rollers press the material.</li>
+        <li>The top visible area is feed/entry into the nip, not a second mixer.</li>
+        <li>The bottom visible band is return/transport. It carries color state but should not continuously blur material like another nip.</li>
+        <li>The material should feel like a continuous sheet or curtain, not random fluid filling the entire screen.</li>
+        <li>Good visual behavior should produce elongated streaks, folding/banding behavior, and gradual homogenization over repeated passes.</li>
+      </ul>
+
+      <h2>Working vocabulary</h2>
+      <table>
+        <tr><th>Term</th><th>Definition</th></tr>
+        <tr><td>Two-roll mill</td><td>The machine with two parallel rollers that pull, compress, sheet, and mix material.</td></tr>
+        <tr><td>Roller</td><td>A rotating cylinder with diameter, width, RPM, surface speed, grip, and direction.</td></tr>
+        <tr><td>Nip</td><td>The narrow gap where the rollers are closest. The primary active mixing event.</td></tr>
+        <tr><td>Gap</td><td>The distance between rollers at the nip. Smaller gap means more compression and shear.</td></tr>
+        <tr><td>Band</td><td>The sheet of material carried by the rollers.</td></tr>
+        <tr><td>Feed zone</td><td>The region where material approaches the nip.</td></tr>
+        <tr><td>Mixing horizon</td><td>The narrow simulated strip where diffusion/dispersion are allowed to be strong.</td></tr>
+        <tr><td>Return path</td><td>The lower/front visible region where material travels after the nip.</td></tr>
+        <tr><td>Pass</td><td>One traversal of material through the nip.</td></tr>
+        <tr><td>Cut/fold</td><td>Manual operation that layers or reorients material before another pass.</td></tr>
+        <tr><td>Dispersion</td><td>How evenly pigment has been broken up and distributed through material.</td></tr>
+        <tr><td>Concentration</td><td>Pigment mass divided by material mass in a cell or region.</td></tr>
+      </table>
+
+      <h2>Simulation concepts</h2>
+      <div class="grid">
+        <div class="card"><h3>SimulationGrid</h3><p>The numerical grid that stores the front-view state of the material band.</p></div>
+        <div class="card"><h3>GridCell</h3><p>A small patch of material state: material amount, pigment masses, velocity, and eventually thickness/dispersion.</p></div>
+        <div class="card"><h3>BandMask</h3><p>A 0..1 field defining where silicone is allowed to exist.</p></div>
+        <div class="card"><h3>MixMask</h3><p>A 0..1 field defining where active nip mixing is happening.</p></div>
+        <div class="card"><h3>VelocityField</h3><p>A grid of movement vectors generated from roller geometry and material path assumptions.</p></div>
+        <div class="card"><h3>Renderer</h3><p>Converts material/pigment state into visible color based on base material, opacity, and pigment concentration.</p></div>
+      </div>
+
+      <h2>Open design questions</h2>
+      <ol>
+        <li>What real mill size should the default simulator represent?</li>
+        <li>Should the first scale target hobby/small-batch silicone, lab-size rubber mill, or an abstract educational mill?</li>
+        <li>What default roller diameter, roller width, RPM, and gap range should we use?</li>
+        <li>How should batch weight translate into grid material mass and thickness?</li>
+        <li>How should translucent silicone render differently from opaque white silicone?</li>
+        <li>How much mixing should happen from one pass through the nip?</li>
+        <li>How should cut/fold operations be represented: direct grid remap, layer stack, or separate pass object?</li>
+        <li>Should we represent left and right roller speeds separately to support speed ratio?</li>
+        <li>What is the simplest useful definition of dispersion quality?</li>
+      </ol>
+
+      <h2>Planned resource types</h2>
+      <table>
+        <tr><th>Resource</th><th>Purpose</th><th>Status</th></tr>
+        <tr><td>Machine diagram</td><td>Explain rollers, nip, feed, band, return path, and simulation mapping.</td><td>Drafted conceptually; needs clean in-app version.</td></tr>
+        <tr><td>Reference photos</td><td>Keep visual target for front-on band geometry.</td><td>Currently discussed in chat; needs repo-hosted references or notes.</td></tr>
+        <tr><td>Domain model notes</td><td>Define machine/material/process vocabulary.</td><td>This page and project notes are first pass.</td></tr>
+        <tr><td>Run notes</td><td>Capture settings and screenshots from interesting simulator runs.</td><td>Future.</td></tr>
+        <tr><td>Issue list</td><td>Track implementation and research tasks.</td><td>GitHub issues exist; need cleanup and milestones.</td></tr>
+      </table>
+
+      <h2>Implementation backlog</h2>
+      <pre>Immediate:
+- Fix white page / deployment reliability
+- Show docs links from simulator shell
+- Tune band mask and mix mask against reference angle
+- Add machine parameter panel
+
+Near-term:
+- Explicit Roller, Nip, MaterialBatch settings
+- Separate roller speeds and speed ratio
+- Batch weight -> material mass/thickness
+- Base material appearance: opaque/translucent/transparent
+- Cut/fold/pass operations
+
+Long-term:
+- Better mass conservation
+- Layer stack / lamination model
+- GPU shader grid path
+- Saved runs and reviewable scenarios
+- More educational diagrams and calibration references</pre>
+    </main>
+  </body>
+</html>

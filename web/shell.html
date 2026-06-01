@@ -23,6 +23,31 @@
         height: 100vh;
       }
 
+      #nav {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        z-index: 5;
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        pointer-events: none;
+      }
+
+      #nav a {
+        pointer-events: auto;
+        color: #e2e8f0;
+        text-decoration: none;
+        font-size: 13px;
+        line-height: 1;
+        padding: 8px 11px;
+        border: 1px solid rgba(148, 163, 184, 0.45);
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.82);
+        backdrop-filter: blur(6px);
+      }
+
       canvas.emscripten {
         width: min(100vw, calc(100vh * 1.5));
         height: auto;
@@ -42,6 +67,12 @@
     </style>
   </head>
   <body>
+    <nav id="nav">
+      <a href="index.html">Simulator</a>
+      <a href="project.html">Project notes</a>
+      <a href="resources.html">Resources</a>
+      <a href="https://github.com/andrewboudreau/ColorMill">GitHub</a>
+    </nav>
     <main id="shell">
       <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
     </main>

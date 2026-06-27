@@ -1,7 +1,7 @@
 APP_NAME := colormill
 BUILD_DIR := build
 DIST_DIR := dist
-SRC := src/main.c src/sim/material_sim.c src/sim/mixbox.c
+SRC := src/main.c src/sim/mpm_sim.c src/sim/mixbox.c
 CFLAGS := -std=c99 -Wall -Wextra -Isrc
 WEB_CFLAGS := $(CFLAGS) -Iraylib/src
 WEB_SHELL := web/shell.html

@@ -269,10 +269,44 @@ from `mixbox@scrtwpns.com`. The third-party C++ copy carries the same terms.
 
 ---
 
-## Open question: which solver?
+## Solver decision: MPM (implemented)
 
-**Eulerian-3D** (smallest change, smears sharp color edges) vs.
-**MPM/APIC** (more work, but crisp folding striations — the whole point of a
-mill). Leaning MPM/APIC at small resolution. Decide before writing solver
-code; a short design doc comparing data layouts for `MaterialSim` under each
-should come next.
+We chose **MLS-MPM** over Eulerian-3D — folding striations stay crisp because
+color rides particles, not a diffusing grid field, which is the whole point of
+a mill.
+
+**Status: a working 2D MLS-MPM solver is now the live engine** in
+`src/sim/mpm_sim.{c,h}` (the Eulerian `material_sim.c` is retired from the
+build but kept for reference). It follows the `mpm88` lineage (Hu et al. 2018)
+with APIC transfers (Jiang et al. 2015):
+
+- **Particles carry state** — position, velocity, APIC affine matrix `C`,
+  volume ratio `J`, and red/blue pigment. The background grid is scratch,
+  rebuilt every substep (P2G → grid solve → G2P → advect).
+- **Weakly-compressible fluid** material model (pressure from `J`) — good for a
+  silicone-ish pool that shears and folds.
+- **Two counter-rotating rollers** are rigid-rotation velocity boundaries
+  submerged in the pool; their inner faces sweep down into the nip and knead
+  the material. Free-slip box walls; gravity feeds the pool.
+- **Pigment is Lagrangian** — it rides particles and mixes purely by transport
+  (no diffusion). At render the particle pigment is rasterized to a grid and
+  run through **Mixbox** (`Mixbox_PigmentRgb`), so folded red/blue interfaces
+  read as real dark-purple blends, not gray.
+
+Verified headlessly (no raylib needed for the physics): stable over thousands
+of substeps, no NaNs, particles stay in-domain, mass/particle count conserved,
+and rendered frames show the two colors kneading into folded mixing bands.
+`main.c` renders the field square with roller overlays and Mixbox color.
+
+### Next steps
+
+1. **3D.** Add a `z` axis to position/velocity/`C`/grid — the loop is otherwise
+   identical. Then volumetric rendering (slice or raymarch) instead of the 2D
+   texture.
+2. **Latents per particle** (see Color model section) — store the 7-float
+   Mixbox latent on each particle instead of two pigment scalars, so any number
+   of pigments mixes correctly during transport.
+3. **Cut/fold operations** and proper viscoelasticity (deformation gradient `F`
+   + plasticity) for true dough/taffy behavior.
+4. Performance: the solver substeps ~40×/frame; a fixed-timestep accumulator
+   and SIMD/threads (or a WebGL/WebGPU compute port) would lift resolution.

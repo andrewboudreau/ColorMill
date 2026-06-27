@@ -1,6 +1,7 @@
 #include "raylib.h"
 
 #include "sim/material_sim.h"
+#include "sim/mixbox.h"
 
 #include <math.h>
 
@@ -69,18 +70,16 @@ static Color CellColor(float material, float red, float blue, float vx, float vy
 
     if (material < 0.015f) return (Color){ 226, 232, 240, 255 };
 
+    /* Pigment-correct mixing: treat the cell as a white silicone base carrying
+       red and blue pigment, mixed in Mixbox latent space so blends follow real
+       pigment behavior instead of linear RGB averaging. */
     const float invMaterial = 1.0f / fmaxf(material, 0.001f);
     const float redC = Clamp01f(red * invMaterial);
     const float blueC = Clamp01f(blue * invMaterial);
-    const float mixed = redC < blueC ? redC : blueC;
-    const float base = 0.50f + material * 0.24f;
 
-    return (Color){
-        ToByte(base + redC * 0.56f + mixed * 0.18f),
-        ToByte(base * 0.86f - mixed * 0.16f),
-        ToByte(base + blueC * 0.62f + mixed * 0.22f),
-        255
-    };
+    float r, g, b;
+    Mixbox_PigmentRgb(redC, blueC, &r, &g, &b);
+    return (Color){ ToByte(r), ToByte(g), ToByte(b), 255 };
 }
 
 static const char *ViewName(void) {

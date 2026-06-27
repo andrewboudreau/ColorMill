@@ -238,6 +238,15 @@ from `mixbox@scrtwpns.com`. The third-party C++ copy carries the same terms.
 
 ## How this maps to the current code
 
+- **Pigment mixing is now Mixbox-backed in the live renderer.** The deployed
+  app is the C/emscripten build (`src/main.c`), not the TypeScript seed, so the
+  color change landed in `CellColor()`'s "mixed" view via `src/sim/mixbox.c`
+  (`Mixbox_PigmentRgb`). It treats each cell as a white silicone base carrying
+  red/blue pigment and mixes them in Mixbox **latent space** — the exact
+  store-latents-and-convert plan above, just with fixed endpoints precomputed
+  offline (no runtime LUT needed yet). The C port is verified bit-exact against
+  the official library. Generalizing to per-cell latent storage (more pigments,
+  accumulate during advection) is the next step for the 3D solver.
 - `MaterialSim` already separates **material mass** from **pigment**
   (`red`/`blue`) — the same split MPM needs (particle mass vs. carried
   pigment). Good foundation.

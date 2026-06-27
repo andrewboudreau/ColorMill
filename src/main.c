@@ -1,6 +1,6 @@
 #include "raylib.h"
 
-#include "sim/mpm_sim.h"
+#include "sim/mpm3d_sim.h"
 #include "sim/mixbox.h"
 
 #include <math.h>
@@ -11,16 +11,15 @@
 
 #define SCREEN_WIDTH 960
 #define SCREEN_HEIGHT 640
-#define FIELD_SIDE 540
-#define FIELD_X ((SCREEN_WIDTH - FIELD_SIDE) / 2)
-#define FIELD_Y 70
+#define VOXEL_THRESHOLD 0.16f
 
 typedef struct AppState {
-    MpmSim sim;
-    Texture2D fieldTexture;
-    Image fieldImage;
-    Color *pixels;
-    int viewMode;
+    MpmSim3D sim;
+    Camera3D camera;
+    float orbit;       /* azimuth angle */
+    float elevation;   /* pitch angle */
+    float distance;
+    bool autoOrbit;
     bool showRollers;
 } AppState;
 
@@ -36,82 +35,38 @@ static unsigned char ToByte(float value) {
     return (unsigned char)(Clamp01f(value) * 255.0f);
 }
 
-static Color CellColor(float material, float red, float blue, float vx, float vy) {
-    if (app.viewMode == 1) {
-        const unsigned char shade = ToByte(material);
-        return (Color){ shade, shade, shade, 255 };
-    }
+/* sim coordinates are [0,1] with +y down; map to a unit cube centered at the
+   origin with +y up for rendering */
+static Vector3 SimToWorld(float sx, float sy, float sz) {
+    return (Vector3){ sx - 0.5f, -(sy - 0.5f), sz - 0.5f };
+}
 
-    if (app.viewMode == 2) {
-        const float value = material > 0.001f ? red / material : 0.0f;
-        return (Color){ ToByte(value), 28, 36, 255 };
-    }
-
-    if (app.viewMode == 3) {
-        const float value = material > 0.001f ? blue / material : 0.0f;
-        return (Color){ 28, 42, ToByte(value), 255 };
-    }
-
-    if (app.viewMode == 4) {
-        const float speed = Clamp01f(sqrtf(vx * vx + vy * vy) / 1.5f);
-        const float dir = atan2f(vy, vx) / 6.2831853f + 0.5f;
-        return (Color){ ToByte(speed), ToByte(dir), ToByte(1.0f - speed), 255 };
-    }
-
-    if (material < 0.06f) return (Color){ 226, 232, 240, 255 };
-
-    /* Pigment-correct mixing: white silicone base carrying red + blue pigment,
-       mixed in Mixbox latent space so folds read as real pigment blends. */
-    const float invMaterial = 1.0f / fmaxf(material, 0.001f);
-    const float redC = Clamp01f(red * invMaterial);
-    const float blueC = Clamp01f(blue * invMaterial);
-
+static Color VoxelColor(float material, float red, float blue) {
+    const float inv = 1.0f / fmaxf(material, 0.001f);
+    const float redC = Clamp01f(red * inv);
+    const float blueC = Clamp01f(blue * inv);
     float r, g, b;
     Mixbox_PigmentRgb(redC, blueC, &r, &g, &b);
     return (Color){ ToByte(r), ToByte(g), ToByte(b), 255 };
 }
 
-static const char *ViewName(void) {
-    if (app.viewMode == 1) return "material";
-    if (app.viewMode == 2) return "red";
-    if (app.viewMode == 3) return "blue";
-    if (app.viewMode == 4) return "velocity";
-    return "mixed (Mixbox)";
-}
-
-static void UpdateFieldTexture(void) {
-    for (int y = 0; y < MPM_GRID; y++) {
-        for (int x = 0; x < MPM_GRID; x++) {
-            const float material = MpmSim_MaterialAt(&app.sim, x, y);
-            const float red = MpmSim_RedAt(&app.sim, x, y);
-            const float blue = MpmSim_BlueAt(&app.sim, x, y);
-            const float vx = MpmSim_VelocityXAt(&app.sim, x, y);
-            const float vy = MpmSim_VelocityYAt(&app.sim, x, y);
-            app.pixels[MpmSim_Index(x, y)] = CellColor(material, red, blue, vx, vy);
+static void DrawVoxels(void) {
+    const float cell = 1.0f / (float)MPM3D_GRID;
+    const float size = cell * 0.92f;
+    for (int z = 0; z < MPM3D_GRID; z++) {
+        for (int y = 0; y < MPM3D_GRID; y++) {
+            for (int x = 0; x < MPM3D_GRID; x++) {
+                const float material = MpmSim3D_MaterialAt(&app.sim, x, y, z);
+                if (material < VOXEL_THRESHOLD) continue;
+                const float red = MpmSim3D_RedAt(&app.sim, x, y, z);
+                const float blue = MpmSim3D_BlueAt(&app.sim, x, y, z);
+                const Color color = VoxelColor(material, red, blue);
+                const Vector3 pos = SimToWorld((x + 0.5f) * cell,
+                                               (y + 0.5f) * cell,
+                                               (z + 0.5f) * cell);
+                DrawCube(pos, size, size, size, color);
+            }
         }
-    }
-
-    UpdateTexture(app.fieldTexture, app.pixels);
-}
-
-static Vector2 FieldPoint(float normalizedX, float normalizedY) {
-    return (Vector2){
-        FIELD_X + normalizedX * FIELD_SIDE,
-        FIELD_Y + normalizedY * FIELD_SIDE
-    };
-}
-
-static void DrawRoller(Vector2 center, float radius, float angle, bool clockwise) {
-    DrawCircleV(center, radius, (Color){ 30, 41, 59, 70 });
-    DrawCircleLines((int)center.x, (int)center.y, radius, (Color){ 226, 232, 240, 230 });
-    DrawCircleV(center, 4.0f, (Color){ 226, 232, 240, 230 });
-
-    /* spokes communicate rotation direction */
-    const float dir = clockwise ? 1.0f : -1.0f;
-    for (int s = 0; s < 4; s++) {
-        const float a = dir * angle + (float)s * (3.14159265f * 0.5f);
-        const Vector2 tip = { center.x + cosf(a) * radius, center.y + sinf(a) * radius };
-        DrawLineEx(center, tip, 2.0f, (Color){ 148, 163, 184, 180 });
     }
 }
 
@@ -119,85 +74,87 @@ static void DrawRollers(void) {
     if (!app.showRollers) return;
 
     float leftCx, rightCx, centerY, radius;
-    MpmSim_Rollers(&app.sim, &leftCx, &rightCx, &centerY, &radius);
-    const float pixelRadius = radius * FIELD_SIDE;
+    MpmSim3D_Rollers(&app.sim, &leftCx, &rightCx, &centerY, &radius);
 
-    DrawRoller(FieldPoint(leftCx, centerY), pixelRadius, app.sim.rollerAngle, true);
-    DrawRoller(FieldPoint(rightCx, centerY), pixelRadius, app.sim.rollerAngle, false);
+    const Color shell = (Color){ 148, 163, 184, 90 };
+    const Color wire = (Color){ 226, 232, 240, 180 };
+    const float zFront = -0.52f, zBack = 0.52f;
 
-    const Vector2 nipTop = FieldPoint(0.5f, centerY - radius - 0.04f);
-    DrawText("nip", (int)nipTop.x - 12, (int)nipTop.y, 16, (Color){ 88, 28, 135, 220 });
+    const Vector3 lFront = SimToWorld(leftCx, centerY, zFront + 0.5f);
+    const Vector3 lBack = SimToWorld(leftCx, centerY, zBack + 0.5f);
+    const Vector3 rFront = SimToWorld(rightCx, centerY, zFront + 0.5f);
+    const Vector3 rBack = SimToWorld(rightCx, centerY, zBack + 0.5f);
+
+    DrawCylinderEx(lFront, lBack, radius, radius, 20, shell);
+    DrawCylinderWiresEx(lFront, lBack, radius, radius, 20, wire);
+    DrawCylinderEx(rFront, rBack, radius, radius, 20, shell);
+    DrawCylinderWiresEx(rFront, rBack, radius, radius, 20, wire);
 }
 
-static bool MouseInField(Vector2 mouse) {
-    return mouse.x >= FIELD_X && mouse.x <= FIELD_X + FIELD_SIDE &&
-           mouse.y >= FIELD_Y && mouse.y <= FIELD_Y + FIELD_SIDE;
-}
+static void UpdateCameraOrbit(void) {
+    if (app.autoOrbit) app.orbit += GetFrameTime() * 0.35f;
 
-static void AddPigmentAtMouse(float red, float blue) {
-    const Vector2 mouse = GetMousePosition();
-    if (!MouseInField(mouse)) return;
+    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        const Vector2 delta = GetMouseDelta();
+        app.orbit -= delta.x * 0.006f;
+        app.elevation = Clamp01f((app.elevation - delta.y * 0.006f + 1.5f) / 3.0f) * 3.0f - 1.5f;
+    }
 
-    const float x = (mouse.x - FIELD_X) / (float)FIELD_SIDE;
-    const float y = (mouse.y - FIELD_Y) / (float)FIELD_SIDE;
-    MpmSim_AddPigment(&app.sim, x, y, red, blue, 0.06f);
+    const float ce = cosf(app.elevation);
+    app.camera.position = (Vector3){
+        app.distance * ce * sinf(app.orbit),
+        app.distance * sinf(app.elevation),
+        app.distance * ce * cosf(app.orbit)
+    };
 }
 
 static void HandleInput(void) {
     if (IsKeyPressed(KEY_SPACE)) app.sim.paused = !app.sim.paused;
-    if (IsKeyPressed(KEY_R)) MpmSim_Reset(&app.sim);
+    if (IsKeyPressed(KEY_R)) MpmSim3D_Reset(&app.sim);
     if (IsKeyPressed(KEY_G)) app.showRollers = !app.showRollers;
-
-    if (IsKeyPressed(KEY_ONE)) app.viewMode = 0;
-    if (IsKeyPressed(KEY_TWO)) app.viewMode = 1;
-    if (IsKeyPressed(KEY_THREE)) app.viewMode = 2;
-    if (IsKeyPressed(KEY_FOUR)) app.viewMode = 3;
-    if (IsKeyPressed(KEY_FIVE)) app.viewMode = 4;
+    if (IsKeyPressed(KEY_O)) app.autoOrbit = !app.autoOrbit;
 
     if (IsKeyDown(KEY_UP)) app.sim.rollerSpeed += GetFrameTime() * 0.55f;
     if (IsKeyDown(KEY_DOWN)) app.sim.rollerSpeed -= GetFrameTime() * 0.55f;
     if (IsKeyDown(KEY_RIGHT)) app.sim.gap += GetFrameTime() * 0.5f;
     if (IsKeyDown(KEY_LEFT)) app.sim.gap -= GetFrameTime() * 0.5f;
-
     app.sim.rollerSpeed = Clamp01f(app.sim.rollerSpeed);
     app.sim.gap = Clamp01f(app.sim.gap);
 
-    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) AddPigmentAtMouse(1.0f, 0.0f);
-    if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) AddPigmentAtMouse(0.0f, 1.0f);
+    if (IsKeyDown(KEY_X)) MpmSim3D_AddPigment(&app.sim, 0.5f, 0.45f, 0.5f, 1.0f, 0.0f, 0.12f);
+    if (IsKeyDown(KEY_C)) MpmSim3D_AddPigment(&app.sim, 0.5f, 0.45f, 0.5f, 0.0f, 1.0f, 0.12f);
+
+    app.distance -= GetMouseWheelMove() * 0.15f;
+    if (app.distance < 1.4f) app.distance = 1.4f;
+    if (app.distance > 4.0f) app.distance = 4.0f;
 }
 
 static void DrawHud(void) {
-    DrawText("ColorMill - MLS-MPM mill", FIELD_X, 24, 28, (Color){ 15, 23, 42, 255 });
-    DrawText(TextFormat("view: %s", ViewName()), FIELD_X, 56, 18, (Color){ 51, 65, 85, 255 });
-    DrawText(TextFormat("speed %.2f   gap %.2f   particles %d",
+    DrawText("ColorMill - 3D MLS-MPM mill", 24, 20, 28, (Color){ 15, 23, 42, 255 });
+    DrawText(TextFormat("speed %.2f   gap %.2f   particles %d   filled voxels rendered",
                         app.sim.rollerSpeed, app.sim.gap, app.sim.particleCount),
-             FIELD_X + 230, 56, 18, (Color){ 51, 65, 85, 255 });
+             24, 54, 18, (Color){ 51, 65, 85, 255 });
     DrawText(app.sim.paused ? "paused" : "running",
-             FIELD_X + FIELD_SIDE - 80, 56, 18, app.sim.paused ? ORANGE : DARKGREEN);
-    DrawText("1 mixed 2 material 3 red 4 blue 5 velocity | LMB red RMB blue | UP/DOWN speed LEFT/RIGHT gap | G rollers SPACE pause R reset",
-             FIELD_X - 120, SCREEN_HEIGHT - 26, 15, (Color){ 51, 65, 85, 255 });
+             SCREEN_WIDTH - 90, 24, 18, app.sim.paused ? ORANGE : DARKGREEN);
+    DrawText("drag: orbit  wheel: zoom  O auto-orbit | UP/DOWN speed  LEFT/RIGHT gap | X/C add red/blue | G rollers SPACE pause R reset",
+             24, SCREEN_HEIGHT - 26, 15, (Color){ 51, 65, 85, 255 });
 }
 
 static void UpdateDrawFrame(void) {
     HandleInput();
-    MpmSim_Step(&app.sim, GetFrameTime());
-    UpdateFieldTexture();
+    MpmSim3D_Step(&app.sim, GetFrameTime());
+    UpdateCameraOrbit();
 
     BeginDrawing();
     ClearBackground((Color){ 238, 242, 247, 255 });
 
-    DrawTexturePro(
-        app.fieldTexture,
-        (Rectangle){ 0, 0, (float)app.fieldTexture.width, (float)app.fieldTexture.height },
-        (Rectangle){ FIELD_X, FIELD_Y, FIELD_SIDE, FIELD_SIDE },
-        (Vector2){ 0, 0 },
-        0.0f,
-        WHITE
-    );
+    BeginMode3D(app.camera);
+    DrawCubeWires((Vector3){ 0, 0, 0 }, 1.0f, 1.0f, 1.0f, (Color){ 148, 163, 184, 120 });
+    DrawVoxels();
     DrawRollers();
-    DrawRectangleLinesEx((Rectangle){ FIELD_X, FIELD_Y, FIELD_SIDE, FIELD_SIDE }, 2.0f, (Color){ 15, 23, 42, 180 });
-    DrawHud();
+    EndMode3D();
 
+    DrawHud();
     EndDrawing();
 }
 
@@ -206,13 +163,17 @@ int main(void) {
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "ColorMill");
     SetTargetFPS(60);
 
-    MpmSim_Init(&app.sim);
-    app.viewMode = 0;
+    MpmSim3D_Init(&app.sim);
+    app.orbit = 0.7f;
+    app.elevation = 0.5f;
+    app.distance = 2.4f;
+    app.autoOrbit = true;
     app.showRollers = true;
-    app.fieldImage = GenImageColor(MPM_GRID, MPM_GRID, BLANK);
-    app.fieldTexture = LoadTextureFromImage(app.fieldImage);
-    app.pixels = (Color *)MemAlloc(sizeof(Color) * MPM_GRID * MPM_GRID);
-    UpdateFieldTexture();
+    app.camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
+    app.camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+    app.camera.fovy = 45.0f;
+    app.camera.projection = CAMERA_PERSPECTIVE;
+    UpdateCameraOrbit();
 
 #if defined(PLATFORM_WEB)
     emscripten_set_main_loop(UpdateDrawFrame, 0, 1);
@@ -222,9 +183,6 @@ int main(void) {
     }
 #endif
 
-    MemFree(app.pixels);
-    UnloadTexture(app.fieldTexture);
-    UnloadImage(app.fieldImage);
     CloseWindow();
     return 0;
 }

@@ -166,6 +166,76 @@ Why it fits a mill better than pure Eulerian:
 
 ---
 
+## Color model: Mixbox WebGL integration
+
+We're adopting **Mixbox** (Sochorová & Jamriška, *Practical Pigment Mixing*,
+SIGGRAPH Asia 2021) as the color model — Kubelka–Munk pigment mixing, so
+blue + yellow → green instead of the gray you get from linear RGB. Upstream:
+<https://github.com/scrtwpns/mixbox>.
+
+The repo flagged in chat ([`0xchaosbi/pigment-mixing`](https://github.com/0xchaosbi/pigment-mixing))
+is a third-party **C++ copy** of Mixbox. We use the official build instead.
+
+### Can it run in WebGL? Yes — it's barely a "port"
+
+Mixbox already ships an official **GLSL shader** ([`shaders/mixbox.glsl`](https://github.com/scrtwpns/mixbox/blob/master/shaders/mixbox.glsl)),
+and it's about as WebGL-friendly as it gets:
+
+- **One regular 2D RGBA8 texture** — the LUT, **512×512**. Standard 2D
+  sampling only: no 3D textures, no float textures, no extensions.
+- **GLSL 1.20+ with a `__VERSION__` fallback** → runs unchanged on **WebGL1
+  and WebGL2**.
+- API drops in: `mixbox_lerp(a, b, t)`, `mixbox_rgb_to_latent`,
+  `mixbox_latent_to_rgb`. Optional `MIXBOX_COLORSPACE_LINEAR` flag.
+
+### The one gotcha: the LUT is encoded
+
+The `mixbox_lut.png` distributed for native bindings is **4096×4096 and
+*encoded*** — it must be decoded to a 512×512 LUT before the shader can use
+it. The official **`mixbox.js` is self-contained**: it embeds and decodes
+its own LUT (`mixbox.lutTexture(gl)`) and returns the shader source
+(`mixbox.glsl()`). So the WebGL path needs **only `mixbox.js`** — the giant
+PNG is not vendored.
+
+### Integration recipe (what the PoC does)
+
+```js
+var lut = mixbox.lutTexture(gl);     // upload decoded 512x512 LUT
+gl.activeTexture(gl.TEXTURE0);
+gl.bindTexture(gl.TEXTURE_2D, lut);
+gl.uniform1i(loc('mixbox_lut'), 0);
+// fragment shader = header + `uniform sampler2D mixbox_lut;` + mixbox.glsl() + main()
+// then: vec3 c = mixbox_lerp(colorA, colorB, t);
+```
+
+Proof of concept lives at **`web/pigment.html`** (vendored library under
+`web/vendor/mixbox/`, wired into `make web`). It draws two blend bars —
+Mixbox on top, naive linear on the bottom — so blue + yellow visibly goes
+green vs. gray. Verified numerically: blue `#002185` + yellow `#feec00` at
+t=0.5 → Mixbox `#30953d` (green), linear ≈ `#7f8743` (mud).
+
+### Why latent space matters for the 3D solver
+
+Mixbox's **latent** representation is 7 coefficients (3 Kubelka–Munk pigment
+weights + 4 residual). For mixing many colors you **average in latent space**
+and convert to RGB once — not pairwise `lerp`. That maps cleanly onto the
+grid/particle pipeline:
+
+> Store pigment per particle/cell as the **latent coefficients**, accumulate
+> weighted latents during advection / P2G, and convert latent → RGB only at
+> render time.
+
+This gives physically-correct N-way pigment mixing essentially for free and
+replaces the linear averaging in `src/color.ts`.
+
+### License ⚠️
+
+Mixbox is **CC BY-NC 4.0 — non-commercial only**, with attribution. Fine for
+ColorMill as research/education; a commercial release would need a license
+from `mixbox@scrtwpns.com`. The third-party C++ copy carries the same terms.
+
+---
+
 ## How this maps to the current code
 
 - `MaterialSim` already separates **material mass** from **pigment**

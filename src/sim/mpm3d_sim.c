@@ -11,18 +11,21 @@
 #define MPM3D_SUBSTEPS_PER_FRAME 10
 #define MPM3D_E 200.0f
 #define MPM3D_P_RHO 1.0f
-#define MPM3D_GRAVITY 2.0f
+#define MPM3D_GRAVITY 0.8f             /* low: keep material packed, not pooling */
 #define MPM3D_OMEGA_MAX 7.0f
 #define MPM3D_BOUND 3
 #define MPM3D_SEED_PER_AXIS 2          /* 2^3 = 8 particles per filled cell */
 
-/* Narrow, deep trough so the pool is deep enough to keep the small rollers
-   fully submerged (otherwise material settles below them and they disengage).
-   Both roller cylinders sit inside [CXMIN, CXMAX]. */
-#define MPM3D_CXMIN 0.30f
-#define MPM3D_CXMAX 0.70f
-#define MPM3D_CZMIN 0.40f
-#define MPM3D_CZMAX 0.60f
+/* Tight box hugging the rollers: little empty space around them and a floor
+   just below them, so material stays packed around the rollers and does not
+   pool at the bottom. Both roller cylinders sit inside [CXMIN, CXMAX], and the
+   rollers run the box depth [CZMIN, CZMAX]. */
+#define MPM3D_CXMIN 0.33f
+#define MPM3D_CXMAX 0.67f
+#define MPM3D_CYMIN 0.42f
+#define MPM3D_CYMAX 0.72f
+#define MPM3D_CZMIN 0.42f
+#define MPM3D_CZMAX 0.58f
 
 static const float MPM3D_P_VOL =
     (MPM3D_DX * 0.5f) * (MPM3D_DX * 0.5f) * (MPM3D_DX * 0.5f);
@@ -85,11 +88,13 @@ static bool InsideRoller(const MpmSim3D *sim, float px, float py,
 }
 
 static void UpdateRollerGeometry(MpmSim3D *sim) {
-    sim->rollerRadius = 0.075f;
+    sim->rollerRadius = 0.07f;
     const float halfGap = 0.006f + sim->gap * 0.04f;  /* nip opening = 2*halfGap */
-    sim->rollerCy = 0.65f;  /* submerged in the packed trough */
+    sim->rollerCy = 0.57f;  /* centered in the packed box */
     sim->leftCx = 0.5f - halfGap - sim->rollerRadius;
     sim->rightCx = 0.5f + halfGap + sim->rollerRadius;
+    sim->rollerZMin = MPM3D_CZMIN;   /* rollers run the box depth (short) */
+    sim->rollerZMax = MPM3D_CZMAX;
 }
 
 static void QuadWeights(float fx, float w[3]) {
@@ -110,9 +115,9 @@ void MpmSim3D_Reset(MpmSim3D *sim) {
 
     const int per = MPM3D_SEED_PER_AXIS;
     int count = 0;
-    for (int cz = (int)(0.42f * MPM3D_GRID); cz < (int)(0.58f * MPM3D_GRID); cz++) {
-        for (int cy = (int)(0.52f * MPM3D_GRID); cy < (int)(0.90f * MPM3D_GRID); cy++) {
-            for (int cx = (int)(0.32f * MPM3D_GRID); cx < (int)(0.68f * MPM3D_GRID); cx++) {
+    for (int cz = (int)(MPM3D_CZMIN * MPM3D_GRID); cz < (int)(MPM3D_CZMAX * MPM3D_GRID); cz++) {
+        for (int cy = (int)(MPM3D_CYMIN * MPM3D_GRID); cy < (int)(MPM3D_CYMAX * MPM3D_GRID); cy++) {
+            for (int cx = (int)(MPM3D_CXMIN * MPM3D_GRID); cx < (int)(MPM3D_CXMAX * MPM3D_GRID); cx++) {
                 for (int sz = 0; sz < per; sz++) {
                     for (int sy = 0; sy < per; sy++) {
                         for (int sx = 0; sx < per; sx++) {
@@ -247,8 +252,9 @@ static void Substep(MpmSim3D *sim, float dt) {
                     vz = 0.0f;
                 }
 
-                /* domain floor + interior container (trough) walls */
-                if (j > MPM3D_GRID - MPM3D_BOUND && vy > 0.0f) vy = 0.0f;
+                /* tight box walls (top, floor, and the four sides) */
+                if (py < MPM3D_CYMIN && vy < 0.0f) vy = 0.0f;
+                if (py > MPM3D_CYMAX && vy > 0.0f) vy = 0.0f;
                 if (px < MPM3D_CXMIN && vx < 0.0f) vx = 0.0f;
                 if (px > MPM3D_CXMAX && vx > 0.0f) vx = 0.0f;
                 if (pz < MPM3D_CZMIN && vz < 0.0f) vz = 0.0f;
@@ -308,6 +314,7 @@ static void Substep(MpmSim3D *sim, float dt) {
         /* hard collision so material can never end up inside the rollers */
         ResolveRoller(p, sim->leftCx, sim->rollerCy, sim->rollerRadius, omega);
         ResolveRoller(p, sim->rightCx, sim->rollerCy, sim->rollerRadius, -omega);
+        p->y = Clamp(p->y, MPM3D_CYMIN, MPM3D_CYMAX);
     }
 }
 
@@ -380,9 +387,11 @@ float MpmSim3D_YellowAt(const MpmSim3D *sim, int x, int y, int z) {
 }
 
 void MpmSim3D_Rollers(const MpmSim3D *sim, float *leftCx, float *rightCx,
-                      float *centerY, float *radius) {
+                      float *centerY, float *radius, float *zMin, float *zMax) {
     *leftCx = sim->leftCx;
     *rightCx = sim->rightCx;
     *centerY = sim->rollerCy;
     *radius = sim->rollerRadius;
+    *zMin = sim->rollerZMin;
+    *zMax = sim->rollerZMax;
 }

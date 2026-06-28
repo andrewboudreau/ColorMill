@@ -29,7 +29,7 @@ typedef struct AppState {
     bool autoOrbit;
     bool showRollers;
     bool dragging;
-    UiButton buttons[6];
+    UiButton buttons[8];
     int buttonCount;
 } AppState;
 
@@ -76,12 +76,12 @@ static void DrawVoxels(void) {
 
 static void DrawRollers(void) {
     if (!app.showRollers) return;
-    float leftCx, rightCx, centerY, radius;
-    MpmSim3D_Rollers(&app.sim, &leftCx, &rightCx, &centerY, &radius);
+    float leftCx, rightCx, centerY, radius, zMin, zMax;
+    MpmSim3D_Rollers(&app.sim, &leftCx, &rightCx, &centerY, &radius, &zMin, &zMax);
     const Color shell = (Color){ 148, 163, 184, 80 };
     const Color wire = (Color){ 226, 232, 240, 150 };
-    const Vector3 lF = SimToWorld(leftCx, centerY, 0.0f), lB = SimToWorld(leftCx, centerY, 1.0f);
-    const Vector3 rF = SimToWorld(rightCx, centerY, 0.0f), rB = SimToWorld(rightCx, centerY, 1.0f);
+    const Vector3 lF = SimToWorld(leftCx, centerY, zMin), lB = SimToWorld(leftCx, centerY, zMax);
+    const Vector3 rF = SimToWorld(rightCx, centerY, zMin), rB = SimToWorld(rightCx, centerY, zMax);
     DrawCylinderEx(lF, lB, radius, radius, 20, shell);
     DrawCylinderWiresEx(lF, lB, radius, radius, 20, wire);
     DrawCylinderEx(rF, rB, radius, radius, 20, shell);
@@ -109,10 +109,10 @@ static void UpdateCameraOrbit(void) {
 
 static void InjectPigment(float r, float b, float y) {
     /* drop a pigment blob at a jittered spot inside the material */
-    const float nx = 0.38f + (float)GetRandomValue(0, 240) / 1000.0f;
-    const float ny = 0.55f + (float)GetRandomValue(0, 120) / 1000.0f;
-    const float nz = 0.45f + (float)GetRandomValue(0, 100) / 1000.0f;
-    MpmSim3D_AddPigment(&app.sim, nx, ny, nz, r, b, y, 0.13f);
+    const float nx = 0.40f + (float)GetRandomValue(0, 200) / 1000.0f;
+    const float ny = 0.50f + (float)GetRandomValue(0, 160) / 1000.0f;
+    const float nz = 0.44f + (float)GetRandomValue(0, 120) / 1000.0f;
+    MpmSim3D_AddPigment(&app.sim, nx, ny, nz, r, b, y, 0.16f);
 }
 
 static void DoAction(int action) {
@@ -123,6 +123,7 @@ static void DoAction(int action) {
         case 3: MpmSim3D_ClearPigment(&app.sim); break;
         case 4: app.distance += 0.3f; break;
         case 5: app.distance -= 0.3f; break;
+        case 6: MpmSim3D_Reset(&app.sim); break;
         default: break;
     }
     if (app.distance < 1.4f) app.distance = 1.4f;
@@ -194,15 +195,16 @@ static void DrawUI(void) {
 }
 
 static void InitUI(void) {
-    const float h = 40.0f, w = 104.0f, gap = 10.0f, y = SCREEN_HEIGHT - 52.0f;
+    const float h = 40.0f, w = 96.0f, gap = 8.0f, y = SCREEN_HEIGHT - 52.0f;
     float x = 20.0f;
-    app.buttons[0] = (UiButton){ { x, y, w, h }, (Color){ 214, 64, 50, 255 }, "Red", 0 };    x += w + gap;
-    app.buttons[1] = (UiButton){ { x, y, w, h }, (Color){ 40, 92, 200, 255 }, "Blue", 1 };   x += w + gap;
-    app.buttons[2] = (UiButton){ { x, y, w, h }, (Color){ 236, 200, 30, 255 }, "Yellow", 2 }; x += w + gap;
-    app.buttons[3] = (UiButton){ { x, y, w, h }, (Color){ 100, 116, 139, 255 }, "Clear", 3 };
-    app.buttons[4] = (UiButton){ { SCREEN_WIDTH - 124.0f, y, 50.0f, h }, (Color){ 51, 65, 85, 255 }, "-", 4 };
-    app.buttons[5] = (UiButton){ { SCREEN_WIDTH - 66.0f, y, 50.0f, h }, (Color){ 51, 65, 85, 255 }, "+", 5 };
-    app.buttonCount = 6;
+    app.buttons[0] = (UiButton){ { x, y, w, h }, (Color){ 214, 64, 50, 255 }, "Red", 0 };     x += w + gap;
+    app.buttons[1] = (UiButton){ { x, y, w, h }, (Color){ 40, 92, 200, 255 }, "Blue", 1 };    x += w + gap;
+    app.buttons[2] = (UiButton){ { x, y, w, h }, (Color){ 236, 200, 30, 255 }, "Yellow", 2 };  x += w + gap;
+    app.buttons[3] = (UiButton){ { x, y, w, h }, (Color){ 100, 116, 139, 255 }, "Clear", 3 };  x += w + gap;
+    app.buttons[4] = (UiButton){ { x, y, w, h }, (Color){ 71, 85, 105, 255 }, "Reset", 6 };
+    app.buttons[5] = (UiButton){ { SCREEN_WIDTH - 124.0f, y, 50.0f, h }, (Color){ 51, 65, 85, 255 }, "-", 4 };
+    app.buttons[6] = (UiButton){ { SCREEN_WIDTH - 66.0f, y, 50.0f, h }, (Color){ 51, 65, 85, 255 }, "+", 5 };
+    app.buttonCount = 7;
 }
 
 static void UpdateDrawFrame(void) {

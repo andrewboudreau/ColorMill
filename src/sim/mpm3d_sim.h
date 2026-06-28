@@ -17,7 +17,7 @@
  * References: Hu et al., MLS-MPM (SIGGRAPH 2018); Jiang et al., APIC (2015).
  */
 
-#define MPM3D_GRID 32                          /* cubic sim/render grid (cells) */
+#define MPM3D_GRID 40                          /* cubic sim/render grid (cells) */
 #define MPM3D_NODES (MPM3D_GRID + 1)
 #define MPM3D_CELLS (MPM3D_GRID * MPM3D_GRID * MPM3D_GRID)
 #define MPM3D_NODE_COUNT (MPM3D_NODES * MPM3D_NODES * MPM3D_NODES)
@@ -49,6 +49,8 @@ typedef struct MpmSim3D {
     float gap;             /* 0..1, roller separation at the nip */
     float rollerAngle;
     bool paused;
+    bool frictionMode;     /* false: counter-rotating; true: same direction,
+                              different speeds (friction-ratio milling) */
 
     /* roller cylinders: axis along z, centers in the xy plane, spanning
        [rollerZMin, rollerZMax] in z */

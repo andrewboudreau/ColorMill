@@ -286,12 +286,14 @@ the `mpm88` lineage (Hu et al. 2018) with APIC transfers (Jiang et al. 2015):
   rebuilt every substep (P2G → grid solve → G2P → advect).
 - **Weakly-compressible fluid** material model (pressure from `J`) — good for a
   silicone-ish pool that shears and folds.
-- **Two counter-rotating rollers** are cylinders (axis along z) submerged in a
-  packed trough; their inner faces sweep down through the nip and recirculate
-  the material up the trough walls. A particle-level collider projects material
-  out of each cylinder and removes the inward velocity component (with the
-  roller's tangential drag), so material never ends up inside a roller. Gravity
-  is gentle and the trough stays packed, so the rollers stay engaged.
+- **Two rollers** are short cylinders (axis along z, spanning the box depth) in
+  a tight packed box. Two modes, switchable live: **counter-rotating** (inner
+  faces sweep down the nip) and **friction** (both spin the same direction at
+  different speeds, so the nip faces shear past each other — real friction-ratio
+  milling). A particle-level collider projects material out of each cylinder and
+  removes the inward velocity (with the roller's tangential drag), so material
+  never ends up inside a roller. Gentle gravity + the tight box keep material
+  packed around the rollers (no bottom pooling). Grid resolution is 40³.
 - **Pigment is Lagrangian** — it rides particles and mixes purely by transport
   (no diffusion). The mill starts as **clear white silicone**; the user adds
   **red / blue / yellow** pigment via on-screen buttons (touch-friendly), which

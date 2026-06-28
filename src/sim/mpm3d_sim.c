@@ -5,22 +5,24 @@
 
 #define MPM3D_DX (1.0f / (float)MPM3D_GRID)
 #define MPM3D_INV_DX ((float)MPM3D_GRID)
-#define MPM3D_DT_SUB 1.4e-3f
+#define MPM3D_DT_SUB 1.1e-3f
 /* Fixed substeps per frame: keeps cost bounded and deterministic so a slow
    browser tab can't spiral into ever-larger steps. ~realtime at 60 fps. */
 #define MPM3D_SUBSTEPS_PER_FRAME 10
-#define MPM3D_E 50.0f
+#define MPM3D_E 200.0f
 #define MPM3D_P_RHO 1.0f
-#define MPM3D_GRAVITY 4.0f
-#define MPM3D_OMEGA_MAX 6.0f
+#define MPM3D_GRAVITY 2.0f
+#define MPM3D_OMEGA_MAX 7.0f
 #define MPM3D_BOUND 3
 #define MPM3D_SEED_PER_AXIS 2          /* 2^3 = 8 particles per filled cell */
 
-/* interior container (trough) keeps the pool deep enough to submerge rollers */
-#define MPM3D_CXMIN 0.25f
-#define MPM3D_CXMAX 0.75f
-#define MPM3D_CZMIN 0.30f
-#define MPM3D_CZMAX 0.70f
+/* Narrow, deep trough so the pool is deep enough to keep the small rollers
+   fully submerged (otherwise material settles below them and they disengage).
+   Both roller cylinders sit inside [CXMIN, CXMAX]. */
+#define MPM3D_CXMIN 0.30f
+#define MPM3D_CXMAX 0.70f
+#define MPM3D_CZMIN 0.40f
+#define MPM3D_CZMAX 0.60f
 
 static const float MPM3D_P_VOL =
     (MPM3D_DX * 0.5f) * (MPM3D_DX * 0.5f) * (MPM3D_DX * 0.5f);
@@ -45,6 +47,36 @@ int MpmSim3D_Index(int x, int y, int z) {
 
 static void Rasterize(MpmSim3D *sim);
 
+/* Keep a particle out of a roller cylinder: push it to the surface and remove
+   the velocity component pointing into the roller, adding the roller's
+   tangential (rigid-rotation) velocity so material rides the surface. */
+static void ResolveRoller(MpmParticle3D *p, float cx, float cy, float r,
+                          float omega) {
+    const float dx = p->x - cx;
+    const float dy = p->y - cy;
+    const float d2 = dx * dx + dy * dy;
+    if (d2 >= r * r || d2 < 1e-12f) return;
+
+    const float d = sqrtf(d2);
+    const float nx = dx / d, ny = dy / d;
+    p->x = cx + nx * r;
+    p->y = cy + ny * r;
+
+    /* roller surface velocity here, matching the grid BC rigid rotation:
+       v = (-W*dy, W*dx), W passed as `omega` (+ for left, - for right) */
+    const float surfVx = -omega * ny * r;
+    const float surfVy = omega * nx * r;
+    float rvx = p->vx - surfVx;
+    float rvy = p->vy - surfVy;
+    const float vn = rvx * nx + rvy * ny;
+    if (vn < 0.0f) {           /* moving into the roller: remove inward part */
+        rvx -= vn * nx;
+        rvy -= vn * ny;
+    }
+    p->vx = surfVx + rvx;
+    p->vy = surfVy + rvy;
+}
+
 static bool InsideRoller(const MpmSim3D *sim, float px, float py,
                          float cx, float r) {
     const float dx = px - cx;
@@ -53,9 +85,9 @@ static bool InsideRoller(const MpmSim3D *sim, float px, float py,
 }
 
 static void UpdateRollerGeometry(MpmSim3D *sim) {
-    sim->rollerRadius = 0.13f;
-    const float halfGap = 0.025f + sim->gap * 0.08f;
-    sim->rollerCy = 0.62f;
+    sim->rollerRadius = 0.075f;
+    const float halfGap = 0.006f + sim->gap * 0.04f;  /* nip opening = 2*halfGap */
+    sim->rollerCy = 0.65f;  /* submerged in the packed trough */
     sim->leftCx = 0.5f - halfGap - sim->rollerRadius;
     sim->rightCx = 0.5f + halfGap + sim->rollerRadius;
 }
@@ -78,9 +110,9 @@ void MpmSim3D_Reset(MpmSim3D *sim) {
 
     const int per = MPM3D_SEED_PER_AXIS;
     int count = 0;
-    for (int cz = (int)(0.32f * MPM3D_GRID); cz < (int)(0.68f * MPM3D_GRID); cz++) {
-        for (int cy = (int)(0.40f * MPM3D_GRID); cy < (int)(0.84f * MPM3D_GRID); cy++) {
-            for (int cx = (int)(0.27f * MPM3D_GRID); cx < (int)(0.73f * MPM3D_GRID); cx++) {
+    for (int cz = (int)(0.41f * MPM3D_GRID); cz < (int)(0.59f * MPM3D_GRID); cz++) {
+        for (int cy = (int)(0.42f * MPM3D_GRID); cy < (int)(0.90f * MPM3D_GRID); cy++) {
+            for (int cx = (int)(0.31f * MPM3D_GRID); cx < (int)(0.69f * MPM3D_GRID); cx++) {
                 for (int sz = 0; sz < per; sz++) {
                     for (int sy = 0; sy < per; sy++) {
                         for (int sx = 0; sx < per; sx++) {
@@ -191,6 +223,9 @@ static void Substep(MpmSim3D *sim, float dt) {
                 float vy = sim->gvy[n] / m + dt * MPM3D_GRAVITY;
                 float vz = sim->gvz[n] / m;
 
+                /* counter-rotating: inner (nip-facing) faces sweep down, drawing
+                   material through the nip; in the closed trough it recirculates
+                   up the outer walls and folds back through the nip */
                 if (InsideRoller(sim, px, py, sim->leftCx, sim->rollerRadius)) {
                     vx = -omega * (py - sim->rollerCy);
                     vy = omega * (px - sim->leftCx);
@@ -258,6 +293,10 @@ static void Substep(MpmSim3D *sim, float dt) {
         p->x = Clamp(p->x + dt * nvx, MPM3D_CXMIN, MPM3D_CXMAX);
         p->y = Clamp(p->y + dt * nvy, lo, hi);
         p->z = Clamp(p->z + dt * nvz, MPM3D_CZMIN, MPM3D_CZMAX);
+
+        /* hard collision so material can never end up inside the rollers */
+        ResolveRoller(p, sim->leftCx, sim->rollerCy, sim->rollerRadius, omega);
+        ResolveRoller(p, sim->rightCx, sim->rollerCy, sim->rollerRadius, -omega);
     }
 }
 

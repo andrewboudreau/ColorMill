@@ -286,10 +286,12 @@ the `mpm88` lineage (Hu et al. 2018) with APIC transfers (Jiang et al. 2015):
   rebuilt every substep (P2G → grid solve → G2P → advect).
 - **Weakly-compressible fluid** material model (pressure from `J`) — good for a
   silicone-ish pool that shears and folds.
-- **Two counter-rotating rollers** are rigid-rotation velocity boundaries —
-  cylinders (axis along z) submerged in the pool; their inner faces sweep down
-  into the nip and knead the material. A trough container (interior walls) keeps
-  the pool deep enough to stay engaged with the rollers; gravity feeds it.
+- **Two counter-rotating rollers** are cylinders (axis along z) submerged in a
+  packed trough; their inner faces sweep down through the nip and recirculate
+  the material up the trough walls. A particle-level collider projects material
+  out of each cylinder and removes the inward velocity component (with the
+  roller's tangential drag), so material never ends up inside a roller. Gravity
+  is gentle and the trough stays packed, so the rollers stay engaged.
 - **Pigment is Lagrangian** — it rides particles and mixes purely by transport
   (no diffusion). At render the particle pigment is rasterized to the voxel grid
   and run through **Mixbox** (`Mixbox_PigmentRgb`), so folded red/blue

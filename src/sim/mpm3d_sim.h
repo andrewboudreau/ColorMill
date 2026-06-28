@@ -17,11 +17,11 @@
  * References: Hu et al., MLS-MPM (SIGGRAPH 2018); Jiang et al., APIC (2015).
  */
 
-#define MPM3D_GRID 24                          /* cubic sim/render grid (cells) */
+#define MPM3D_GRID 32                          /* cubic sim/render grid (cells) */
 #define MPM3D_NODES (MPM3D_GRID + 1)
 #define MPM3D_CELLS (MPM3D_GRID * MPM3D_GRID * MPM3D_GRID)
 #define MPM3D_NODE_COUNT (MPM3D_NODES * MPM3D_NODES * MPM3D_NODES)
-#define MPM3D_MAX_PARTICLES 20000
+#define MPM3D_MAX_PARTICLES 30000
 
 typedef struct MpmParticle3D {
     float x, y, z;            /* position, normalized [0,1]^3 */

@@ -64,11 +64,21 @@
         color: #cbd5e1;
         font-size: 13px;
       }
+
+      #hint {
+        position: fixed;
+        right: 16px;
+        bottom: 12px;
+        color: #94a3b8;
+        font-size: 12px;
+        pointer-events: none;
+      }
     </style>
   </head>
   <body>
     <nav id="nav">
       <a href="index.html">Simulator</a>
+      <a href="pigment.html">Pigment demo</a>
       <a href="project.html">Project notes</a>
       <a href="resources.html">Resources</a>
       <a href="https://github.com/andrewboudreau/ColorMill">GitHub</a>
@@ -76,7 +86,8 @@
     <main id="shell">
       <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
     </main>
-    <div id="status">Loading ColorMill...</div>
+    <div id="status">Loading ColorMill 3D mill...</div>
+    <div id="hint">drag to orbit &middot; wheel to zoom &middot; UP/DOWN speed &middot; X/C add color &middot; R reset</div>
     <script>
       var Module = {
         canvas: document.getElementById('canvas'),

@@ -6,7 +6,9 @@
 #define MPM3D_DX (1.0f / (float)MPM3D_GRID)
 #define MPM3D_INV_DX ((float)MPM3D_GRID)
 #define MPM3D_DT_SUB 1.4e-3f
-#define MPM3D_MAX_SUBSTEPS 24
+/* Fixed substeps per frame: keeps cost bounded and deterministic so a slow
+   browser tab can't spiral into ever-larger steps. ~realtime at 60 fps. */
+#define MPM3D_SUBSTEPS_PER_FRAME 10
 #define MPM3D_E 50.0f
 #define MPM3D_P_RHO 1.0f
 #define MPM3D_GRAVITY 4.0f
@@ -291,19 +293,16 @@ static void Rasterize(MpmSim3D *sim) {
 }
 
 void MpmSim3D_Step(MpmSim3D *sim, float dt) {
+    (void)dt;  /* fixed substep count for stable, bounded cost on the web */
     if (sim->paused) return;
 
     UpdateRollerGeometry(sim);
 
-    float remaining = dt > 0.05f ? 0.05f : dt;
-    int substeps = (int)(remaining / MPM3D_DT_SUB);
-    if (substeps < 1) substeps = 1;
-    if (substeps > MPM3D_MAX_SUBSTEPS) substeps = MPM3D_MAX_SUBSTEPS;
-
-    for (int s = 0; s < substeps; s++) {
+    for (int s = 0; s < MPM3D_SUBSTEPS_PER_FRAME; s++) {
         Substep(sim, MPM3D_DT_SUB);
     }
-    sim->rollerAngle += sim->rollerSpeed * MPM3D_OMEGA_MAX * (float)substeps * MPM3D_DT_SUB;
+    sim->rollerAngle += sim->rollerSpeed * MPM3D_OMEGA_MAX *
+                        (float)MPM3D_SUBSTEPS_PER_FRAME * MPM3D_DT_SUB;
 
     Rasterize(sim);
 }

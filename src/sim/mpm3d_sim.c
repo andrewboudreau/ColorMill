@@ -13,6 +13,7 @@
 #define MPM3D_P_RHO 1.0f
 #define MPM3D_GRAVITY 0.8f             /* low: keep material packed, not pooling */
 #define MPM3D_OMEGA_MAX 7.0f
+#define MPM3D_FRICTION_RATIO 1.6f      /* right roller speed factor in friction mode */
 #define MPM3D_BOUND 3
 #define MPM3D_SEED_PER_AXIS 2          /* 2^3 = 8 particles per filled cell */
 
@@ -111,6 +112,7 @@ void MpmSim3D_Reset(MpmSim3D *sim) {
     sim->gap = 0.26f;
     sim->rollerAngle = 0.0f;
     sim->paused = false;
+    /* frictionMode is preserved across Reset (set in Init / toggled by UI) */
     UpdateRollerGeometry(sim);
 
     const int per = MPM3D_SEED_PER_AXIS;
@@ -225,6 +227,11 @@ static void Substep(MpmSim3D *sim, float dt) {
 
     /* --- grid update ----------------------------------------------------- */
     const float omega = sim->rollerSpeed * MPM3D_OMEGA_MAX;
+    /* per-roller angular velocity. counter-rotating: opposite signs (inner
+       faces sweep down the nip). friction: same direction, different speeds
+       (the two nip faces shear past each other). */
+    const float leftW = omega;
+    const float rightW = sim->frictionMode ? omega * MPM3D_FRICTION_RATIO : -omega;
     for (int i = 0; i < MPM3D_NODES; i++) {
         const float px = (float)i * MPM3D_DX;
         for (int j = 0; j < MPM3D_NODES; j++) {
@@ -239,16 +246,14 @@ static void Substep(MpmSim3D *sim, float dt) {
                 float vy = sim->gvy[n] / m + dt * MPM3D_GRAVITY;
                 float vz = sim->gvz[n] / m;
 
-                /* counter-rotating: inner (nip-facing) faces sweep down, drawing
-                   material through the nip; in the closed trough it recirculates
-                   up the outer walls and folds back through the nip */
+                /* rigid rotation v = (-W*dy, W*dx) per roller */
                 if (InsideRoller(sim, px, py, sim->leftCx, sim->rollerRadius)) {
-                    vx = -omega * (py - sim->rollerCy);
-                    vy = omega * (px - sim->leftCx);
+                    vx = -leftW * (py - sim->rollerCy);
+                    vy = leftW * (px - sim->leftCx);
                     vz = 0.0f;
                 } else if (InsideRoller(sim, px, py, sim->rightCx, sim->rollerRadius)) {
-                    vx = omega * (py - sim->rollerCy);
-                    vy = -omega * (px - sim->rightCx);
+                    vx = -rightW * (py - sim->rollerCy);
+                    vy = rightW * (px - sim->rightCx);
                     vz = 0.0f;
                 }
 
@@ -312,8 +317,8 @@ static void Substep(MpmSim3D *sim, float dt) {
         p->z = Clamp(p->z + dt * nvz, MPM3D_CZMIN, MPM3D_CZMAX);
 
         /* hard collision so material can never end up inside the rollers */
-        ResolveRoller(p, sim->leftCx, sim->rollerCy, sim->rollerRadius, omega);
-        ResolveRoller(p, sim->rightCx, sim->rollerCy, sim->rollerRadius, -omega);
+        ResolveRoller(p, sim->leftCx, sim->rollerCy, sim->rollerRadius, leftW);
+        ResolveRoller(p, sim->rightCx, sim->rollerCy, sim->rollerRadius, rightW);
         p->y = Clamp(p->y, MPM3D_CYMIN, MPM3D_CYMAX);
     }
 }

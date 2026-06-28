@@ -124,6 +124,7 @@ static void DoAction(int action) {
         case 4: app.distance += 0.3f; break;
         case 5: app.distance -= 0.3f; break;
         case 6: MpmSim3D_Reset(&app.sim); break;
+        case 7: app.sim.frictionMode = !app.sim.frictionMode; break;
         default: break;
     }
     if (app.distance < 1.4f) app.distance = 1.4f;
@@ -162,6 +163,7 @@ static void HandleInput(void) {
     if (IsKeyPressed(KEY_C)) DoAction(1);
     if (IsKeyPressed(KEY_V)) DoAction(2);
     if (IsKeyPressed(KEY_K)) DoAction(3);
+    if (IsKeyPressed(KEY_M)) DoAction(7);
 
     if (IsKeyDown(KEY_UP)) app.sim.rollerSpeed += GetFrameTime() * 0.55f;
     if (IsKeyDown(KEY_DOWN)) app.sim.rollerSpeed -= GetFrameTime() * 0.55f;
@@ -172,19 +174,21 @@ static void HandleInput(void) {
 }
 
 static void DrawButton(const UiButton *b) {
-    const Color base = b->color;
-    DrawRectangleRounded(b->rect, 0.35f, 6, base);
+    DrawRectangleRounded(b->rect, 0.35f, 6, b->color);
     DrawRectangleRoundedLines(b->rect, 0.35f, 6, (Color){ 226, 232, 240, 90 });
-    const int fs = 20;
-    const int tw = MeasureText(b->label, fs);
+    const char *label = b->label;
+    if (b->action == 7) label = app.sim.frictionMode ? "Friction" : "Counter";
+    const int fs = 18;
+    const int tw = MeasureText(label, fs);
     const Color ink = (b->action == 2) ? (Color){ 30, 30, 30, 255 } : (Color){ 245, 248, 252, 255 };
-    DrawText(b->label, (int)(b->rect.x + (b->rect.width - tw) / 2),
+    DrawText(label, (int)(b->rect.x + (b->rect.width - tw) / 2),
              (int)(b->rect.y + (b->rect.height - fs) / 2), fs, ink);
 }
 
 static void DrawUI(void) {
     DrawText("ColorMill - 3D MLS-MPM mill", 20, 16, 26, (Color){ 226, 232, 240, 255 });
-    DrawText(TextFormat("speed %.2f   gap %.2f   particles %d",
+    DrawText(TextFormat("rollers: %s   speed %.2f   gap %.2f   particles %d",
+                        app.sim.frictionMode ? "friction (same dir, diff speed)" : "counter-rotating",
                         app.sim.rollerSpeed, app.sim.gap, app.sim.particleCount),
              20, 48, 18, (Color){ 148, 163, 184, 255 });
     DrawText(app.sim.paused ? "paused" : "running",
@@ -195,16 +199,17 @@ static void DrawUI(void) {
 }
 
 static void InitUI(void) {
-    const float h = 40.0f, w = 96.0f, gap = 8.0f, y = SCREEN_HEIGHT - 52.0f;
+    const float h = 40.0f, w = 84.0f, gap = 7.0f, y = SCREEN_HEIGHT - 52.0f;
     float x = 20.0f;
     app.buttons[0] = (UiButton){ { x, y, w, h }, (Color){ 214, 64, 50, 255 }, "Red", 0 };     x += w + gap;
     app.buttons[1] = (UiButton){ { x, y, w, h }, (Color){ 40, 92, 200, 255 }, "Blue", 1 };    x += w + gap;
     app.buttons[2] = (UiButton){ { x, y, w, h }, (Color){ 236, 200, 30, 255 }, "Yellow", 2 };  x += w + gap;
     app.buttons[3] = (UiButton){ { x, y, w, h }, (Color){ 100, 116, 139, 255 }, "Clear", 3 };  x += w + gap;
-    app.buttons[4] = (UiButton){ { x, y, w, h }, (Color){ 71, 85, 105, 255 }, "Reset", 6 };
-    app.buttons[5] = (UiButton){ { SCREEN_WIDTH - 124.0f, y, 50.0f, h }, (Color){ 51, 65, 85, 255 }, "-", 4 };
-    app.buttons[6] = (UiButton){ { SCREEN_WIDTH - 66.0f, y, 50.0f, h }, (Color){ 51, 65, 85, 255 }, "+", 5 };
-    app.buttonCount = 7;
+    app.buttons[4] = (UiButton){ { x, y, w, h }, (Color){ 71, 85, 105, 255 }, "Reset", 6 };    x += w + gap;
+    app.buttons[5] = (UiButton){ { x, y, w, h }, (Color){ 13, 148, 136, 255 }, "Mode", 7 };
+    app.buttons[6] = (UiButton){ { SCREEN_WIDTH - 124.0f, y, 50.0f, h }, (Color){ 51, 65, 85, 255 }, "-", 4 };
+    app.buttons[7] = (UiButton){ { SCREEN_WIDTH - 66.0f, y, 50.0f, h }, (Color){ 51, 65, 85, 255 }, "+", 5 };
+    app.buttonCount = 8;
 }
 
 static void UpdateDrawFrame(void) {

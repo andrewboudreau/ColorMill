@@ -11,9 +11,10 @@
  *
  * Endpoint latents below were generated from the official library for fixed
  * pigment colors (see scripts in the PR / web/vendor/mixbox):
- *   WHITE base   rgb(255, 255, 255)
- *   RED  pigment Cadmium Red  rgb(255, 39, 2)
- *   BLUE pigment Cobalt Blue  rgb(0, 33, 133)
+ *   WHITE  base    rgb(255, 255, 255)
+ *   RED    pigment Cadmium Red    rgb(255, 39, 2)
+ *   BLUE   pigment Cobalt Blue    rgb(0, 33, 133)
+ *   YELLOW pigment Cadmium Yellow rgb(254, 236, 0)
  *
  * Mixbox is (c) Secret Weapons, CC BY-NC 4.0 (non-commercial use).
  */
@@ -28,6 +29,9 @@ static const float MB_RED[MB_LATENT] = {
 };
 static const float MB_BLUE[MB_LATENT] = {
     0.86413725f, 0.00441961f, 0.02987264f, 0.10157050f, -0.05379499f, -0.01226009f, 0.00350272f
+};
+static const float MB_YELLOW[MB_LATENT] = {
+    0.00392157f, 0.85950980f, 0.00000000f, 0.13656863f, 0.03300247f, 0.10249173f, -0.08066935f
 };
 
 static float Clamp01(float x) {
@@ -74,27 +78,32 @@ static void EvalPolynomial(float c0, float c1, float c2, float c3,
 }
 
 void Mixbox_PigmentRgb(float redConcentration, float blueConcentration,
+                       float yellowConcentration,
                        float *outR, float *outG, float *outB) {
     const float redC = Clamp01(redConcentration);
     const float blueC = Clamp01(blueConcentration);
+    const float yellowC = Clamp01(yellowConcentration);
 
-    /* White base fills the remaining mass; if the two pigments overflow the
+    /* White base fills the remaining mass; if the pigments overflow the
        material, renormalize so the pigment weights sum to one. */
-    const float total = redC + blueC;
-    float wWhite, wRed, wBlue;
+    const float total = redC + blueC + yellowC;
+    float wWhite, wRed, wBlue, wYellow;
     if (total > 1.0f) {
         wWhite = 0.0f;
         wRed = redC / total;
         wBlue = blueC / total;
+        wYellow = yellowC / total;
     } else {
         wWhite = 1.0f - total;
         wRed = redC;
         wBlue = blueC;
+        wYellow = yellowC;
     }
 
     float z[MB_LATENT];
     for (int i = 0; i < MB_LATENT; i++) {
-        z[i] = wWhite * MB_WHITE[i] + wRed * MB_RED[i] + wBlue * MB_BLUE[i];
+        z[i] = wWhite * MB_WHITE[i] + wRed * MB_RED[i] +
+               wBlue * MB_BLUE[i] + wYellow * MB_YELLOW[i];
     }
 
     float r, g, b;

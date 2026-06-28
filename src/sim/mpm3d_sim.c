@@ -110,9 +110,9 @@ void MpmSim3D_Reset(MpmSim3D *sim) {
 
     const int per = MPM3D_SEED_PER_AXIS;
     int count = 0;
-    for (int cz = (int)(0.41f * MPM3D_GRID); cz < (int)(0.59f * MPM3D_GRID); cz++) {
-        for (int cy = (int)(0.42f * MPM3D_GRID); cy < (int)(0.90f * MPM3D_GRID); cy++) {
-            for (int cx = (int)(0.31f * MPM3D_GRID); cx < (int)(0.69f * MPM3D_GRID); cx++) {
+    for (int cz = (int)(0.42f * MPM3D_GRID); cz < (int)(0.58f * MPM3D_GRID); cz++) {
+        for (int cy = (int)(0.52f * MPM3D_GRID); cy < (int)(0.90f * MPM3D_GRID); cy++) {
+            for (int cx = (int)(0.32f * MPM3D_GRID); cx < (int)(0.68f * MPM3D_GRID); cx++) {
                 for (int sz = 0; sz < per; sz++) {
                     for (int sy = 0; sy < per; sy++) {
                         for (int sx = 0; sx < per; sx++) {
@@ -128,8 +128,10 @@ void MpmSim3D_Reset(MpmSim3D *sim) {
                             p->vx = p->vy = p->vz = 0.0f;
                             for (int m = 0; m < 9; m++) p->C[m] = 0.0f;
                             p->J = 1.0f;
-                            p->redFrac = px < 0.5f ? 1.0f : 0.0f;
-                            p->blueFrac = px < 0.5f ? 0.0f : 1.0f;
+                            /* start as clear silicone; pigment is added by the user */
+                            p->redFrac = 0.0f;
+                            p->blueFrac = 0.0f;
+                            p->yellowFrac = 0.0f;
                         }
                     }
                 }
@@ -146,7 +148,7 @@ void MpmSim3D_Init(MpmSim3D *sim) {
 }
 
 void MpmSim3D_AddPigment(MpmSim3D *sim, float nx, float ny, float nz,
-                         float red, float blue, float radius) {
+                         float red, float blue, float yellow, float radius) {
     const float r2 = radius * radius;
     for (int i = 0; i < sim->particleCount; i++) {
         MpmParticle3D *p = &sim->particles[i];
@@ -156,6 +158,15 @@ void MpmSim3D_AddPigment(MpmSim3D *sim, float nx, float ny, float nz,
         const float t = 1.0f - sqrtf(d2 / r2);
         p->redFrac = Clamp01(p->redFrac * (1.0f - t) + red * t);
         p->blueFrac = Clamp01(p->blueFrac * (1.0f - t) + blue * t);
+        p->yellowFrac = Clamp01(p->yellowFrac * (1.0f - t) + yellow * t);
+    }
+}
+
+void MpmSim3D_ClearPigment(MpmSim3D *sim) {
+    for (int i = 0; i < sim->particleCount; i++) {
+        sim->particles[i].redFrac = 0.0f;
+        sim->particles[i].blueFrac = 0.0f;
+        sim->particles[i].yellowFrac = 0.0f;
     }
 }
 
@@ -304,6 +315,7 @@ static void Rasterize(MpmSim3D *sim) {
     memset(sim->rMass, 0, sizeof(sim->rMass));
     memset(sim->rRed, 0, sizeof(sim->rRed));
     memset(sim->rBlue, 0, sizeof(sim->rBlue));
+    memset(sim->rYellow, 0, sizeof(sim->rYellow));
 
     for (int pi = 0; pi < sim->particleCount; pi++) {
         const MpmParticle3D *p = &sim->particles[pi];
@@ -325,6 +337,7 @@ static void Rasterize(MpmSim3D *sim) {
                     sim->rMass[idx] += w;
                     sim->rRed[idx] += w * p->redFrac;
                     sim->rBlue[idx] += w * p->blueFrac;
+                    sim->rYellow[idx] += w * p->yellowFrac;
                 }
             }
         }
@@ -358,6 +371,11 @@ float MpmSim3D_RedAt(const MpmSim3D *sim, int x, int y, int z) {
 
 float MpmSim3D_BlueAt(const MpmSim3D *sim, int x, int y, int z) {
     return sim->rBlue[MpmSim3D_Index(x, y, z)] /
+           (float)(MPM3D_SEED_PER_AXIS * MPM3D_SEED_PER_AXIS * MPM3D_SEED_PER_AXIS);
+}
+
+float MpmSim3D_YellowAt(const MpmSim3D *sim, int x, int y, int z) {
+    return sim->rYellow[MpmSim3D_Index(x, y, z)] /
            (float)(MPM3D_SEED_PER_AXIS * MPM3D_SEED_PER_AXIS * MPM3D_SEED_PER_AXIS);
 }
 

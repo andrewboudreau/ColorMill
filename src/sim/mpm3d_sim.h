@@ -28,7 +28,7 @@ typedef struct MpmParticle3D {
     float vx, vy, vz;         /* velocity */
     float C[9];               /* APIC affine velocity matrix, row-major 3x3 */
     float J;                  /* volume ratio */
-    float redFrac, blueFrac;  /* carried pigment concentration, 0..1 */
+    float redFrac, blueFrac, yellowFrac;  /* carried pigment concentration, 0..1 */
 } MpmParticle3D;
 
 typedef struct MpmSim3D {
@@ -43,6 +43,7 @@ typedef struct MpmSim3D {
     float rMass[MPM3D_CELLS];
     float rRed[MPM3D_CELLS];
     float rBlue[MPM3D_CELLS];
+    float rYellow[MPM3D_CELLS];
 
     float rollerSpeed;     /* 0..1, scales roller angular velocity */
     float gap;             /* 0..1, roller separation at the nip */
@@ -58,12 +59,14 @@ void MpmSim3D_Init(MpmSim3D *sim);
 void MpmSim3D_Reset(MpmSim3D *sim);
 void MpmSim3D_Step(MpmSim3D *sim, float dt);
 void MpmSim3D_AddPigment(MpmSim3D *sim, float nx, float ny, float nz,
-                         float red, float blue, float radius);
+                         float red, float blue, float yellow, float radius);
+void MpmSim3D_ClearPigment(MpmSim3D *sim);
 
 int MpmSim3D_Index(int x, int y, int z);
 float MpmSim3D_MaterialAt(const MpmSim3D *sim, int x, int y, int z);
 float MpmSim3D_RedAt(const MpmSim3D *sim, int x, int y, int z);
 float MpmSim3D_BlueAt(const MpmSim3D *sim, int x, int y, int z);
+float MpmSim3D_YellowAt(const MpmSim3D *sim, int x, int y, int z);
 
 void MpmSim3D_Rollers(const MpmSim3D *sim, float *leftCx, float *rightCx,
                       float *centerY, float *radius);

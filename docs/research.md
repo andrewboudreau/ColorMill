@@ -293,9 +293,12 @@ the `mpm88` lineage (Hu et al. 2018) with APIC transfers (Jiang et al. 2015):
   roller's tangential drag), so material never ends up inside a roller. Gravity
   is gentle and the trough stays packed, so the rollers stay engaged.
 - **Pigment is Lagrangian** — it rides particles and mixes purely by transport
-  (no diffusion). At render the particle pigment is rasterized to the voxel grid
-  and run through **Mixbox** (`Mixbox_PigmentRgb`), so folded red/blue
-  interfaces read as real dark-purple blends, not gray.
+  (no diffusion). The mill starts as **clear white silicone**; the user adds
+  **red / blue / yellow** pigment via on-screen buttons (touch-friendly), which
+  drop pigment blobs that get kneaded in. At render the per-particle pigment is
+  rasterized to the voxel grid and run through **Mixbox** (`Mixbox_PigmentRgb`,
+  white base + 3 pigment endpoints), so blue+yellow folds to real green and
+  red+blue to purple, not gray.
 
 Verified headlessly (no raylib needed for the physics): stable over thousands
 of substeps, no NaNs, particles stay in-domain/in-trough, particle count

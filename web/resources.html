@@ -32,6 +32,7 @@
         <a href="index.html">Simulator</a>
         <a href="project.html">Project notes</a>
         <a href="resources.html">Resources</a>
+        <a href="pigment.html">Pigment demo</a>
         <a href="https://github.com/andrewboudreau/ColorMill/issues">GitHub issues</a>
       </nav>
 
@@ -91,6 +92,15 @@
         <li>Should we represent left and right roller speeds separately to support speed ratio?</li>
         <li>What is the simplest useful definition of dispersion quality?</li>
       </ol>
+
+      <h2>Color model</h2>
+      <p>Linear RGB averaging (the current <code>mixColors</code>) is physically wrong for pigment &mdash; blue + yellow should make green, not gray. We are adopting <strong>Mixbox</strong> (Kubelka&ndash;Munk pigment mixing, SIGGRAPH Asia 2021) for color blending.</p>
+      <ul>
+        <li>It ships an official GLSL shader, so it runs per-fragment on the GPU &mdash; the same path a 3D voxel renderer needs.</li>
+        <li>Its <em>latent</em> space (7 coefficients) lets us store pigment per cell/particle, accumulate weighted latents during advection, and convert to RGB only at render time.</li>
+        <li>License is CC BY-NC 4.0 (non-commercial); fine for this research project with attribution. Vendored under <code>web/vendor/mixbox/</code>.</li>
+        <li>See the live <a href="pigment.html">pigment demo</a> &mdash; Mixbox vs. naive linear, side by side.</li>
+      </ul>
 
       <h2>Planned resource types</h2>
       <table>

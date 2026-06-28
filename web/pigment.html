@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ColorMill · Mixbox WebGL proof of concept</title>
+    <style>
+      :root { color-scheme: dark; --bg:#0f172a; --panel:#111827; --ink:#e5e7eb; --muted:#94a3b8; --accent:#38bdf8; --line:#334155; }
+      body { margin:0; background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,Segoe UI,sans-serif; line-height:1.55; }
+      main { max-width:1040px; margin:0 auto; padding:32px 20px 64px; }
+      nav { display:flex; flex-wrap:wrap; gap:12px; margin:0 0 28px; }
+      nav a { color:var(--ink); text-decoration:none; border:1px solid var(--line); border-radius:999px; padding:8px 12px; background:#0b1220; }
+      .pill { display:inline-block; color:var(--ink); border:1px solid var(--line); border-radius:999px; padding:6px 12px; background:#0b1220; font-size:.9rem; }
+      h1 { font-size:clamp(2rem,5vw,3.4rem); line-height:1; margin:12px 0; }
+      h2 { margin-top:32px; border-top:1px solid var(--line); padding-top:20px; }
+      .lead { color:#cbd5e1; font-size:1.1rem; max-width:760px; }
+      canvas { width:100%; height:240px; display:block; border:1px solid var(--line); border-radius:14px; background:#000; }
+      .controls { display:flex; flex-wrap:wrap; gap:18px; align-items:flex-end; margin:20px 0; }
+      .ctl { display:flex; flex-direction:column; gap:6px; }
+      .ctl label { color:var(--muted); font-size:.85rem; }
+      input[type=color] { width:88px; height:44px; border:1px solid var(--line); border-radius:10px; background:#0b1220; cursor:pointer; }
+      .presets { display:flex; flex-wrap:wrap; gap:8px; }
+      .presets button { cursor:pointer; border:1px solid var(--line); border-radius:999px; padding:6px 10px; background:#0b1220; color:var(--ink); font-size:.82rem; display:flex; align-items:center; gap:7px; }
+      .sw { width:14px; height:14px; border-radius:50%; border:1px solid #0008; }
+      .legend { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; margin-top:16px; }
+      .card { background:linear-gradient(180deg,#111827,#0b1220); border:1px solid var(--line); border-radius:14px; padding:14px; }
+      .card h3 { margin:0 0 6px; color:#7dd3fc; font-size:1rem; }
+      .mid { display:flex; gap:10px; align-items:center; margin-top:8px; }
+      .midsw { width:40px; height:28px; border-radius:8px; border:1px solid var(--line); }
+      code { background:#020617; color:#e2e8f0; border-radius:6px; padding:2px 5px; }
+      .callout { border-left:4px solid var(--accent); padding:12px 16px; background:#111827; border-radius:12px; margin-top:24px; color:#cbd5e1; font-size:.92rem; }
+      .err { color:#fca5a5; }
+      a.inline { color:var(--accent); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav>
+        <a href="index.html">Simulator</a>
+        <a href="project.html">Project notes</a>
+        <a href="resources.html">Resources</a>
+        <a href="pigment.html">Pigment demo</a>
+        <a href="https://github.com/andrewboudreau/ColorMill">GitHub</a>
+      </nav>
+
+      <span class="pill">WebGL2 proof of concept</span>
+      <h1>Mixbox pigment mixing</h1>
+      <p class="lead">
+        Both bars sweep a blend from color A (left) to color B (right). The
+        <strong>top bar mixes with Mixbox</strong> (Kubelka&ndash;Munk pigment model, evaluated
+        live in a fragment shader); the <strong>bottom bar mixes with naive linear RGB</strong>.
+        Pick blue and yellow and watch the top go green while the bottom goes gray.
+      </p>
+
+      <div class="controls">
+        <div class="ctl">
+          <label for="colorA">Color A</label>
+          <input type="color" id="colorA" value="#002185">
+        </div>
+        <div class="ctl">
+          <label for="colorB">Color B</label>
+          <input type="color" id="colorB" value="#feec00">
+        </div>
+        <div class="ctl" style="flex:1; min-width:220px;">
+          <label>Pigment presets (click to load into A / B alternately)</label>
+          <div class="presets" id="presets"></div>
+        </div>
+      </div>
+
+      <canvas id="gl" width="1000" height="240" aria-label="Mixbox vs linear blend"></canvas>
+      <p id="status" class="err" hidden></p>
+
+      <div class="legend">
+        <div class="card">
+          <h3>Top &mdash; Mixbox (Kubelka&ndash;Munk)</h3>
+          <p style="margin:0;color:#cbd5e1;font-size:.9rem;">Pigment-correct subtractive mixing. Midpoint (t = 0.5):</p>
+          <div class="mid"><div class="midsw" id="midMixbox"></div><code id="midMixboxHex">#000000</code></div>
+        </div>
+        <div class="card">
+          <h3>Bottom &mdash; Naive linear RGB</h3>
+          <p style="margin:0;color:#cbd5e1;font-size:.9rem;">Channel-wise average (today's <code>mixColors</code>). Midpoint (t = 0.5):</p>
+          <div class="mid"><div class="midsw" id="midLinear"></div><code id="midLinearHex">#000000</code></div>
+        </div>
+      </div>
+
+      <h2>How this works</h2>
+      <p style="color:#cbd5e1;">
+        The page loads the self-contained <code>mixbox.js</code> (it embeds and decodes its own
+        512&times;512 lookup table). At init we call <code>mixbox.lutTexture(gl)</code> to upload the
+        LUT and inject <code>mixbox.glsl()</code> into the fragment shader. Each pixel's blend factor
+        <code>t</code> comes from its x position, and the shader calls
+        <code>mixbox_lerp(A, B, t)</code> on the top half and <code>mix(A, B, t)</code> on the bottom.
+        Nothing here is precomputed on the CPU &mdash; the pigment mixing runs per-fragment on the GPU,
+        which is exactly the path a 3D voxel renderer would use.
+      </p>
+
+      <div class="callout">
+        <strong>License:</strong> Mixbox is &copy; Secret Weapons, licensed
+        <a class="inline" href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>
+        (non-commercial). Fine for ColorMill as a research/educational project with attribution;
+        commercial use needs a license from <code>mixbox@scrtwpns.com</code>. Vendored files live in
+        <code>web/vendor/mixbox/</code>. Paper: Sochorov&aacute; &amp; Jamri&scaron;ka,
+        <em>Practical Pigment Mixing for Digital Painting</em>, SIGGRAPH Asia 2021.
+      </div>
+    </main>
+
+    <script src="./vendor/mixbox/mixbox.js"></script>
+    <script>
+      (function () {
+        var statusEl = document.getElementById('status');
+        function fail(msg) {
+          statusEl.hidden = false;
+          statusEl.textContent = msg;
+          throw new Error(msg);
+        }
+
+        if (typeof mixbox === 'undefined') {
+          fail('mixbox.js failed to load (expected at ./vendor/mixbox/mixbox.js).');
+        }
+
+        var canvas = document.getElementById('gl');
+        var gl = canvas.getContext('webgl2');
+        if (!gl) fail('WebGL2 is not available in this browser.');
+
+        var VERT = [
+          '#version 300 es',
+          'in vec2 aPos;',
+          'out vec2 vUv;',
+          'void main() {',
+          '  vUv = aPos * 0.5 + 0.5;',
+          '  gl_Position = vec4(aPos, 0.0, 1.0);',
+          '}'
+        ].join('\n');
+
+        var FRAG = [
+          '#version 300 es',
+          'precision highp float;',
+          'uniform sampler2D mixbox_lut;',
+          'uniform vec3 uColorA;',
+          'uniform vec3 uColorB;',
+          'in vec2 vUv;',
+          'out vec4 fragColor;',
+          mixbox.glsl(),
+          'void main() {',
+          '  float t = clamp(vUv.x, 0.0, 1.0);',
+          '  vec3 pigment = mixbox_lerp(uColorA, uColorB, t);',
+          '  vec3 linear  = mix(uColorA, uColorB, t);',
+          '  float divider = smoothstep(0.495, 0.505, vUv.y) - smoothstep(0.495, 0.505, vUv.y - 0.006);',
+          '  vec3 col = vUv.y > 0.5 ? pigment : linear;',
+          '  col = mix(col, vec3(0.06, 0.09, 0.16), clamp(divider, 0.0, 1.0));',
+          '  fragColor = vec4(col, 1.0);',
+          '}'
+        ].join('\n');
+
+        function compile(type, src) {
+          var s = gl.createShader(type);
+          gl.shaderSource(s, src);
+          gl.compileShader(s);
+          if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+            fail('Shader compile error: ' + gl.getShaderInfoLog(s));
+          }
+          return s;
+        }
+
+        var prog = gl.createProgram();
+        gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
+        gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
+        gl.linkProgram(prog);
+        if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+          fail('Program link error: ' + gl.getProgramInfoLog(prog));
+        }
+        gl.useProgram(prog);
+
+        var quad = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]);
+        var buf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+        var aPos = gl.getAttribLocation(prog, 'aPos');
+        gl.enableVertexAttribArray(aPos);
+        gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+        // Upload the decoded Mixbox LUT and bind it to texture unit 0.
+        var lut = mixbox.lutTexture(gl);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, lut);
+        gl.uniform1i(gl.getUniformLocation(prog, 'mixbox_lut'), 0);
+
+        var uA = gl.getUniformLocation(prog, 'uColorA');
+        var uB = gl.getUniformLocation(prog, 'uColorB');
+
+        var colorA = document.getElementById('colorA');
+        var colorB = document.getElementById('colorB');
+
+        function hexToRgb01(hex) {
+          var n = parseInt(hex.slice(1), 16);
+          return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+        }
+        function hexToRgb255(hex) {
+          var n = parseInt(hex.slice(1), 16);
+          return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+        }
+        function toHex(a) {
+          return '#' + a.map(function (v) { return ((v < 16 ? '0' : '') + v.toString(16)); }).join('');
+        }
+
+        function render() {
+          var a01 = hexToRgb01(colorA.value);
+          var b01 = hexToRgb01(colorB.value);
+          gl.uniform3fv(uA, a01);
+          gl.uniform3fv(uB, b01);
+          gl.viewport(0, 0, canvas.width, canvas.height);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+          // CPU readout of the midpoint, using the same library on the same inputs.
+          var a = hexToRgb255(colorA.value), b = hexToRgb255(colorB.value);
+          var mb = mixbox.lerp(a, b, 0.5);
+          mb = [mb[0], mb[1], mb[2]];
+          var ln = a.map(function (v, i) { return Math.round((v + b[i]) / 2); });
+          document.getElementById('midMixbox').style.background = toHex(mb);
+          document.getElementById('midMixboxHex').textContent = toHex(mb);
+          document.getElementById('midLinear').style.background = toHex(ln);
+          document.getElementById('midLinearHex').textContent = toHex(ln);
+        }
+
+        colorA.addEventListener('input', render);
+        colorB.addEventListener('input', render);
+
+        // Real pigment swatches taken from the Mixbox shader header.
+        var pigments = [
+          ['Cadmium Yellow', '#feec00'],
+          ['Cadmium Orange', '#ff6900'],
+          ['Cadmium Red', '#ff2702'],
+          ['Quinacridone Magenta', '#80022e'],
+          ['Cobalt Blue', '#002185'],
+          ['Ultramarine Blue', '#190059'],
+          ['Phthalo Green', '#003c32'],
+          ['Sap Green', '#6b9404'],
+          ['Burnt Sienna', '#7b4800']
+        ];
+        var presets = document.getElementById('presets');
+        var target = 0; // 0 -> A, 1 -> B, alternating
+        pigments.forEach(function (p) {
+          var btn = document.createElement('button');
+          btn.innerHTML = '<span class="sw" style="background:' + p[1] + '"></span>' + p[0];
+          btn.addEventListener('click', function () {
+            (target === 0 ? colorA : colorB).value = p[1];
+            target ^= 1;
+            render();
+          });
+          presets.appendChild(btn);
+        });
+
+        render();
+      })();
+    </script>
+  </body>
+</html>

@@ -50,9 +50,11 @@ typedef struct MpmSim3D {
     float rollerAngle;
     bool paused;
 
-    /* roller cylinders: axis along z, centers in the xy plane */
+    /* roller cylinders: axis along z, centers in the xy plane, spanning
+       [rollerZMin, rollerZMax] in z */
     float rollerRadius;
     float leftCx, rightCx, rollerCy;
+    float rollerZMin, rollerZMax;
 } MpmSim3D;
 
 void MpmSim3D_Init(MpmSim3D *sim);
@@ -69,6 +71,6 @@ float MpmSim3D_BlueAt(const MpmSim3D *sim, int x, int y, int z);
 float MpmSim3D_YellowAt(const MpmSim3D *sim, int x, int y, int z);
 
 void MpmSim3D_Rollers(const MpmSim3D *sim, float *leftCx, float *rightCx,
-                      float *centerY, float *radius);
+                      float *centerY, float *radius, float *zMin, float *zMax);
 
 #endif

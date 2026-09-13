@@ -6,8 +6,108 @@ on:
     branches: [main]
 
 jobs:
-  web-build:
+  # ---------------------------------------------------------------------------
+  # v2: the WebGPU Vite app. Type-check, unit tests, production build, then the
+  # Playwright end-to-end tests in headless Chromium with SwiftShader WebGPU
+  # (no GPU on the runner). tests/e2e/lib.mjs falls back to Playwright's own
+  # Chromium when COLORMILL_CHROMIUM / the /opt path is absent.
+  # ---------------------------------------------------------------------------
+  web:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit -p .
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Check dist layout
+        run: |
+          test -f dist/index.html
+          test -f dist/project.html
+          test -f dist/resources.html
+          test -f dist/pigment.html
+          test -f dist/vendor/mixbox/mixbox.js
+          test ! -e dist/shell.html
+          ls -R dist | head -50
+
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      - name: Install Chromium (Playwright)
+        run: npx playwright install --with-deps chromium
+
+      # Runs against the production bundle (`vite preview` on dist/). Locally
+      # the same thing is `E2E_MODE=preview npm run test:e2e`.
+      - name: End-to-end tests (headless Chromium + SwiftShader WebGPU)
+        run: npm run test:e2e
+        continue-on-error: false
+        env:
+          E2E_MODE: preview
+
+      - name: Upload e2e output (screenshots)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-out
+          path: tests/e2e/out/
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Native C: the v1 CPU solver must still compile, and the v2 C reference
+  # solver (`make ref`, src/sim/millref.c + tools/) is built when present.
+  # ---------------------------------------------------------------------------
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compile v1 CPU solver
+        run: |
+          mkdir -p build
+          cc -O2 -std=gnu99 -Wall -Wextra -Isrc -c src/sim/mpm3d_sim.c -o build/mpm3d_sim.o
+          cc -O2 -std=gnu99 -Wall -Wextra -Isrc -c src/sim/mixbox.c -o build/mixbox.o
+
+      - name: Build v2 C reference solver (if the `ref` target exists)
+        run: |
+          if make -n ref >/dev/null 2>&1; then
+            make ref
+          else
+            echo "no 'ref' target in Makefile yet - skipping"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Legacy v1 web build (C/raylib -> wasm via Emscripten). Pages publishes this
+  # under dist/legacy/ for browsers without WebGPU, so keep it compiling.
+  # ---------------------------------------------------------------------------
+  legacy-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,12 +116,33 @@ jobs:
         uses: mymindstorm/setup-emsdk@v14
         with:
           version: latest
+          actions-cache-folder: emsdk-cache
+
+      - name: Emscripten version
+        id: emver
+        run: echo "version=$(emcc --version | head -n 1 | tr -cd '[:alnum:]._-')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache raylib (web)
+        id: raylib-cache
+        uses: actions/cache@v4
+        with:
+          path: raylib
+          key: raylib-web-5.5-${{ steps.emver.outputs.version }}
 
       - name: Fetch raylib
+        if: steps.raylib-cache.outputs.cache-hit != 'true'
         run: git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib
 
       - name: Build raylib for web
+        if: steps.raylib-cache.outputs.cache-hit != 'true'
         run: make -C raylib/src PLATFORM=PLATFORM_WEB
 
-      - name: Build ColorMill web app
-        run: make web
+      - name: Build legacy ColorMill web app
+        run: make web DIST_DIR=dist/legacy
+
+      - name: Check legacy layout
+        run: |
+          test -f dist/legacy/index.html
+          test -f dist/legacy/index.js
+          test -f dist/legacy/index.wasm
+          test -f dist/legacy/vendor/mixbox/mixbox.js

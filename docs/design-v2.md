@@ -316,21 +316,29 @@ architecture is not a discrete class (or `low` on mobile user agents) and
 Single fullscreen ray-march pass (`src/render/shaders/raymarch.wgsl`):
 
 1. Camera ray per pixel (perspective, orbit camera in `src/render/camera.ts`).
-2. Intersect the domain box; march through `volA.density` with step `0.6h`
-   (trilinear, `float32-filterable` not required: use `rgba16float`).
-   Surface = first sample with `density ≥ 0.45`; refine with 3 bisection
-   steps. Normal = central-difference gradient of density (offset 1 texel).
+2. Intersect the domain box; march through `volA.density` with step
+   `0.5h` (trilinear, `rgba16float`). A coarse max-density mip (one value
+   per 4×4×4 block with a one-texel halo, rebuilt by a small compute pass
+   before every render) lets empty blocks be skipped in one step. Surface =
+   first sample with `density ≥ 0.45`; refine with 3 bisection steps.
+   Normal = a 75/25 blend of the gradient of a 2×2×2 box-filtered density
+   (±1.5 texels) and a tight central difference (±0.8 texel); the
+   disagreement between the two widens the specular lobes so cell-scale
+   noise reads as satin, not sparkle.
 3. Colour at the hit: sample `volA/volB`, decode the 7-float latent,
    `latentToRgb` → albedo (sRGB-linearised for lighting).
 4. Shading: key light (warm, upper right front), fill (cool, left), rim from
    behind; Blinn-Phong specular with a wide + narrow lobe (silicone putty is
-   glossy); a cheap ambient occlusion from density sampled 2 and 4 texels
-   along the normal (darkens creases and the nip).
+   glossy); ambient occlusion from density sampled along the normal plus an
+   analytic hemisphere occlusion by each roll (darkens the crease between
+   bank and rolls); a thin-sheet transmittance term (thickness from a short
+   march along −n, transmitted colour ≈ albedo²) so sheet edges glow.
 5. Rollers: analytic ray/cylinder intersection with end caps; brushed metal
    shading with a rotating stripe pattern (angle = `rollerAngle`) so rotation
    speed is visible. Depth-composite against the volume hit.
 6. Tray/floor plane with a soft contact shadow under the front roller;
-   background: dark vertical gradient.
+   translucent end-guide plates at x = 0 and x = L; background: dark
+   vertical gradient.
 7. Output sRGB. The canvas uses `navigator.gpu.getPreferredCanvasFormat()`.
 
 Render at `min(devicePixelRatio, 2)`. Provide `Renderer.setVolumes(volA, volB)`

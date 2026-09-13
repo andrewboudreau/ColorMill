@@ -103,5 +103,33 @@ export default async function run() {
     assert(sampled.blue.some(bluish), 'the blue band reads as blue');
     const reddish = (c) => c && c[0] > c[1] * 1.35 && c[0] > c[2] * 1.35 && c[0] > 120;
     assert(sampled.red.some(reddish), 'the red band reads as red');
+
+    // low preset with a sheet as thin as the sim's (gap / h ~ 1.6 cells) and per-node density
+    // noise: the march must not step over the thin sheet on the front roll, and the block
+    // skipping (coarse max-density mip) must leave the surface intact
+    await page.goto(baseUrl + 'harness/render.html?quality=low&sheet=1.7&noise=0.15');
+    await page.waitForFunction(() => window.__render && (window.__render.ready || window.__render.error), null, { timeout: 90000 });
+    const state2 = await page.evaluate(() => ({ ready: window.__render.ready, error: window.__render.error ?? null, validationError: window.__render.validationError ?? null }));
+    assert(state2.ready && !state2.validationError, 'thin-sheet harness initialised: ' + (state2.error ?? state2.validationError));
+    const t0 = performance.now();
+    await page.evaluate(() => window.__render.frame());
+    console.log('  low / thin sheet frame (ms):', (performance.now() - t0).toFixed(0));
+    const px2 = await page.evaluate(() => window.__render.readPixels());
+    const img2 = { width: px2.width, height: px2.height, data: new Uint8Array(Buffer.from(px2.base64, 'base64')) };
+    writeFileSync(path.join(OUT_DIR, 'render-low-thin.png'), encodePng(img2.width, img2.height, img2.data));
+    const spots2 = await page.evaluate(() => {
+      const sp = window.__render.samplePoints;
+      const out = {};
+      for (const name of ['yellow', 'blue', 'red']) out[name] = window.__render.project(sp[name][0]); // [0] = on the sheet
+      return out;
+    });
+    const sheet = {};
+    for (const [name, pt] of Object.entries(spots2)) {
+      sheet[name] = pt ? patchMean(img2, Math.round(pt.x), Math.round(pt.y), 3) : null;
+      console.log(`  thin sheet ${name}:`, sheet[name] ? sheet[name].map(Math.round).join(',') : 'off-screen');
+    }
+    assert(yellowish(sheet.yellow), 'the yellow band on the thin sheet reads as yellow');
+    assert(bluish(sheet.blue), 'the blue band on the thin sheet reads as blue');
+    assert(reddish(sheet.red), 'the red band on the thin sheet reads as red');
   });
 }

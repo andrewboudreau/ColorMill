@@ -39,7 +39,12 @@ export const BANDS: Array<{ name: string; latent: Latent }> = [
 ];
 
 const params = { ...DEFAULT_PARAMS };
-const preset = new URLSearchParams(location.search).get('quality') === 'low' ? QUALITY_PRESETS.low : QUALITY_PRESETS.medium;
+const query = new URLSearchParams(location.search);
+const preset = query.get('quality') === 'low' ? QUALITY_PRESETS.low : QUALITY_PRESETS.medium;
+/** sheet thickness in cells (the sim's sheet after the nip is ~gap/h, 1.6 cells at low) */
+const sheetCells = Number(query.get('sheet') || 3);
+/** amplitude of per-node density noise (emulates MPM particle-count fluctuation) */
+const noiseAmp = Number(query.get('noise') || 0);
 
 function toHalf(f: number): number {
   // IEEE 754 binary16 with round-to-nearest-even
@@ -95,7 +100,7 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
   const L = GEOMETRY.length;
   const b = GEOMETRY.bankEndMargin;
   const bankCy = GEOMETRY.axisY + R * 0.69;
-  const sheetT = 3 * h;
+  const sheetT = sheetCells * h;
   const sheetMargin = 0.14;
   const a = new Uint16Array(nx * ny * nz * 4);
   const bb = new Uint16Array(nx * ny * nz * 4);
@@ -122,7 +127,14 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
         // the sheet is narrower than the roll: bare metal shows at both ends
         sheet = Math.max(sheet, Math.abs(x - L / 2) - (L / 2 - sheetMargin));
         sd = Math.min(sd, sheet);
-        const dens = Math.min(1, Math.max(0, 0.5 - sd / edge));
+        let dens = Math.min(1, Math.max(0, 0.5 - sd / edge));
+        if (noiseAmp > 0 && dens > 0) {
+          // deterministic per-node hash noise
+          let hsh = (i * 73856093) ^ (j * 19349663) ^ (k * 83492791);
+          hsh = Math.imul(hsh ^ (hsh >>> 13), 0x5bd1e995);
+          hsh ^= hsh >>> 15;
+          dens = Math.min(1, Math.max(0, dens * (1 + noiseAmp * (((hsh >>> 0) / 4294967296) * 2 - 1))));
+        }
         const idx = ((k * ny + j) * nx + i) * 4;
         if (dens > 0) {
           const lat = latentAt(x);

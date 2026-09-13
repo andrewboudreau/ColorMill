@@ -2,9 +2,11 @@
  * RayMarchRenderer — the fullscreen ray-march renderer of design §8.
  *
  * Owns: the canvas configuration, one render pipeline (fullscreen triangle),
- * a uniform buffer (camera ray basis, volume dims, roller poses/angles,
- * lights), a filtering sampler and the bind group that references the
- * render volumes (rebuilt by setVolumes()).
+ * a compute pipeline that rebuilds a coarse max-density mip of the live
+ * volume every frame (empty-space skipping in the march), a uniform buffer
+ * (camera ray basis, volume dims, roller poses/angles, lights, mip dims,
+ * end-guide plates), a filtering sampler and the bind groups that reference
+ * the render volumes (rebuilt by setVolumes()).
  */
 import type { GpuContext } from '../gpu/device';
 import { configureCanvas } from '../gpu/device';
@@ -38,10 +40,10 @@ export function defaultLightRig(): LightRig {
   return {
     keyDir: [0.42, 0.74, 0.52],
     keyColor: [1.0, 0.93, 0.82],
-    keyIntensity: 2.3,
+    keyIntensity: 1.7,
     fillDir: [-0.72, 0.3, 0.55],
     fillColor: [0.6, 0.7, 0.9],
-    fillIntensity: 0.75,
+    fillIntensity: 0.65,
     rimDir: [0.15, 0.55, -0.82],
     rimColor: [0.85, 0.9, 1.0],
     rimIntensity: 1.1,
@@ -49,7 +51,17 @@ export function defaultLightRig(): LightRig {
   };
 }
 
-const UNIFORM_FLOATS = 15 * 4; // 15 vec4f, see Uniforms in raymarch.wgsl
+const UNIFORM_FLOATS = 17 * 4; // 17 vec4f, see Uniforms in raymarch.wgsl
+
+/** Edge length (in texels) of the blocks of the coarse max-density mip used for empty-space skipping. */
+export const MIP_BLOCK = 4;
+/** Workgroup size of the mip compute pass (one invocation per coarse cell), see csMip in raymarch.wgsl. */
+const MIP_WG = 4;
+
+/** Coarse mip dimensions for a volume. */
+export function mipDims(dims: { nx: number; ny: number; nz: number }): [number, number, number] {
+  return [Math.ceil(dims.nx / MIP_BLOCK), Math.ceil(dims.ny / MIP_BLOCK), Math.ceil(dims.nz / MIP_BLOCK)];
+}
 
 function normalize3(v: readonly [number, number, number]): [number, number, number] {
   const l = Math.hypot(v[0], v[1], v[2]) || 1;
@@ -59,6 +71,8 @@ function normalize3(v: readonly [number, number, number]): [number, number, numb
 export class RayMarchRenderer implements Renderer {
   readonly camera: CameraState = defaultCamera();
   readonly lights: LightRig = defaultLightRig();
+  /** Draw the translucent end-guide plates at x = 0 and x = L (design §8, optional). */
+  endGuides = true;
 
   private readonly device: GPUDevice;
   private readonly canvas: HTMLCanvasElement;
@@ -66,7 +80,11 @@ export class RayMarchRenderer implements Renderer {
   private readonly format: GPUTextureFormat;
   private readonly module: GPUShaderModule;
   private readonly pipeline: GPURenderPipeline;
+  private readonly mipPipeline: GPUComputePipeline;
   private readonly uniformBuffer: GPUBuffer;
+  private mipBuffer: GPUBuffer;
+  private mipBindGroup: GPUBindGroup;
+  private mipSize: [number, number, number] = [1, 1, 1];
   private readonly uniformData = new Float32Array(UNIFORM_FLOATS);
   private readonly sampler: GPUSampler;
   private readonly placeholder: GPUTexture;
@@ -93,8 +111,23 @@ export class RayMarchRenderer implements Renderer {
         { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
         { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
-        { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }
+        { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+        { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }
       ]
+    });
+
+    const mipBgl = this.device.createBindGroupLayout({
+      label: 'raymarch-mip-bgl',
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float', viewDimension: '3d' } },
+        { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } }
+      ]
+    });
+    this.mipPipeline = this.device.createComputePipeline({
+      label: 'raymarch-mip-pipeline',
+      layout: this.device.createPipelineLayout({ bindGroupLayouts: [mipBgl] }),
+      compute: { module: this.module, entryPoint: 'csMip' }
     });
 
     this.pipeline = this.device.createRenderPipeline({
@@ -129,8 +162,30 @@ export class RayMarchRenderer implements Renderer {
       format: 'rgba16float',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
     });
+    this.mipBuffer = this.makeMipBuffer(1);
     this.bindGroup = this.makeBindGroup(this.placeholder, this.placeholder);
+    this.mipBindGroup = this.makeMipBindGroup(this.placeholder);
     this.resize();
+  }
+
+  private makeMipBuffer(cells: number): GPUBuffer {
+    return this.device.createBuffer({
+      label: 'raymarch-density-mip',
+      size: Math.max(16, cells * 4),
+      usage: GPUBufferUsage.STORAGE
+    });
+  }
+
+  private makeMipBindGroup(volA: GPUTexture): GPUBindGroup {
+    return this.device.createBindGroup({
+      label: 'raymarch-mip-bg',
+      layout: this.mipPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.uniformBuffer } },
+        { binding: 1, resource: volA.createView({ dimension: '3d' }) },
+        { binding: 5, resource: { buffer: this.mipBuffer } }
+      ]
+    });
   }
 
   /** WGSL compile diagnostics (for the dev harness). */
@@ -146,14 +201,23 @@ export class RayMarchRenderer implements Renderer {
         { binding: 0, resource: { buffer: this.uniformBuffer } },
         { binding: 1, resource: volA.createView({ dimension: '3d' }) },
         { binding: 2, resource: volB.createView({ dimension: '3d' }) },
-        { binding: 3, resource: this.sampler }
+        { binding: 3, resource: this.sampler },
+        { binding: 4, resource: { buffer: this.mipBuffer } }
       ]
     });
   }
 
   setVolumes(volumes: RenderVolumes): void {
     this.volumes = volumes;
+    const m = mipDims(volumes.dims);
+    const cells = m[0] * m[1] * m[2];
+    if (cells !== this.mipSize[0] * this.mipSize[1] * this.mipSize[2] || this.mipBuffer.size < cells * 4) {
+      this.mipBuffer.destroy();
+      this.mipBuffer = this.makeMipBuffer(cells);
+    }
+    this.mipSize = m;
     this.bindGroup = this.makeBindGroup(volumes.volA, volumes.volB);
+    this.mipBindGroup = this.makeMipBindGroup(volumes.volA);
   }
 
   resize(): boolean {
@@ -205,11 +269,28 @@ export class RayMarchRenderer implements Renderer {
     set4(12, rd[0], rd[1], rd[2], L.rimIntensity);
     set4(13, L.rimColor[0], L.rimColor[1], L.rimColor[2], 0);
     set4(14, w, hgt, L.exposure, flags);
+    const m = this.mipSize;
+    set4(15, m[0], m[1], m[2], MIP_BLOCK);
+    // end-guide plates: plate top (a little above the settled bank), half depth in z, thickness, enabled
+    const guideTop = GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight * 0.75;
+    set4(16, guideTop, GEOMETRY.bankHalfDepth, 0.012, this.endGuides ? 1 : 0);
     this.device.queue.writeBuffer(this.uniformBuffer, 0, u);
+  }
+
+  /** Rebuild the coarse max-density mip from the live volume (design §8: empty-space skipping). */
+  private encodeMipPass(encoder: GPUCommandEncoder): void {
+    if (!this.volumes) return;
+    const m = this.mipSize;
+    const pass = encoder.beginComputePass({ label: 'raymarch-density-mip' });
+    pass.setPipeline(this.mipPipeline);
+    pass.setBindGroup(0, this.mipBindGroup);
+    pass.dispatchWorkgroups(Math.ceil(m[0] / MIP_WG), Math.ceil(m[1] / MIP_WG), Math.ceil(m[2] / MIP_WG));
+    pass.end();
   }
 
   private encodePass(encoder: GPUCommandEncoder, info: RenderFrameInfo, view: GPUTextureView, w: number, h: number): void {
     this.writeUniforms(info, w, h);
+    this.encodeMipPass(encoder);
     const pass = encoder.beginRenderPass({
       label: 'raymarch-pass',
       colorAttachments: [{ view, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }]
@@ -297,6 +378,7 @@ export class RayMarchRenderer implements Renderer {
     if (this.destroyed) return;
     this.destroyed = true;
     this.uniformBuffer.destroy();
+    this.mipBuffer.destroy();
     this.placeholder.destroy();
     this.offscreen?.destroy();
     this.offscreen = null;

@@ -23,3 +23,8 @@ web:
 
 clean:
 	rm -rf $(BUILD_DIR) $(DIST_DIR)
+
+# CPU reference of the v2 mill physics (docs/design-v2.md); see docs/millref-notes.md
+ref:
+	mkdir -p $(BUILD_DIR)
+	cc -O2 -std=gnu99 -Wall -Wextra -fopenmp -Isrc src/sim/millref.c tools/millref_main.c -o $(BUILD_DIR)/millref -lm

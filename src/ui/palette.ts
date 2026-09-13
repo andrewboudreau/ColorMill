@@ -49,6 +49,7 @@ export class Palette {
       b.addEventListener('click', () => {
         this.flash(b);
         this.cb.onPigment(key);
+        b.blur(); // keep Space/Enter for the viewport shortcuts, not a re-click
       });
       swatches.appendChild(b);
       this.swatches.set(key, b);
@@ -95,7 +96,7 @@ export class Palette {
     b.className = 'cm-btn';
     b.textContent = label;
     if (key) b.title = `${label} (${key})`;
-    b.addEventListener('click', onClick);
+    b.addEventListener('click', () => { onClick(); b.blur(); });
     parent.appendChild(b);
     return b;
   }

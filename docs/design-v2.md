@@ -89,8 +89,11 @@ readback helper `GpuMpmSim.readParticles()` must return the layout in
 | pad | to 32 floats |
 
 All particles have equal mass `pMass = 1` and equal rest volume
-`pVol = h³ / 8`. Density is thus ρ = 8/h³ per unit volume — the constants
-below are already expressed so that ρ cancels; do not "fix" this.
+`pVol = h³ / 8` for the grid transfers. The material constants of §4 are
+expressed for a **unit density (ρ = 1)** material, so the P2G stress term is
+scaled by `pMass / (pVol · ρ)` with ρ = 1 (`MATERIAL_DENSITY` in
+`src/sim/mpm.ts`); this keeps `dt < ~0.4·h/√E` meaningful and the bank
+self-supporting. The v1 solver used the same convention.
 
 ---
 
@@ -288,6 +291,12 @@ Exposed as `GpuMpmSim.cutAndFold()`. The UI has a "Cut & fold" button.
 Simulated time per rendered frame is `dt·substepsPerFrame` (≈13 ms at
 `high`), so at 60 fps the mill runs at ~0.8× real time. Show the resulting
 "sim speed" in the HUD; do not vary substeps with frame time (determinism).
+Everything rate-dependent (dispersion included) advances by sim time, never
+by wall-clock frame time.
+
+The app also steps the preset **down** automatically when the average frame
+time stays above 45 ms for 3 s, unless the preset was pinned by the user or
+the URL.
 
 The app auto-selects `medium` when `navigator.gpu` adapter info says the
 architecture is not a discrete class (or `low` on mobile user agents) and

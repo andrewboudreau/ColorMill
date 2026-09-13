@@ -106,6 +106,8 @@ export class Panel {
         value.textContent = spec.format(v);
         this.cb.onParam(spec.key, v);
       });
+      // after a drag, give the keyboard back to the viewport shortcuts
+      input.addEventListener('change', () => input.blur());
       value.textContent = spec.format(initial.params[spec.key]);
       field.append(row, input);
       params.appendChild(field);

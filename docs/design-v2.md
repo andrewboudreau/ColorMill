@@ -258,22 +258,29 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
 
 ---
 
-## 6. Operator: cut & fold (phase 2, after the core runs)
+## 6. Operator: cut & fold (implemented)
 
 A real operator cuts the sheet on the front roll and folds it across the
 mill to mix along x (there is no axial transport otherwise). Model it as a
 scripted kinematic move over `T = 1.2 s`:
 
-1. Select particles on the front roller sheet with `x < 0.75·L` and
-   `d < R + 3h` from the front axis and `z > zNip` (the visible sheet).
-2. Mark them kinematic. Give each a start pose `p0` and a target pose `p1`
-   = the bank top at `x + 0.25·L` (wrapping onto the bank surface,
-   `y = bankTop + small`, `z = zNip`), and move them along a raised arc
-   `p(t) = lerp(p0,p1,s) + up·sin(π s)·0.25`, `s = smoothstep(t/T)`, with `v`
-   set to the analytical derivative.
-3. At the end clear the kinematic flag; set `C = 0`, `F = I`.
+1. Select particles on the front roller sheet with `x < 0.75·L`,
+   `d < R + 3h` from the front axis, and `y < axisY` or `z > frontAxisZ`
+   (the visible sheet; never the nip channel).
+2. Parameterise each by `(x, t = d − R, θ)` with θ the angle around the
+   front axis from the nip, and map it onto a slab lying on the bank so the
+   sheet keeps its shape: `x1 = x + 0.25·L` (clamped to the guides),
+   `y1 = bankTop + t + h/2`, `z1 = zNip + 0.6·(θ·R − arcMid)`. `bankTop` is
+   the *live* bank top: the select kernel atomically maxes the y of bank
+   particles (|z − zNip| < bankHalfDepth, above the roller tops, in a node
+   with raster mass ≥ 2), so the slab lands on the bank as it is, not as it
+   was seeded. Move along a raised arc
+   `p(s) = lerp(p0,p1,s) + up·sin(π s)·0.25`, `s = smoothstep(t/T)`, with `v`
+   the analytical derivative and the lift clamped below the ceiling.
+3. On release keep `F` (the sheet's strain history), set `C = 0` and `v` to
+   the scripted end velocity, and rebuild the P2G affine term.
 
-Exposed as `GpuMpmSim.cutAndFold()`. The UI has a "Cut & fold" button.
+Exposed as `GpuMpmSim.cutAndFold()`. The UI has a "Cut & fold" button (F).
 
 ---
 

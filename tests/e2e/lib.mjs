@@ -45,11 +45,23 @@ export async function launchBrowser() {
   });
 }
 
+/** Pick a free TCP port on localhost. */
+export async function freePort() {
+  const { createServer } = await import('node:net');
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.unref();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => resolve(port)); });
+  });
+}
+
 /**
  * Start `vite` (dev) or `vite preview` (after a build) on a free port.
  * Resolves with { baseUrl, stop }.
  */
-export async function startServer({ mode = process.env.E2E_MODE || 'dev', port = 5179 } = {}) {
+export async function startServer({ mode = process.env.E2E_MODE || 'dev', port = 0 } = {}) {
+  if (!port) port = await freePort();
   const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
   const args = mode === 'preview' ? [viteBin, 'preview', '--port', String(port), '--strictPort'] : [viteBin, '--port', String(port), '--strictPort'];
   const child = spawn(process.execPath, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...process.env, BROWSER: 'none' } });
@@ -58,15 +70,17 @@ export async function startServer({ mode = process.env.E2E_MODE || 'dev', port =
   child.stderr.on('data', (d) => { out += d.toString(); });
   const base = mode === 'preview' ? `http://127.0.0.1:${port}/ColorMill/` : `http://127.0.0.1:${port}/ColorMill/`;
   const deadline = Date.now() + 30000;
-  while (Date.now() < deadline) {
+  let exited = false;
+  child.once('exit', () => { exited = true; });
+  while (Date.now() < deadline && !exited) {
     try {
       const r = await fetch(base);
       if (r.ok || r.status === 404) break;
     } catch { /* not up yet */ }
     await new Promise((r) => setTimeout(r, 200));
   }
-  if (Date.now() >= deadline) {
-    child.kill();
+  if (exited || Date.now() >= deadline) {
+    try { process.kill(-child.pid, 'SIGTERM'); } catch { /* already gone */ }
     throw new Error('vite did not start:\n' + out);
   }
   return {

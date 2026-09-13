@@ -63,6 +63,8 @@ export interface GpuMpmSim {
   /** live parameters; mutate then call step() (uploaded each step) */
   readonly params: MillParams;
   readonly stats: SimStats;
+  /** Resolves once every pipeline compiled cleanly; rejects with the WGSL/pipeline errors. */
+  readonly ready: Promise<void>;
   paused: boolean;
 
   /** Advance substepsPerFrame substeps and refresh the render volumes. Encodes into `encoder`; the caller submits. */

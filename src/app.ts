@@ -372,6 +372,12 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     await nextPaint();
     try {
       const next = opts.makeSim(device, buildConfig(p, old.params));
+      try {
+        await next.ready;
+      } catch (e) {
+        next.destroy();
+        throw e;
+      }
       next.paused = old.paused;
       renderer.setVolumes(next.volumes);
       sim = next;
@@ -400,6 +406,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   await nextPaint();
   try {
     sim = opts.makeSim(device, buildConfig(preset, DEFAULT_PARAMS));
+    await sim.ready;
     sim.paused = startPaused;
   } catch (e) {
     reportError('Could not build the simulation', e);

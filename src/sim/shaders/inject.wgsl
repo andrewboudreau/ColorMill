@@ -1,5 +1,7 @@
 // Inject (design §5): blend a pigment latent into particles inside a sphere,
-// z = mix(z, zPigment, strength * t), t = 1 - |d| / radius.
+// z = mix(z, zPigment, strength * t): a solid core (t = 1 for |d| < 0.6 r)
+// with a linear falloff to the edge, so a tap reads as a dollop of
+// concentrated masterbatch rather than a faint tint.
 // mode 1 = set every particle (clearPigment / reset base colour).
 struct Inject {
   // center xyz, radius
@@ -26,7 +28,8 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
     let x = vec3<f32>(pos[3u * p], pos[3u * p + 1u], pos[3u * p + 2u]);
     let d = length(x - I.center.xyz);
     if (d >= I.center.w) { return; }
-    a = clamp(I.lat1.w * (1.0 - d / I.center.w), 0.0, 1.0);
+    let t = clamp((1.0 - d / I.center.w) / 0.4, 0.0, 1.0);
+    a = clamp(I.lat1.w * t, 0.0, 1.0);
   }
   for (var c = 0u; c < 7u; c++) {
     let z = lat[7u * p + c];

@@ -57,7 +57,7 @@ declare global {
 }
 
 const PRESETS: readonly QualityPreset[] = ['low', 'medium', 'high', 'ultra'];
-const PIGMENT_RADIUS = 0.09;
+const PIGMENT_RADIUS = 0.1;
 const AUTO_ORBIT_RATE = 0.12; // rad/s
 const STATS_WINDOW = 60;
 /** Adaptive quality: step the preset down when frames average above this for a sustained period. */
@@ -200,7 +200,8 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     if (!sim) return;
     const L = GEOMETRY.length;
     const x = 0.15 + Math.random() * (L - 0.3);
-    const y = GEOMETRY.axisY + GEOMETRY.radius + 0.12;
+    // a dollop on top of the bank, sitting over the nip so the rollers draw it in
+    const y = GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight - 0.03;
     const z = GEOMETRY.nipZ;
     try {
       sim.addPigment([x, y, z], PIGMENT_RADIUS, latent);

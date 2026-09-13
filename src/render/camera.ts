@@ -36,9 +36,9 @@ export const CAMERA_LIMITS: CameraLimits = {
 export function defaultCamera(): CameraState {
   return {
     yaw: 0.0,
-    pitch: 0.5,
-    distance: 3.0,
-    target: [GEOMETRY.length / 2, GEOMETRY.axisY + 0.05, GEOMETRY.nipZ],
+    pitch: 0.62,
+    distance: 2.9,
+    target: [GEOMETRY.length / 2, GEOMETRY.axisY + 0.12, GEOMETRY.nipZ],
     fovY: (40 * Math.PI) / 180
   };
 }

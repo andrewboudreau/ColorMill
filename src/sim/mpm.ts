@@ -2,12 +2,15 @@
  * ColorMill v2 — WebGPU compute MLS-MPM solver for the two-roll mill.
  * Implements GpuMpmSim (src/sim/types.ts) per docs/design-v2.md §1–§7.
  *
- * Storage is structure-of-arrays (flat f32 buffers): positions (3), velocities
- * (3), C (9, row-major), F (9, row-major), Cauchy stress of the current F
- * (9, row-major; produced by g2p so p2g does not repeat the SVD), latent (7),
- * flags (u32) and the cut-and-fold start pose (4). Grid accumulators are i32
- * fixed point (mass 2^20, momentum 2^16, latent·mass 2^18) plus an f32
- * velocity grid. The render volume is two rgba16float 3D storage textures.
+ * Storage is structure-of-arrays: positions and velocities as vec4 (xyz + pad,
+ * one 16-byte load each), C (9, row-major), F (9, row-major), the premultiplied
+ * P2G affine matrix −dt·pVol·(4/h²)·stressScale·τ + pMass·C (9, row-major;
+ * produced by g2p so p2g reads one matrix and repeats no SVD), latent (7),
+ * flags (u32) and the cut-and-fold start pose (vec4: p0 + arc). Grid
+ * accumulators are i32 fixed point (mass 2^20, momentum 2^16, latent·mass 2^18)
+ * plus a vec4 f32 velocity grid. The render volume is two rgba16float 3D
+ * storage textures. readParticles() converts the vec4 arrays back to the
+ * xyz-interleaved ParticleSnapshot layout.
  */
 import {
   GEOMETRY, gridDims, lameParameters, rollerPoses, seedBankPositions,
@@ -39,6 +42,8 @@ const UNIFORM_STRIDE = 256;
 /** Cut & fold script length (design §6). */
 export const FOLD_DURATION = 1.2;
 export const FOLD_LIFT = 0.25;
+/** Arc length along the front roll -> z on the bank (the unrolled sheet is compressed by this factor). */
+export const FOLD_Z_SCALE = 0.6;
 /**
  * Reference material density. The stress force in P2G is scaled by
  * pMass / (pVol * MATERIAL_DENSITY) so that the elastic constants of §4 act
@@ -113,10 +118,12 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufVel: GPUBuffer;
   private readonly bufC: GPUBuffer;
   private readonly bufF: GPUBuffer;
-  private readonly bufS: GPUBuffer;
+  private readonly bufAff: GPUBuffer;
   private readonly bufLat: GPUBuffer;
   private readonly bufFlags: GPUBuffer;
   private readonly bufFold: GPUBuffer;
+  /** cut & fold reductions (live bank top, arc range, count); zeroed on the CPU before each selection */
+  private readonly bufFoldInfo: GPUBuffer;
   // grid
   private readonly bufGMass: GPUBuffer;
   private readonly bufGMom: GPUBuffer;
@@ -167,17 +174,18 @@ export class GpuMpm implements GpuMpmSim {
 
     const mk = (floats: number, extra = 0): GPUBuffer =>
       device.createBuffer({ size: floats * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC | extra });
-    this.bufPos = mk(3 * n);
-    this.bufVel = mk(3 * n);
+    this.bufPos = mk(4 * n);
+    this.bufVel = mk(4 * n);
     this.bufC = mk(9 * n);
     this.bufF = mk(9 * n);
-    this.bufS = mk(9 * n);
+    this.bufAff = mk(9 * n);
     this.bufLat = mk(7 * n);
     this.bufFlags = mk(n);
     this.bufFold = mk(4 * n);
+    this.bufFoldInfo = mk(4);
     this.bufGMass = mk(d.nodeCount);
     this.bufGMom = mk(3 * d.nodeCount);
-    this.bufGVel = mk(3 * d.nodeCount);
+    this.bufGVel = mk(4 * d.nodeCount);
     this.bufPMass = mk(d.nodeCount);
     this.bufPLat = mk(7 * d.nodeCount);
 
@@ -287,7 +295,8 @@ export class GpuMpm implements GpuMpmSim {
     const foldMod = mod('fold', foldSrc);
     const injectMod = mod('inject', injectSrc);
     const clearRes = [rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGVel), rw(this.bufPMass), rw(this.bufPLat)];
-    const foldRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufS), rw(this.bufFlags), rw(this.bufFold)];
+    const foldRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags), rw(this.bufFold),
+      rw(this.bufFoldInfo), ro(this.bufPMass)];
     const volAView = this.volA.createView({ dimension: '3d' });
     const volBView = this.volB.createView({ dimension: '3d' });
 
@@ -295,10 +304,10 @@ export class GpuMpm implements GpuMpmSim {
       clearGrid: this.makeKernel('clearGrid', clearMod, 'clearGrid', clearRes),
       clearRaster: this.makeKernel('clearRaster', clearMod, 'clearRaster', clearRes),
       p2g: this.makeKernel('p2g', mod('p2g', p2gSrc), 'main',
-        [ro(this.bufPos), ro(this.bufVel), ro(this.bufC), ro(this.bufS), ro(this.bufFlags), rw(this.bufGMass), rw(this.bufGMom)]),
+        [ro(this.bufPos), ro(this.bufVel), ro(this.bufAff), ro(this.bufFlags), rw(this.bufGMass), rw(this.bufGMom)]),
       grid: this.makeKernel('grid', mod('grid', gridSrc), 'main', [ro(this.bufGMass), ro(this.bufGMom), rw(this.bufGVel)]),
       g2p: this.makeKernel('g2p', mod('g2p', g2pSrc), 'main',
-        [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufS), ro(this.bufFlags), ro(this.bufGVel)]),
+        [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), ro(this.bufFlags), ro(this.bufGVel)]),
       raster: this.makeKernel('raster', mod('raster', rasterSrc), 'main',
         [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat)]),
       disperse: this.makeKernel('disperse', mod('disperse', disperseSrc), 'main',
@@ -308,7 +317,7 @@ export class GpuMpm implements GpuMpmSim {
       inject: this.makeKernel('inject', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInject }, ro(this.bufPos), rw(this.bufLat)]),
       injectAll: this.makeKernel('injectAll', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInjectAll }, ro(this.bufPos), rw(this.bufLat)]),
       reset: this.makeKernel('reset', mod('reset', resetSrc), 'main',
-        [rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufS), rw(this.bufFlags)]),
+        [rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags)]),
       foldSelect: this.makeKernel('foldSelect', foldMod, 'select_', foldRes),
       foldMove: this.makeKernel('foldMove', foldMod, 'move_', foldRes),
       foldFinish: this.makeKernel('foldFinish', foldMod, 'finish_', foldRes)
@@ -335,7 +344,13 @@ export class GpuMpm implements GpuMpmSim {
 
   private uploadInitialState(): void {
     const q = this.device.queue;
-    q.writeBuffer(this.bufPos, 0, this.seeds);
+    const pos4 = new Float32Array(4 * Math.max(this.count, 1));
+    for (let i = 0; i < this.count; i++) {
+      pos4[4 * i] = this.seeds[3 * i];
+      pos4[4 * i + 1] = this.seeds[3 * i + 1];
+      pos4[4 * i + 2] = this.seeds[3 * i + 2];
+    }
+    q.writeBuffer(this.bufPos, 0, pos4);
     // "set all" inject uniform: white base
     const inj = new Float32Array(16);
     inj.set([0, 0, 0, 1e9], 0);
@@ -343,7 +358,7 @@ export class GpuMpm implements GpuMpmSim {
     inj.set([WHITE_LATENT[4], WHITE_LATENT[5], WHITE_LATENT[6], 1], 8);
     new Uint32Array(inj.buffer)[12] = 1;
     q.writeBuffer(this.bufInjectAll, 0, inj);
-    this.writeParams(0, this.quality.dt, 0);
+    this.writeParams(0, 0);
     q.writeBuffer(this.bufParams, 0, this.paramsData, 0, (UNIFORM_STRIDE / 4) * this.uniformSlots);
 
     const enc = this.device.createCommandEncoder({ label: 'GpuMpm-init' });
@@ -359,8 +374,12 @@ export class GpuMpm implements GpuMpmSim {
   // uniforms
   // ---------------------------------------------------------------------------
 
-  /** Fill uniform slot `slot` (fold state: s and ds/dt for that substep). */
-  private writeParams(slot: number, frameDt: number, foldT: number, foldActive = false): void {
+  /**
+   * Fill uniform slot `slot` (fold state: s and ds/dt for that substep). All
+   * time-dependent physics uses the fixed substep dt; the per-frame kernels
+   * (dispersion) use dt * substepsPerFrame, never the wall-clock frame time.
+   */
+  private writeParams(slot: number, foldT: number, foldActive = false): void {
     const d = this.dims;
     const q = this.quality;
     const p = this.params;
@@ -374,16 +393,19 @@ export class GpuMpm implements GpuMpmSim {
     const u = this.paramsU32;
     u[o + 0] = d.nx; u[o + 1] = d.ny; u[o + 2] = d.nz; u[o + 3] = this.count;
     f.set([h, 1 / h, q.dt, p.gravity], o + 4);
-    f.set([GEOMETRY.domain[0], GEOMETRY.domain[1], GEOMETRY.domain[2], frameDt], o + 8);
+    f.set([GEOMETRY.domain[0], GEOMETRY.domain[1], GEOMETRY.domain[2], q.dt * q.substepsPerFrame], o + 8);
     f.set([back.axisY, back.axisZ, back.omegaX, p.backFriction], o + 12);
     f.set([front.axisY, front.axisZ, front.omegaX, GEOMETRY.radius], o + 16);
     f.set([mu, lambda, this.config.material.thetaC, this.config.material.thetaS], o + 20);
     f.set([pVol, pMass, pMass / (pVol * MATERIAL_DENSITY), p.dispersion], o + 24);
     const fp = foldProfile(foldT, FOLD_DURATION);
     f.set([foldActive ? 1 : 0, fp.s, fp.dsdt, FOLD_LIFT], o + 28);
-    const bankTop = GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight + 2 * h;
-    f.set([bankTop, GEOMETRY.length, 0.25 * GEOMETRY.length, GEOMETRY.nipZ], o + 32);
+    // fold: the live bank top is reduced on the GPU (fold.wgsl); fold2.x is only the fallback
+    const yMax = GEOMETRY.domain[1] - 3 * h;
+    const bankTopFallback = Math.min(GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight, yMax);
+    f.set([bankTopFallback, GEOMETRY.length, 0.25 * GEOMETRY.length, GEOMETRY.nipZ], o + 32);
     f.set([1.5 * h, 0.5 * h, 2 * h, 0.6], o + 36);
+    f.set([GEOMETRY.bankHalfDepth, 0.5 * h, FOLD_Z_SCALE, yMax], o + 40);
   }
 
   // ---------------------------------------------------------------------------
@@ -416,11 +438,17 @@ export class GpuMpm implements GpuMpmSim {
   // ---------------------------------------------------------------------------
 
   step(encoder: GPUCommandEncoder, frameDtSeconds: number): void {
+    // frameDtSeconds is part of the interface (the app's wall-clock frame time)
+    // but the physics is fixed-step: nothing below depends on it.
+    void frameDtSeconds;
     if (this.destroyed) return;
     this.pollTimestamps();
+    // paused: no uniform write, no substeps, no raster/disperse/pack, no timestamps
+    // (addPigment / clearPigment / reset re-raster themselves).
+    if (this.paused) return;
     const q = this.quality;
     const k = this.kernels;
-    const substeps = this.paused ? 0 : q.substepsPerFrame;
+    const substeps = q.substepsPerFrame;
     const frameSlot = q.substepsPerFrame;
     const { back, front } = rollerPoses(this.params);
 
@@ -429,20 +457,24 @@ export class GpuMpm implements GpuMpmSim {
     let foldT = this.foldPending ? 0 : this.foldTime;
     const finishAt: number[] = [];
     for (let s = 0; s < substeps; s++) {
-      this.writeParams(s, frameDtSeconds, foldT, foldActive);
+      this.writeParams(s, foldT, foldActive);
       if (foldActive) {
         foldT += q.dt;
         if (foldT >= FOLD_DURATION) { finishAt.push(s); foldActive = false; }
       }
     }
-    this.writeParams(frameSlot, frameDtSeconds, foldT, foldActive);
+    this.writeParams(frameSlot, foldT, foldActive);
     this.device.queue.writeBuffer(this.bufParams, 0, this.paramsData, 0, (UNIFORM_STRIDE / 4) * this.uniformSlots);
+    if (this.foldPending) {
+      // reductions: [0] max bank y (atomicMax on float bits), [1] max arc, [2] min arc (atomicMin), [3] count
+      this.device.queue.writeBuffer(this.bufFoldInfo, 0, new Uint32Array([0, 0, 0xffffffff, 0]));
+    }
 
     const timestampWrites: GPUComputePassTimestampWrites | undefined = this.querySet
       ? { querySet: this.querySet, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 }
       : undefined;
     const pass = encoder.beginComputePass({ label: 'GpuMpm-step', timestampWrites });
-    if (this.foldPending && substeps > 0) {
+    if (this.foldPending) {
       this.dispatchParticles(pass, k.foldSelect, 0);
       this.foldPending = false;
       this.foldActive = true;
@@ -462,7 +494,7 @@ export class GpuMpm implements GpuMpmSim {
         }
       }
     }
-    this.encodeFrameKernels(pass, frameSlot, substeps > 0);
+    this.encodeFrameKernels(pass, frameSlot, true);
     pass.end();
 
     if (this.querySet && this.queryResolve) {
@@ -474,13 +506,11 @@ export class GpuMpm implements GpuMpmSim {
       }
     }
 
-    if (substeps > 0) {
-      const st = this.statsData;
-      st.simTime += q.dt * substeps;
-      st.rollerAngleFront += front.omegaX * q.dt * substeps;
-      st.rollerAngleBack += back.omegaX * q.dt * substeps;
-      st.simSecondsPerFrame = q.dt * q.substepsPerFrame;
-    }
+    const st = this.statsData;
+    st.simTime += q.dt * substeps;
+    st.rollerAngleFront += front.omegaX * q.dt * substeps;
+    st.rollerAngleBack += back.omegaX * q.dt * substeps;
+    st.simSecondsPerFrame = q.dt * q.substepsPerFrame;
   }
 
   /** Map any staging buffer whose copy has been submitted (called at the start of the next step). */
@@ -491,10 +521,12 @@ export class GpuMpm implements GpuMpmSim {
       slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
         if (this.destroyed) return;
         const ts = new BigUint64Array(slot.buffer.getMappedRange());
-        const ns = Number(ts[1] - ts[0]);
+        // an end stamp below the start stamp (timer reset / unordered stamps) is not a sample
+        const valid = ts[1] >= ts[0];
+        const ns = valid ? Number(ts[1] - ts[0]) : NaN;
         slot.buffer.unmap();
         slot.state = 'free';
-        if (Number.isFinite(ns) && ns >= 0) this.statsData.lastStepGpuMs = ns / 1e6;
+        if (valid && Number.isFinite(ns)) this.statsData.lastStepGpuMs = ns / 1e6;
       }).catch(() => { slot.state = 'free'; });
     }
   }
@@ -543,7 +575,8 @@ export class GpuMpm implements GpuMpmSim {
 
   async readParticles(): Promise<ParticleSnapshot> {
     const n = this.count;
-    const sizes = [3 * n, 3 * n, 7 * n, 9 * n, n].map((f) => f * 4);
+    // positions / velocities are vec4 on the GPU; the snapshot is xyz-interleaved
+    const sizes = [4 * n, 4 * n, 7 * n, 9 * n, n].map((f) => f * 4);
     const total = sizes.reduce((a, b) => a + b, 0);
     if (!this.readbackStaging || this.readbackStaging.size < total) {
       this.readbackStaging?.destroy();
@@ -561,10 +594,16 @@ export class GpuMpm implements GpuMpmSim {
     const bytes = staging.getMappedRange(0, Math.max(total, 16));
     off = 0;
     const take = (size: number): ArrayBuffer => { const s = bytes.slice(off, off + size); off += size; return s; };
+    const strip = (buf: ArrayBuffer): Float32Array => {
+      const v4 = new Float32Array(buf);
+      const v3 = new Float32Array(3 * n);
+      for (let i = 0; i < n; i++) { v3[3 * i] = v4[4 * i]; v3[3 * i + 1] = v4[4 * i + 1]; v3[3 * i + 2] = v4[4 * i + 2]; }
+      return v3;
+    };
     const snap: ParticleSnapshot = {
       count: n,
-      positions: new Float32Array(take(sizes[0])),
-      velocities: new Float32Array(take(sizes[1])),
+      positions: strip(take(sizes[0])),
+      velocities: strip(take(sizes[1])),
       latents: new Float32Array(take(sizes[2])),
       deformation: new Float32Array(take(sizes[3])),
       flags: new Uint32Array(take(sizes[4]))
@@ -600,7 +639,7 @@ export class GpuMpm implements GpuMpmSim {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufS, this.bufLat, this.bufFlags, this.bufFold,
+    for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufFold, this.bufFoldInfo,
       this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll]) {
       b.destroy();
     }

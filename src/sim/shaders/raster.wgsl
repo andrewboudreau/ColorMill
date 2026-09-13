@@ -1,7 +1,7 @@
 // Pigment raster (design §3.5): scatter particle mass and mass-weighted latent
 // to the node accumulators used by disperse and pack. Kinematic particles are
 // included (they carry pigment and must be visible).
-@group(0) @binding(1) var<storage, read> pos : array<f32>;
+@group(0) @binding(1) var<storage, read> pos : array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read> lat : array<f32>;
 @group(0) @binding(3) var<storage, read_write> pmass : array<atomic<i32>>;
 @group(0) @binding(4) var<storage, read_write> plat : array<atomic<i32>>;
@@ -12,7 +12,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   if (p >= P.grid.w) { return; }
   let invh = P.hdt.y;
   let pMass = P.part.y;
-  let x = vec3<f32>(pos[3u * p], pos[3u * p + 1u], pos[3u * p + 2u]);
+  let x = pos[p].xyz;
   var z : array<f32, 7>;
   for (var c = 0u; c < 7u; c++) { z[c] = lat[7u * p + c]; }
 

@@ -65,7 +65,7 @@ export async function startServer({ mode = process.env.E2E_MODE || 'dev', port =
   if (!port) port = await freePort();
   const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
   const args = mode === 'preview' ? [viteBin, 'preview', '--port', String(port), '--strictPort'] : [viteBin, '--port', String(port), '--strictPort'];
-  const child = spawn(process.execPath, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...process.env, BROWSER: 'none' } });
+  const child = spawn(process.execPath, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...process.env, BROWSER: 'none', E2E_NO_HMR: '1' } });
   let out = '';
   child.stdout.on('data', (d) => { out += d.toString(); });
   child.stderr.on('data', (d) => { out += d.toString(); });

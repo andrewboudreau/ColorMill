@@ -75,6 +75,8 @@ function docsPagesPlugin(): Plugin {
 
 export default defineConfig({
   base: '/ColorMill/',
+  // e2e runs set E2E_NO_HMR so concurrent edits cannot reload a page mid-test
+  server: process.env.E2E_NO_HMR ? { hmr: false, watch: null } : undefined,
   plugins: [docsPagesPlugin()],
   build: {
     target: 'es2022'

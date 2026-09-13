@@ -3,7 +3,9 @@
 //
 // Conventions:
 //   * grid node (i,j,k) has index n = (k*NY + j)*NX + i, position (i,j,k)*h
-//   * particle matrices (C, F, stress) are stored row-major in flat f32 arrays:
+//   * particle positions / velocities and the grid velocity are vec4 (xyz + pad)
+//     so a load is one 16-byte transaction instead of three scalar loads.
+//   * particle matrices (C, F, P2G affine) are stored row-major in flat f32 arrays:
 //     buf[p*9 + r*3 + c] = M[r][c] (math notation, row r / column c).
 //     WGSL mat3x3 is column-major: m[c][r] is row r of column c.
 //   * fixed-point grid accumulators: mass 2^20, momentum 2^16, latent 2^18.
@@ -13,7 +15,7 @@ struct Params {
   grid : vec4<u32>,
   // h, 1/h, dt, gravity
   hdt : vec4<f32>,
-  // domain xyz, frameDt
+  // domain xyz, sim seconds advanced this frame (dt * substeps; NOT wall clock)
   domain : vec4<f32>,
   // back roller: axisY, axisZ, omegaX, Coulomb mu
   back : vec4<f32>,
@@ -25,10 +27,13 @@ struct Params {
   part : vec4<f32>,
   // fold script: active (0/1), s, ds/dt, lift height
   fold : vec4<f32>,
-  // fold targets: bankTop y, roller length L, x shift, nip z
+  // fold targets: fallback bankTop y (used when no bank particle was found), roller length L, x shift, nip z
   fold2 : vec4<f32>,
   // tackBand, backBand, wallMargin, floorFriction
   bands : vec4<f32>,
+  // fold slab: bank half depth (z window for the live bank-top estimate), slab clearance above the bank,
+  // arc -> z scale (0.6), max y any folded particle may reach (domain.y - 3h)
+  fold3 : vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> P : Params;
@@ -89,6 +94,21 @@ fn rollerNormal(axisY : f32, axisZ : f32, p : vec3<f32>) -> vec3<f32> {
   return vec3<f32>(0.0, dy / d, dz / d);
 }
 
+/// True for NaN or +-Inf. Tests the exponent bits directly so a fast-math
+/// backend cannot fold the check away (as it may with `x == x` / `!(x > a)`).
+fn isBad(x : f32) -> bool {
+  return (bitcast<u32>(x) & 0x7f800000u) == 0x7f800000u;
+}
+
+fn isBad3(v : vec3<f32>) -> bool {
+  let e = vec3<u32>(0x7f800000u);
+  return any((bitcast<vec3<u32>>(v) & e) == e);
+}
+
+fn isBadMat(m : mat3x3<f32>) -> bool {
+  return isBad3(m[0]) || isBad3(m[1]) || isBad3(m[2]);
+}
+
 fn identity3() -> mat3x3<f32> {
   return mat3x3<f32>(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0));
 }
@@ -140,9 +160,14 @@ fn jacobiRotate(A : ptr<function, mat3x3<f32>>, V : ptr<function, mat3x3<f32>>, 
 fn svd3(F : mat3x3<f32>) -> Svd3 {
   var A = transpose(F) * F;
   var V = identity3();
+  // Relative convergence test: f32 round-off leaves off-diagonals of order
+  // eps * |A| (eps ~ 6e-8, so off ~ 1e-14 * tr^2 at best); 1e-10 * tr^2 lets
+  // an already-diagonal F (the common case, F ~ I) leave after 1-2 sweeps.
+  let tr = A[0][0] + A[1][1] + A[2][2];
+  let tol = 1e-10 * tr * tr;
   for (var sweep = 0; sweep < 8; sweep++) {
     let off = A[1][0] * A[1][0] + A[2][0] * A[2][0] + A[2][1] * A[2][1];
-    if (off < 1e-14) { break; }
+    if (off < tol) { break; }
     jacobiRotate(&A, &V, 0, 1);
     jacobiRotate(&A, &V, 0, 2);
     jacobiRotate(&A, &V, 1, 2);
@@ -178,11 +203,33 @@ fn svd3(F : mat3x3<f32>) -> Svd3 {
   return out;
 }
 
-/// Fixed corotated Cauchy stress (design §4): sigma = (1/J) P F^T with
-/// P = 2mu (F - R) + lambda (J - 1) J F^-T, so sigma = (2mu/J)(F - R)F^T + lambda (J - 1) I.
-fn corotatedStress(F : mat3x3<f32>, R : mat3x3<f32>, J : f32, mu : f32, lambda : f32) -> mat3x3<f32> {
-  let Jc = max(J, 1e-4);
-  let a = (2.0 * mu / Jc) * ((F - R) * transpose(F));
-  let b = lambda * (Jc - 1.0);
+/// Fixed corotated Kirchhoff stress tau = P F^T (design §4 with the MLS-MPM
+/// volume: the P2G force term is V0 * P * F^T, not V0 * sigma):
+/// P = 2mu (F - R) + lambda (J - 1) J F^-T, so tau = 2mu (F - R) F^T + lambda (J - 1) J I.
+fn kirchhoffStress(F : mat3x3<f32>, R : mat3x3<f32>, J : f32, mu : f32, lambda : f32) -> mat3x3<f32> {
+  let a = (2.0 * mu) * ((F - R) * transpose(F));
+  let b = lambda * (J - 1.0) * J;
   return a + mat3x3<f32>(vec3<f32>(b, 0.0, 0.0), vec3<f32>(0.0, b, 0.0), vec3<f32>(0.0, 0.0, b));
+}
+
+/// The matrix P2G multiplies dpos by (design §3.2), premultiplied once in G2P:
+/// affine = -dt * pVol * (4/h^2) * stressScale * tau + pMass * C.
+fn p2gAffine(tau : mat3x3<f32>, C : mat3x3<f32>) -> mat3x3<f32> {
+  let invh = P.hdt.y;
+  let dt = P.hdt.z;
+  return (-dt * P.part.x * 4.0 * invh * invh * P.part.z) * tau + P.part.y * C;
+}
+
+/// Kirchhoff stress of an already plastically-clamped F (SVD inside; used by the
+/// fold release, where G2P has not run for the particle in a while).
+fn kirchhoffStressOf(F : mat3x3<f32>) -> mat3x3<f32> {
+  let d = svd3(F);
+  let Rot = d.U * transpose(d.V);
+  let J = d.S.x * d.S.y * d.S.z;
+  return kirchhoffStress(F, Rot, J, P.mat.x, P.mat.y);
+}
+
+/// Store a mat3x3 row-major into a flat f32 array slot (9 floats per particle).
+fn matRows(m : mat3x3<f32>) -> array<f32, 9> {
+  return array<f32, 9>(m[0][0], m[1][0], m[2][0], m[0][1], m[1][1], m[2][1], m[0][2], m[1][2], m[2][2]);
 }

@@ -1,7 +1,7 @@
 // Grid update (design §3.3): momentum -> velocity, gravity, boundaries.
 @group(0) @binding(1) var<storage, read> gmass : array<i32>;
 @group(0) @binding(2) var<storage, read> gmom : array<i32>;
-@group(0) @binding(3) var<storage, read_write> gvel : array<f32>;
+@group(0) @binding(3) var<storage, read_write> gvel : array<vec4<f32>>;
 
 @compute @workgroup_size(4, 4, 4)
 fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
@@ -57,7 +57,5 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     v.z *= max(0.0, 1.0 - P.bands.w);
   }
 
-  gvel[3u * n] = v.x;
-  gvel[3u * n + 1u] = v.y;
-  gvel[3u * n + 2u] = v.z;
+  gvel[n] = vec4<f32>(v, 0.0);
 }

@@ -13,7 +13,7 @@ struct Inject {
   mode : vec4<u32>,
 };
 @group(0) @binding(1) var<uniform> I : Inject;
-@group(0) @binding(2) var<storage, read> pos : array<f32>;
+@group(0) @binding(2) var<storage, read> pos : array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read_write> lat : array<f32>;
 
 @compute @workgroup_size(128)
@@ -25,7 +25,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   zp[4] = I.lat1.x; zp[5] = I.lat1.y; zp[6] = I.lat1.z;
   var a = 1.0;
   if (I.mode.x == 0u) {
-    let x = vec3<f32>(pos[3u * p], pos[3u * p + 1u], pos[3u * p + 2u]);
+    let x = pos[p].xyz;
     let d = length(x - I.center.xyz);
     if (d >= I.center.w) { return; }
     let t = clamp((1.0 - d / I.center.w) / 0.4, 0.0, 1.0);

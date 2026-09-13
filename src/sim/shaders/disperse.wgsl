@@ -1,6 +1,6 @@
 // Disperse (design §5): shear-driven relaxation of each particle's latent toward
 // the node-averaged latent of its neighbourhood. gamma = ||sym(C)||_F.
-@group(0) @binding(1) var<storage, read> pos : array<f32>;
+@group(0) @binding(1) var<storage, read> pos : array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read> cbuf : array<f32>;
 @group(0) @binding(3) var<storage, read_write> lat : array<f32>;
 @group(0) @binding(4) var<storage, read> pmass : array<i32>;
@@ -13,7 +13,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   if (p >= P.grid.w) { return; }
   if ((flags[p] & 1u) != 0u) { return; }
   let k = P.part.w;
-  let frameDt = P.domain.w;
+  let simDt = P.domain.w;   // sim seconds advanced this frame (dt * substeps), never wall clock
   if (k <= 0.0) { return; }
 
   // shear rate from the APIC velocity gradient
@@ -25,11 +25,11 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   let s02 = 0.5 * (c02 + c20);
   let s12 = 0.5 * (c12 + c21);
   let gamma = sqrt(c00 * c00 + c11 * c11 + c22 * c22 + 2.0 * (s01 * s01 + s02 * s02 + s12 * s12));
-  let alpha = clamp(k * gamma * frameDt, 0.0, 1.0);
+  let alpha = clamp(k * gamma * simDt, 0.0, 1.0);
   if (alpha <= 0.0) { return; }
 
   let invh = P.hdt.y;
-  let x = vec3<f32>(pos[3u * p], pos[3u * p + 1u], pos[3u * p + 2u]);
+  let x = pos[p].xyz;
   let gx = x * invh;
   let base = vec3<i32>(floor(gx - 0.5));
   let fx = gx - vec3<f32>(base);

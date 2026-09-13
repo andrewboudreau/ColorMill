@@ -1,12 +1,13 @@
 // G2P (design §3.4): gather velocity + APIC C, update F, plastic return,
-// stress for the next P2G, advection, clamps, hard roller push-out.
-@group(0) @binding(1) var<storage, read_write> pos : array<f32>;
-@group(0) @binding(2) var<storage, read_write> vel : array<f32>;
+// the premultiplied P2G affine matrix for the next substep, advection,
+// clamps, hard roller push-out.
+@group(0) @binding(1) var<storage, read_write> pos : array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read_write> vel : array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read_write> cbuf : array<f32>;
 @group(0) @binding(4) var<storage, read_write> fbuf : array<f32>;
-@group(0) @binding(5) var<storage, read_write> sbuf : array<f32>;
+@group(0) @binding(5) var<storage, read_write> abuf : array<f32>;   // P2G affine (read by p2g)
 @group(0) @binding(6) var<storage, read> flags : array<u32>;
-@group(0) @binding(7) var<storage, read> gvel : array<f32>;
+@group(0) @binding(7) var<storage, read> gvel : array<vec4<f32>>;
 
 fn loadMatF(p : u32) -> mat3x3<f32> {
   let b = p * 9u;
@@ -14,29 +15,6 @@ fn loadMatF(p : u32) -> mat3x3<f32> {
     vec3<f32>(fbuf[b], fbuf[b + 3u], fbuf[b + 6u]),
     vec3<f32>(fbuf[b + 1u], fbuf[b + 4u], fbuf[b + 7u]),
     vec3<f32>(fbuf[b + 2u], fbuf[b + 5u], fbuf[b + 8u]));
-}
-fn storeMatC(p : u32, m : mat3x3<f32>) {
-  let b = p * 9u;
-  cbuf[b] = m[0][0]; cbuf[b + 1u] = m[1][0]; cbuf[b + 2u] = m[2][0];
-  cbuf[b + 3u] = m[0][1]; cbuf[b + 4u] = m[1][1]; cbuf[b + 5u] = m[2][1];
-  cbuf[b + 6u] = m[0][2]; cbuf[b + 7u] = m[1][2]; cbuf[b + 8u] = m[2][2];
-}
-fn storeMatF(p : u32, m : mat3x3<f32>) {
-  let b = p * 9u;
-  fbuf[b] = m[0][0]; fbuf[b + 1u] = m[1][0]; fbuf[b + 2u] = m[2][0];
-  fbuf[b + 3u] = m[0][1]; fbuf[b + 4u] = m[1][1]; fbuf[b + 5u] = m[2][1];
-  fbuf[b + 6u] = m[0][2]; fbuf[b + 7u] = m[1][2]; fbuf[b + 8u] = m[2][2];
-}
-fn storeMatS(p : u32, m : mat3x3<f32>) {
-  let b = p * 9u;
-  sbuf[b] = m[0][0]; sbuf[b + 1u] = m[1][0]; sbuf[b + 2u] = m[2][0];
-  sbuf[b + 3u] = m[0][1]; sbuf[b + 4u] = m[1][1]; sbuf[b + 5u] = m[2][1];
-  sbuf[b + 6u] = m[0][2]; sbuf[b + 7u] = m[1][2]; sbuf[b + 8u] = m[2][2];
-}
-
-fn isFinite3(v : vec3<f32>) -> bool {
-  let a = abs(v);
-  return all(a < vec3<f32>(1e30)) && all(v == v);
 }
 
 fn pushOut(axisY : f32, axisZ : f32, R : f32, x : vec3<f32>, h : f32) -> vec3<f32> {
@@ -58,7 +36,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   let invh = P.hdt.y;
   let dt = P.hdt.z;
 
-  var x = vec3<f32>(pos[3u * p], pos[3u * p + 1u], pos[3u * p + 2u]);
+  var x = pos[p].xyz;
   let gx = x * invh;
   let base = vec3<i32>(floor(gx - 0.5));
   let fx = gx - vec3<f32>(base);
@@ -74,8 +52,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
         let off = vec3<i32>(i, j, k);
         let dpos = (vec3<f32>(off) - fx) * h;
         let wgt = wx[i] * wy[j] * wz[k];
-        let n = nodeIndexI(base + off);
-        let gv = vec3<f32>(gvel[3u * n], gvel[3u * n + 1u], gvel[3u * n + 2u]);
+        let gv = gvel[nodeIndexI(base + off)].xyz;
         v += wgt * gv;
         // outer(gv, dpos): column c = gv * dpos[c]  (B[r][c] = gv_r * dpos_c)
         B += wgt * mat3x3<f32>(gv * dpos.x, gv * dpos.y, gv * dpos.z);
@@ -87,7 +64,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   // deformation gradient update + plastic return (design §4)
   var F = (identity3() + dt * C) * loadMatF(p);
   var J = det3(F);
-  if (!(J > 1e-6) || !(J < 1e6) || !isFinite3(F[0]) || !isFinite3(F[1]) || !isFinite3(F[2])) {
+  if (isBad(J) || J < 1e-6 || J > 1e6 || isBadMat(F)) {
     F = identity3();
   }
   var d = svd3(F);
@@ -96,10 +73,11 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   F = d.U * Sig * transpose(d.V);
   let Rot = d.U * transpose(d.V);
   J = d.S.x * d.S.y * d.S.z;
-  let sigma = corotatedStress(F, Rot, J, P.mat.x, P.mat.y);
+  let tau = kirchhoffStress(F, Rot, J, P.mat.x, P.mat.y);
+  let affine = p2gAffine(tau, C);
 
   // advection, clamp, hard push-out of the rollers
-  if (!isFinite3(v)) { v = vec3<f32>(0.0); }
+  if (isBad3(v)) { v = vec3<f32>(0.0); }
   x += dt * v;
   let lo = vec3<f32>(1.5 * h);
   let hi = P.domain.xyz - lo;
@@ -109,9 +87,15 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   x = pushOut(P.back.x, P.back.y, R, x, h);
   x = clamp(x, lo, hi);
 
-  pos[3u * p] = x.x; pos[3u * p + 1u] = x.y; pos[3u * p + 2u] = x.z;
-  vel[3u * p] = v.x; vel[3u * p + 1u] = v.y; vel[3u * p + 2u] = v.z;
-  storeMatC(p, C);
-  storeMatF(p, F);
-  storeMatS(p, sigma);
+  pos[p] = vec4<f32>(x, 0.0);
+  vel[p] = vec4<f32>(v, 0.0);
+  let cr = matRows(C);
+  let fr = matRows(F);
+  let ar = matRows(affine);
+  let b = 9u * p;
+  for (var c = 0u; c < 9u; c++) {
+    cbuf[b + c] = cr[c];
+    fbuf[b + c] = fr[c];
+    abuf[b + c] = ar[c];
+  }
 }

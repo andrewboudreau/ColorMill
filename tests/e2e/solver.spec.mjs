@@ -9,7 +9,9 @@
  *
  *   E2E_SOLVER_FRAMES=<n>      frames for the stability/sheet run (234 = 3 s)
  *   E2E_SOLVER_MIX_FRAMES=<n>  frames after injecting pigment (469 = 6 s)
- *   E2E_SOLVER_FOLD=1          also exercise cutAndFold() (adds ~1.4 s of sim)
+ *   E2E_SOLVER_FOLD=1          also exercise cutAndFold() (adds ~1.4 s of sim): the
+ *                              folded sheet must land as a slab (max node density
+ *                              <= 6, >= 20 distinct z cells) and be released cleanly
  */
 import { assert, withBrowser } from './lib.mjs';
 import { DEFAULT_PARAMS, GEOMETRY, QUALITY_PRESETS, gridDims, rollerPoses } from '../../src/config/mill.ts';
@@ -183,19 +185,45 @@ export default async function run() {
         await window.__solver.stepFrames(10);
         const s = await window.__solver.snapshot();
         let kin = 0, bad = 0;
-        for (let p = 0; p < s.count; p++) { if (s.flags[p] & 1) kin++; for (let c = 0; c < 3; c++) if (!Number.isFinite(s.positions[3 * p + c])) bad++; }
-        return { kin, bad, error: window.__solver.error };
+        const kinIdx = [];
+        for (let p = 0; p < s.count; p++) { if (s.flags[p] & 1) { kin++; kinIdx.push(p); } for (let c = 0; c < 3; c++) if (!Number.isFinite(s.positions[3 * p + c])) bad++; }
+        return { kin, bad, kinIdx, error: window.__solver.error };
       });
       console.log(`  cut & fold: ${mid.kin} kinematic particles mid-move`);
-      assert(!mid.error && mid.bad === 0 && mid.kin > 0, `fold selected particles and moves them (${JSON.stringify(mid)})`);
+      assert(!mid.error && mid.bad === 0 && mid.kin > 0, `fold selected particles and moves them (${JSON.stringify({ kin: mid.kin, bad: mid.bad, error: mid.error })})`);
+
+      // just after release: the folded sheet must still be a sheet (design §6 revised):
+      // no node carries more than ~40 particles' mass and the slab spans many z cells
+      const foldFrames = framesFor(1.2);
+      const rel = await page.evaluate(async ([n, idx, h]) => {
+        await window.__solver.stepFrames(n);
+        const s = await window.__solver.snapshot();
+        const d = await window.__solver.density();
+        let kin = 0, maxDens = 0;
+        for (let p = 0; p < s.count; p++) if (s.flags[p] & 1) kin++;
+        for (const v of d) if (Number.isFinite(v)) maxDens = Math.max(maxDens, v);
+        const zCells = new Set(), yCells = new Set();
+        let ymin = Infinity, ymax = -Infinity, zmin = Infinity, zmax = -Infinity;
+        for (const p of idx) {
+          const y = s.positions[3 * p + 1], z = s.positions[3 * p + 2];
+          zCells.add(Math.floor(z / h)); yCells.add(Math.floor(y / h));
+          ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); zmin = Math.min(zmin, z); zmax = Math.max(zmax, z);
+        }
+        return { kin, maxDens, zCells: zCells.size, yCells: yCells.size, ymin, ymax, zmin, zmax, error: window.__solver.error };
+      }, [foldFrames - 10 + 2, mid.kinIdx, dims.h]);
+      console.log(`  after release: max density ${rel.maxDens.toFixed(2)}, folded slab spans ${rel.zCells} z cells (z ${rel.zmin.toFixed(3)}..${rel.zmax.toFixed(3)}), ${rel.yCells} y cells (y ${rel.ymin.toFixed(3)}..${rel.ymax.toFixed(3)})`);
+      assert(!rel.error && rel.kin === 0, `all particles released ${foldFrames + 2} frames after the fold started (${rel.kin} still kinematic)`);
+      assert(rel.maxDens <= 6, `max density after the fold <= 6 (${rel.maxDens.toFixed(2)}; ~48 particles per node)`);
+      assert(rel.zCells >= 20, `folded sheet spread over >= 20 distinct z cells (${rel.zCells})`);
+
       const end = await page.evaluate(async (n) => {
         await window.__solver.stepFrames(n);
         const s = await window.__solver.snapshot();
         return { count: s.count, positions: Array.from(s.positions), velocities: Array.from(s.velocities), latents: Array.from(s.latents), deformation: Array.from(s.deformation), flags: Array.from(s.flags), error: window.__solver.error };
-      }, framesFor(1.4));
+      }, framesFor(1.4) - (foldFrames - 10 + 2));
       const a3 = analyse(end, dims);
       console.log(`  after fold: ${JSON.stringify({ ...a3, minDf: +a3.minDf.toFixed(4), minDb: +a3.minDb.toFixed(4) })}`);
       assert(!end.error && a3.bad === 0 && a3.outside === 0 && a3.inRoller === 0 && a3.kinematic === 0 && a3.n === init.count, 'state sane and all particles released after the fold');
     }
-  }, { port: 5183 });
+  });
 }

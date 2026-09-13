@@ -68,7 +68,16 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
     F = identity3();
   }
   var d = svd3(F);
-  d.S = clamp(d.S, vec3<f32>(1.0 - P.mat.z), vec3<f32>(1.0 + P.mat.w));
+  // Deviatoric plastic return: putty yields in shape but not in volume.
+  // Split the stretches into a volumetric part J^(1/3) and a unit-volume
+  // deviatoric part, clamp only the deviatoric stretches (design §4), and
+  // put the volume back so the pressure term still resists compression
+  // (otherwise the nip could pack material to several times rest density).
+  let Jraw = clamp(d.S.x * d.S.y * d.S.z, 0.25, 4.0);
+  let Jc = pow(Jraw, 1.0 / 3.0);
+  var dev = clamp(d.S / Jc, vec3<f32>(1.0 - P.mat.z), vec3<f32>(1.0 + P.mat.w));
+  dev = dev / pow(max(dev.x * dev.y * dev.z, 1e-6), 1.0 / 3.0);
+  d.S = dev * Jc;
   let Sig = mat3x3<f32>(vec3<f32>(d.S.x, 0.0, 0.0), vec3<f32>(0.0, d.S.y, 0.0), vec3<f32>(0.0, 0.0, d.S.z));
   F = d.U * Sig * transpose(d.V);
   let Rot = d.U * transpose(d.V);

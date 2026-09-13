@@ -35,5 +35,13 @@ export interface Renderer {
   render(encoder: GPUCommandEncoder, info: RenderFrameInfo): void;
   /** Reset the camera to the default front view. */
   resetCamera(): void;
+  /**
+   * Enable/disable presenting to the canvas. When disabled, render() draws
+   * into an offscreen target instead (automated browsers whose canvas
+   * presentation is broken, e.g. headless SwiftShader Chromium).
+   */
+  setPresentation?(enabled: boolean): void;
+  /** Render one frame offscreen and read back tightly packed RGBA8 pixels (tests/diagnostics). */
+  renderToPixels?(info: RenderFrameInfo, width?: number, height?: number): Promise<{ width: number; height: number; data: Uint8Array }>;
   destroy(): void;
 }

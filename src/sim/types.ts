@@ -98,6 +98,8 @@ export interface DebugApi {
   tapPigment(name: string): void;
   /** Switch preset (rebuilds the sim), resolves when ready */
   setQuality(preset: 'low' | 'medium' | 'high' | 'ultra'): Promise<void>;
+  /** Render the current frame offscreen and return RGBA8 pixels (works where canvas presentation does not). */
+  screenshot(): Promise<{ width: number; height: number; data: Uint8Array }>;
   /** Report whether the app finished initialising */
   readonly ready: boolean;
 }

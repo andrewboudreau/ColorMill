@@ -12,10 +12,9 @@
  *   5. a screenshot (tests/e2e/out/app.png) shows something other than the
  *      background at the centre of the canvas
  */
-import { mkdirSync } from 'node:fs';
+import fs from 'node:fs';
 import path from 'node:path';
-import { inflateSync } from 'node:zlib';
-import { ROOT, assert, withBrowser } from './lib.mjs';
+import { ROOT, assert, withBrowser, encodePng } from './lib.mjs';
 
 const OUT_DIR = path.join(ROOT, 'tests', 'e2e', 'out');
 const SCREENSHOT = path.join(OUT_DIR, 'app.png');
@@ -45,64 +44,6 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
 }
 
-/** Minimal PNG decoder (8-bit, non-interlaced, filters 0-4) — enough for Playwright screenshots. */
-function decodePng(buf) {
-  const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  for (let i = 0; i < 8; i++) if (buf[i] !== sig[i]) throw new Error('screenshot is not a PNG');
-  let off = 8;
-  let width = 0, height = 0, depth = 0, ctype = 0, interlace = 0;
-  const idat = [];
-  while (off + 8 <= buf.length) {
-    const len = buf.readUInt32BE(off);
-    const type = buf.toString('ascii', off + 4, off + 8);
-    const data = buf.subarray(off + 8, off + 8 + len);
-    if (type === 'IHDR') {
-      width = data.readUInt32BE(0); height = data.readUInt32BE(4);
-      depth = data[8]; ctype = data[9]; interlace = data[12];
-    } else if (type === 'IDAT') idat.push(data);
-    else if (type === 'IEND') break;
-    off += 12 + len;
-  }
-  const channels = { 0: 1, 2: 3, 4: 2, 6: 4 }[ctype];
-  if (depth !== 8 || interlace !== 0 || !channels) throw new Error(`unsupported PNG (depth ${depth}, type ${ctype}, interlace ${interlace})`);
-  const raw = inflateSync(Buffer.concat(idat));
-  const stride = width * channels;
-  const bpp = channels;
-  const out = Buffer.alloc(stride * height);
-  let prev = Buffer.alloc(stride);
-  for (let y = 0; y < height; y++) {
-    const filter = raw[y * (stride + 1)];
-    const line = raw.subarray(y * (stride + 1) + 1, y * (stride + 1) + 1 + stride);
-    const cur = out.subarray(y * stride, (y + 1) * stride);
-    for (let i = 0; i < stride; i++) {
-      const a = i >= bpp ? cur[i - bpp] : 0;
-      const b = prev[i];
-      const c = i >= bpp ? prev[i - bpp] : 0;
-      let v = line[i];
-      switch (filter) {
-        case 0: break;
-        case 1: v += a; break;
-        case 2: v += b; break;
-        case 3: v += (a + b) >> 1; break;
-        case 4: {
-          const p = a + b - c;
-          const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
-          v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-          break;
-        }
-        default: throw new Error(`bad PNG filter ${filter} on row ${y}`);
-      }
-      cur[i] = v & 255;
-    }
-    prev = cur;
-  }
-  const px = (x, y) => {
-    const i = (y * width + x) * channels;
-    if (channels < 3) return [out[i], out[i], out[i]];
-    return [out[i], out[i + 1], out[i + 2]];
-  };
-  return { width, height, px };
-}
 
 /** Mean RGB (0..1) over a rectangle of the decoded image. */
 function meanRgb(img, x0, y0, x1, y1) {
@@ -256,7 +197,7 @@ async function stats(page) {
 }
 
 export default async function run() {
-  mkdirSync(OUT_DIR, { recursive: true });
+  fs.mkdirSync(OUT_DIR, { recursive: true });
   await withBrowser(async ({ page, baseUrl }) => {
     await page.goto(`${baseUrl}?preset=low`, { waitUntil: 'load', timeout: 60_000 });
     await waitForApp(page);
@@ -304,27 +245,22 @@ export default async function run() {
     assert(a3.latentSpread > 1e-3, `pigment injection changed particle latents (max deviation from mean ${a3.latentSpread})`);
     console.log(`  pigment ok: ${a3.pigmented} particles visibly pigmented, simTime ${st3.simTime.toFixed(3)}s`);
 
-    // --- 5. screenshot: the centre of the canvas is not the background ----------------
-    const rect = await withTimeout(page.evaluate(() => {
-      const c = document.querySelector('canvas');
-      if (!c) return null;
-      const r = c.getBoundingClientRect();
-      return { x: r.left, y: r.top, w: r.width, h: r.height };
-    }), EVAL_TIMEOUT_MS, 'canvas rect');
-    assert(rect && rect.w > 100 && rect.h > 100, `a canvas is on the page (${JSON.stringify(rect)})`);
-    const png = await withTimeout(page.screenshot({ path: SCREENSHOT, fullPage: false }), EVAL_TIMEOUT_MS, 'screenshot');
-    const img = decodePng(png);
-    const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+    // --- 5. screenshot: rendered offscreen through the debug API (canvas presentation
+    // is unavailable in headless SwiftShader Chromium); the centre must be lit ---------
+    const shot = await withTimeout(page.evaluate(async () => {
+      const s = await window.__colormill.screenshot();
+      return { width: s.width, height: s.height, data: Array.from(s.data) };
+    }), EVAL_TIMEOUT_MS, 'screenshot');
+    const img = { width: shot.width, height: shot.height, data: Uint8Array.from(shot.data) };
+    fs.mkdirSync(OUT_DIR, { recursive: true });
+    fs.writeFileSync(SCREENSHOT, encodePng(img.width, img.height, img.data));
+    const cx = img.width / 2, cy = img.height / 2;
     const centre = meanRgb(img, cx - 6, cy - 6, cx + 6, cy + 6);
-    // Background reference: the same row at the left edge of the canvas. The
-    // background is a vertical gradient, so a same-row sample is its colour at
-    // the centre's height (the top strip alone would differ purely by gradient).
-    const edge = meanRgb(img, rect.x + 3, cy - 6, rect.x + 9, cy + 6);
-    const whole = meanRgb(img, rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
+    const edge = meanRgb(img, 3, cy - 6, 9, cy + 6);
+    const whole = meanRgb(img, 0, 0, img.width, img.height);
     const cl = luma(centre), dEdge = rgbDist(centre, edge);
-    console.log(`  screenshot ${img.width}x${img.height} -> ${path.relative(ROOT, SCREENSHOT)}; centre rgb ${centre.map((v) => v.toFixed(3)).join(',')} (luma ${cl.toFixed(3)}), left-edge rgb ${edge.map((v) => v.toFixed(3)).join(',')}, canvas mean luma ${luma(whole).toFixed(3)}`);
-    assert(cl > 0.08, `centre of the canvas is lit, not near-black (luma ${cl.toFixed(3)})`);
-    // a clearly lit surface passes outright; otherwise it must at least differ from the background at that height
-    assert(cl > 0.35 || dEdge > 0.08, `centre of the canvas is not the background colour (luma ${cl.toFixed(3)}, distance to same-row left edge ${dEdge.toFixed(3)})`);
+    console.log(`  screenshot ${img.width}x${img.height} -> ${path.relative(ROOT, SCREENSHOT)}; centre rgb ${centre.map((v) => v.toFixed(3)).join(',')} (luma ${cl.toFixed(3)}), left-edge rgb ${edge.map((v) => v.toFixed(3)).join(',')}, mean luma ${luma(whole).toFixed(3)}`);
+    assert(cl > 0.08, `centre of the frame is lit, not near-black (luma ${cl.toFixed(3)})`);
+    assert(cl > 0.35 || dEdge > 0.08, `centre of the frame is not the background colour (luma ${cl.toFixed(3)}, distance to same-row left edge ${dEdge.toFixed(3)})`);
   });
 }

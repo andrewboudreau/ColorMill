@@ -73,6 +73,8 @@ export class RayMarchRenderer implements Renderer {
   private bindGroup: GPUBindGroup;
   private volumes: RenderVolumes | null = null;
   private destroyed = false;
+  private present = true;
+  private offscreen: GPUTexture | null = null;
 
   constructor(ctx: GpuContext, canvas: HTMLCanvasElement) {
     this.device = ctx.device;
@@ -218,10 +220,28 @@ export class RayMarchRenderer implements Renderer {
     pass.end();
   }
 
+  setPresentation(enabled: boolean): void {
+    this.present = enabled;
+  }
+
+  private offscreenView(w: number, h: number): GPUTextureView {
+    if (!this.offscreen || this.offscreen.width !== w || this.offscreen.height !== h) {
+      this.offscreen?.destroy();
+      this.offscreen = this.device.createTexture({
+        label: 'raymarch-offscreen-frame',
+        size: { width: w, height: h },
+        format: this.format,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+      });
+    }
+    return this.offscreen.createView();
+  }
+
   render(encoder: GPUCommandEncoder, info: RenderFrameInfo): void {
     if (this.destroyed) return;
-    const view = this.context.getCurrentTexture().createView();
-    this.encodePass(encoder, info, view, this.canvas.width, this.canvas.height);
+    const w = Math.max(1, this.canvas.width), h = Math.max(1, this.canvas.height);
+    const view = this.present ? this.context.getCurrentTexture().createView() : this.offscreenView(w, h);
+    this.encodePass(encoder, info, view, w, h);
   }
 
   /**
@@ -278,6 +298,8 @@ export class RayMarchRenderer implements Renderer {
     this.destroyed = true;
     this.uniformBuffer.destroy();
     this.placeholder.destroy();
+    this.offscreen?.destroy();
+    this.offscreen = null;
     this.volumes = null;
     try {
       this.context.unconfigure();

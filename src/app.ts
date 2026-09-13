@@ -141,6 +141,9 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   let preset: QualityPreset = chosen.preset;
   let autoOrbit = query.get('orbit') === '1';
   const startPaused = query.get('paused') === '1';
+  // Automated browsers (Playwright) on software WebGPU cannot present to the
+  // canvas; render offscreen there and let the debug API read pixels back.
+  const offscreen = navigator.webdriver || query.get('offscreen') === '1';
 
   // --- state ------------------------------------------------------------------
   let sim: GpuMpmSim | undefined;
@@ -383,6 +386,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   await nextPaint();
   try {
     renderer = opts.makeRenderer(ctx, canvas);
+    if (offscreen) renderer.setPresentation?.(false);
     renderer.setVolumes(sim.volumes);
   } catch (e) {
     reportError('Could not build the renderer', e);
@@ -417,6 +421,17 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     stats(): SimStats { return (sim as GpuMpmSim).stats; },
     tapPigment,
     setQuality,
+    async screenshot() {
+      const r = renderer as Renderer;
+      if (!r.renderToPixels) throw new Error('renderer has no offscreen readback');
+      const st = (sim as GpuMpmSim).stats;
+      return r.renderToPixels({
+        params: (sim as GpuMpmSim).params,
+        rollerAngleFront: st.rollerAngleFront,
+        rollerAngleBack: st.rollerAngleBack,
+        timeSeconds: (performance.now() - startTime) / 1000
+      });
+    },
     get ready(): boolean { return ready; }
   };
   window.__colormill = api;

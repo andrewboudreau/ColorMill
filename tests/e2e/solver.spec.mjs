@@ -123,6 +123,13 @@ export default async function run() {
     let maxV = 0;
     for (const v of snap1.velocities) maxV = Math.max(maxV, Math.abs(v));
     console.log(`  max |v| component: ${maxV.toFixed(3)}`);
+    // an unstable run is NaN-free (the yield clamp bounds the stress) but shows up as
+    // speeds far above the roller surface speed and material thrown onto the tray
+    const surfaceSpeed = Math.abs(DEFAULT_PARAMS.omega) * DEFAULT_PARAMS.frictionRatio * GEOMETRY.radius;
+    assert(maxV < 2.5 * surfaceSpeed, `max |v| ${maxV.toFixed(3)} stays below 2.5x the roller surface speed (${surfaceSpeed.toFixed(3)})`);
+    let onTray = 0;
+    for (let i = 0; i < snap1.count; i++) if (snap1.positions[3 * i + 1] < 3 * dims.h) onTray++;
+    assert(onTray === 0, `no material fell onto the tray (${onTray} particles below 3h)`);
 
     // --- 2. sheet on the front roller -------------------------------------
     const sheetFrac = a1.sheetFront / a1.n;

@@ -37,8 +37,8 @@ describe('mill geometry', () => {
     const q = QUALITY_PRESETS.low;
     const pos = seedBankPositions(q, DEFAULT_PARAMS);
     const n = pos.length / 3;
-    expect(n).toBeGreaterThan(20000);
-    expect(n).toBeLessThan(70000);
+    expect(n).toBeGreaterThan(40000);
+    expect(n).toBeLessThan(110000);
     const { back, front } = rollerPoses(DEFAULT_PARAMS);
     for (let i = 0; i < n; i += 97) {
       const x = pos[3 * i], y = pos[3 * i + 1], z = pos[3 * i + 2];

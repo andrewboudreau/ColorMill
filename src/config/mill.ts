@@ -22,7 +22,7 @@ export const QUALITY_PRESETS: Readonly<Record<QualityPreset, QualitySettings>> =
   low: { preset: 'low', cellsPerUnit: 32, dt: 1.6e-3, substepsPerFrame: 8 },
   medium: { preset: 'medium', cellsPerUnit: 48, dt: 1.1e-3, substepsPerFrame: 12 },
   high: { preset: 'high', cellsPerUnit: 64, dt: 8e-4, substepsPerFrame: 16 },
-  ultra: { preset: 'ultra', cellsPerUnit: 80, dt: 6.4e-4, substepsPerFrame: 20 }
+  ultra: { preset: 'ultra', cellsPerUnit: 72, dt: 7.1e-4, substepsPerFrame: 18 }
 };
 
 export interface MaterialConstants {
@@ -69,7 +69,7 @@ export interface MillParams {
 export const DEFAULT_PARAMS: Readonly<MillParams> = {
   omega: 3.0,
   frictionRatio: 1.25,
-  gap: 0.05,
+  gap: 0.04,
   gravity: 2.0,
   dispersion: 0.6,
   backFriction: 0.4
@@ -98,7 +98,9 @@ export const GEOMETRY = {
   nipZ: 0.75,
   /** initial bank: half-width in z around nipZ, and height above the roller top */
   bankHalfDepth: 0.25,
-  bankHeight: 0.22,
+  /* tall enough that a gap-thick sheet around the front roll (2πR·gap per unit
+     length) leaves a bank in front of the nip instead of consuming it */
+  bankHeight: 0.36,
   /** x margin the bank keeps from the end guides at seeding */
   bankEndMargin: 0.05,
   /** particles per axis per cell at seeding (8 per cell) */

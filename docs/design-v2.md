@@ -30,7 +30,7 @@ gap — we exaggerate the gap so it is resolvable on the grid).
 | `R` | 0.32 | Roller radius |
 | `yc` | 0.55 | Height of both roller axes |
 | `zNip` | 0.75 | z of the nip centre (mid-plane between rollers) |
-| `gap` | 0.02–0.10, default 0.05 | Nip opening (distance between surfaces) |
+| `gap` | 0.02–0.10, default 0.04 | Nip opening (distance between surfaces) |
 | back roller axis | (y=yc, z = zNip − (R + gap/2)) | further from viewer |
 | front roller axis | (y=yc, z = zNip + (R + gap/2)) | nearer the viewer |
 | `omega` | 0–6 rad/s, default 3.0 | Angular speed of the **front** roller |
@@ -54,18 +54,21 @@ Node counts are `N = round(domain / h) + 1` per axis; see
 
 | preset | cellsPerUnit | h | cells (x,y,z) | seeded particles (approx) |
 | --- | --- | --- | --- | --- |
-| low | 32 | 0.03125 | 48×40×48 | 60k |
-| medium | 48 | 0.02083 | 72×60×72 | 204k |
-| high (default) | 64 | 0.015625 | 96×80×96 | 484k |
-| ultra | 80 | 0.0125 | 120×100×120 | 945k |
+| low | 32 | 0.03125 | 48×40×48 | 85k |
+| medium | 48 | 0.02083 | 72×60×72 | 285k |
+| high (default) | 64 | 0.015625 | 96×80×96 | 683k |
+| ultra | 72 | 0.01389 | 108×90×108 | 972k |
 
-The nip gap at `high` is ~3.2 cells wide; the sheet is 2–4 cells thick. That
+The default nip gap (0.04) at `high` is ~2.6 cells wide; the sheet is 2–4 cells thick. That
 is the minimum for a resolvable sheet; do not lower `cellsPerUnit` below 32.
 
 **Initial material (the bank).** A slab resting on the nip:
 x ∈ [0.05, L−0.05], z ∈ [zNip−0.25, zNip+0.25], y from the roller top surface
 (`ySurface(z)` = yc + sqrt(R² − (z − zRollerAxis)²) for whichever roller is
-under that z, or the nip floor `yc` inside the gap) up to `yc + R + 0.22`.
+under that z, or the nip floor `yc` inside the gap) up to `yc + R + 0.36`.
+The bank must hold more material than a gap-thick sheet around the front
+roll (2πR·gap per unit length) or the mill consumes it into a ring with no
+bank in front of the nip (see docs/millref-notes.md §5b).
 Particles are seeded 2 per axis per cell (8 per cell) on a jittered lattice.
 Particles inside a roller are skipped. This gives the counts in the table.
 
@@ -145,7 +148,8 @@ Boundaries, applied in this order:
 
 1. **Front roller** (sticky / tack). Let `d` be the distance from the node to
    the front roller axis, `n` the outward unit normal, `vr = ω_f × (p − axis)`
-   the surface velocity. If `d < R + tackBand` (tackBand = 1.5·h):
+   the surface velocity. If `d < R + tackBand` (tackBand = gap + h, i.e. the
+   thickness of the sheet the nip produces plus one cell of stencil slack):
    `v = vr` (full no-slip incl. normal — the sheet is carried around).
 2. **Back roller** (separating with Coulomb friction). If `d < R`:
    `vrel = v − vr`; `vn = dot(vrel, n)`; if `vn < 0`: `vt = vrel − vn·n`;
@@ -213,10 +217,15 @@ P = 2mu·(F − Rot) + lambda·(J − 1)·J·F⁻ᵀ
 σ = (1/J) · P · Fᵀ                     (Cauchy stress, used in §3.2)
 ```
 
-Plastic return (after the F update in G2P): clamp each singular value
-`Σi = clamp(Σi, 1 − thetaC, 1 + thetaS)` and rebuild `F = U·diag(Σ)·Vᵀ`.
-No hardening. (This is the snow model with hardening off — it reads as
-plasticine/putty.)
+Plastic return (after the F update in G2P) is **deviatoric only**: split the
+stretches into the volumetric part `J^(1/3)` and unit-volume deviatoric
+stretches `Σi / J^(1/3)`, clamp only the deviatoric stretches to
+`[1 − thetaC, 1 + thetaS]`, renormalise their product to 1 and put the volume
+back, then rebuild `F = U·diag(Σ)·Vᵀ`. No hardening. Clamping the raw
+singular values (the snow model) lets the material lose volume plastically,
+so the nip packs it to several times rest density and swallows the bank
+(docs/millref-notes.md §5a); putty yields in shape, not in volume, and the
+pressure term must keep resisting compression.
 
 SVD note: implement a 3×3 SVD as Jacobi eigen-decomposition of `FᵀF`
 (≤ 8 sweeps) to get `V` and `Σ²`, then `U = F·V·Σ⁻¹` with a guard for tiny
@@ -293,7 +302,7 @@ Exposed as `GpuMpmSim.cutAndFold()`. The UI has a "Cut & fold" button (F).
 | low | 32 | 1.6e-3 | 8 | integrated / mobile GPU |
 | medium | 48 | 1.1e-3 | 12 | laptop GPU |
 | high | 64 | 8e-4 | 16 | desktop GPU (default) |
-| ultra | 80 | 6.4e-4 | 20 | discrete GPU |
+| ultra | 72 | 7.1e-4 | 18 | discrete GPU |
 
 Simulated time per rendered frame is `dt·substepsPerFrame` (≈13 ms at
 `high`), so at 60 fps the mill runs at ~0.8× real time. Show the resulting

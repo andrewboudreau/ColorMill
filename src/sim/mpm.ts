@@ -404,7 +404,11 @@ export class GpuMpm implements GpuMpmSim {
     const yMax = GEOMETRY.domain[1] - 3 * h;
     const bankTopFallback = Math.min(GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight, yMax);
     f.set([bankTopFallback, GEOMETRY.length, 0.25 * GEOMETRY.length, GEOMETRY.nipZ], o + 32);
-    f.set([1.5 * h, 0.5 * h, 2 * h, 0.6], o + 36);
+    // front-roll tack band: the adhesion layer is as thick as the sheet the nip
+    // produces (the gap) plus one cell of stencil slack, so the whole sheet
+    // rides the roll instead of only its innermost layer (design §3.3).
+    const tackBand = p.gap + 1.0 * h;
+    f.set([tackBand, 0.5 * h, 2 * h, 0.6], o + 36);
     f.set([GEOMETRY.bankHalfDepth, 0.5 * h, FOLD_Z_SCALE, yMax], o + 40);
   }
 

@@ -60,6 +60,10 @@ const PRESETS: readonly QualityPreset[] = ['low', 'medium', 'high', 'ultra'];
 const PIGMENT_RADIUS = 0.09;
 const AUTO_ORBIT_RATE = 0.12; // rad/s
 const STATS_WINDOW = 60;
+/** Adaptive quality: step the preset down when frames average above this for a sustained period. */
+const ADAPT_SLOW_MS = 45;
+const ADAPT_SETTLE_SECONDS = 3;
+const PRESET_ORDER: readonly QualityPreset[] = ['low', 'medium', 'high', 'ultra'];
 const MAX_REPORTED_GPU_ERRORS = 5;
 
 function isPreset(s: string | null): s is QualityPreset {
@@ -141,6 +145,10 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   let preset: QualityPreset = chosen.preset;
   let autoOrbit = query.get('orbit') === '1';
   const startPaused = query.get('paused') === '1';
+  // Unless the preset was pinned by the user or the URL, drop a level when the
+  // GPU cannot keep up (frame time sustained above ADAPT_SLOW_MS).
+  let adaptive = chosen.reason !== 'query parameter' && !navigator.webdriver;
+  let slowSince = 0;
   // Automated browsers (Playwright) on software WebGPU cannot present to the
   // canvas; render offscreen there and let the debug API read pixels back.
   const offscreen = navigator.webdriver || query.get('offscreen') === '1';
@@ -184,7 +192,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     onParam: (key, value) => {
       if (sim) sim.params[key] = value;
     },
-    onQuality: (p) => { void setQuality(p); },
+    onQuality: (p) => { adaptive = false; void setQuality(p); },
     onAutoOrbit: (on) => { autoOrbit = on; }
   }, { params: { ...DEFAULT_PARAMS }, preset, autoOrbit, open: wideScreen });
 
@@ -319,6 +327,21 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     runFrame(dt);
     recordFrameTime(dt);
     paintStats();
+    adaptQuality(now);
+  };
+
+  const adaptQuality = (now: number): void => {
+    if (!adaptive || !sim || rebuilding || sim.paused || frameTimes.length < STATS_WINDOW) return;
+    const msFrame = (frameTimeSum / frameTimes.length) * 1000;
+    if (msFrame < ADAPT_SLOW_MS) { slowSince = 0; return; }
+    if (!slowSince) { slowSince = now; return; }
+    if (now - slowSince < ADAPT_SETTLE_SECONDS * 1000) return;
+    const idx = PRESET_ORDER.indexOf(preset);
+    if (idx <= 0) { adaptive = false; return; }
+    const next = PRESET_ORDER[idx - 1];
+    slowSince = 0;
+    hud.showHint(`Frame time ${msFrame.toFixed(0)} ms: lowering quality to ${next} (choose a preset in the panel to pin it)`, 9000);
+    void setQuality(next);
   };
 
   const onVisibility = (): void => {

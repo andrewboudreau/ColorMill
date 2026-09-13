@@ -251,7 +251,8 @@ export default async function run() {
       const s = await window.__colormill.screenshot();
       return { width: s.width, height: s.height, data: Array.from(s.data) };
     }), EVAL_TIMEOUT_MS, 'screenshot');
-    const img = { width: shot.width, height: shot.height, data: Uint8Array.from(shot.data) };
+    const data = Uint8Array.from(shot.data);
+    const img = { width: shot.width, height: shot.height, data, px: (x, y) => { const i = (y * shot.width + x) * 4; return [data[i], data[i + 1], data[i + 2]]; } };
     fs.mkdirSync(OUT_DIR, { recursive: true });
     fs.writeFileSync(SCREENSHOT, encodePng(img.width, img.height, img.data));
     const cx = img.width / 2, cy = img.height / 2;

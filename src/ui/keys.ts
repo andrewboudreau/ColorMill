@@ -1,5 +1,5 @@
 /**
- * Keyboard shortcuts (design §9): Space pause, R reset, F cut & fold,
+ * Keyboard shortcuts (design §9): Space pause, R reset, F cut & roll,
  * 1–8 pigments, arrows speed (up/down) and nip gap (left/right), P toggles
  * the settings drawer. Keys are ignored while a form control has focus.
  */

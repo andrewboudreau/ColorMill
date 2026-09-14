@@ -13,6 +13,7 @@
  * xyz-interleaved ParticleSnapshot layout.
  */
 import {
+  PIGMENT_POOL_FRACTION,
   GEOMETRY, gridDims, lameParameters, rollerPoses, seedBankPositions,
   type GridDims, type MillConfig, type MillParams, type QualitySettings
 } from '../config/mill';
@@ -40,10 +41,10 @@ export const GRID_WG = 4;
 /** Uniform ring stride (>= minUniformBufferOffsetAlignment). */
 const UNIFORM_STRIDE = 256;
 /** Cut & fold script length (design §6). */
-export const FOLD_DURATION = 1.2;
+export const FOLD_DURATION = 1.6;
 export const FOLD_LIFT = 0.25;
 /** Arc length along the front roll -> z on the bank (the unrolled sheet is compressed by this factor). */
-export const FOLD_Z_SCALE = 0.6;
+export const FOLD_Z_SCALE = 0.9;   // the turned log's length along z, as a fraction of the sheet width L
 /**
  * Reference material density. The stress force in P2G is scaled by
  * pMass / (pVol * MATERIAL_DENSITY) so that the elastic constants of §4 act
@@ -89,6 +90,7 @@ interface Kernel {
 
 interface MutableStats {
   particleCount: number;
+  particleCapacity: number;
   grid: GridDims;
   simTime: number;
   simSecondsPerFrame: number;
@@ -109,7 +111,9 @@ export class GpuMpm implements GpuMpmSim {
   readonly ready: Promise<void>;
 
   private readonly device: GPUDevice;
-  private readonly count: number;
+  private count: number;
+  private readonly seedCount: number;
+  private readonly capacity: number;
   private readonly seeds: Float32Array;
   private readonly statsData: MutableStats;
 
@@ -143,7 +147,7 @@ export class GpuMpm implements GpuMpmSim {
 
   private readonly kernels: Record<string, Kernel>;
   private readonly modules: GPUShaderModule[] = [];
-  private readonly particleDispatch: [number, number];
+  private particleDispatch: [number, number];
   private readonly gridDispatch: [number, number, number];
 
   // timestamps
@@ -170,8 +174,11 @@ export class GpuMpm implements GpuMpmSim {
 
     this.seeds = seedBankPositions(config.quality, config.params);
     this.clampSeeds();
-    this.count = this.seeds.length / 3;
-    const n = Math.max(this.count, 1);
+    this.seedCount = this.seeds.length / 3;
+    this.count = this.seedCount;
+    // reserve room for pigment chunks (new coloured material added by the user)
+    this.capacity = Math.max(1, Math.ceil(this.seedCount * (1 + PIGMENT_POOL_FRACTION)));
+    const n = this.capacity;
 
     const mk = (floats: number, extra = 0): GPUBuffer =>
       device.createBuffer({ size: floats * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC | extra });
@@ -204,11 +211,12 @@ export class GpuMpm implements GpuMpmSim {
     this.volumes = { volA: this.volA, volB: this.volB, dims: d };
 
     const maxDim = device.limits.maxComputeWorkgroupsPerDimension;
-    this.particleDispatch = dispatchSize(Math.ceil(n / PARTICLE_WG), maxDim);
+    this.particleDispatch = dispatchSize(Math.ceil(Math.max(this.count, 1) / PARTICLE_WG), maxDim);
     this.gridDispatch = [Math.ceil(d.nx / GRID_WG), Math.ceil(d.ny / GRID_WG), Math.ceil(d.nz / GRID_WG)];
 
     this.statsData = {
       particleCount: this.count,
+      particleCapacity: this.capacity,
       grid: d,
       simTime: 0,
       simSecondsPerFrame: config.quality.dt * config.quality.substepsPerFrame,
@@ -406,7 +414,8 @@ export class GpuMpm implements GpuMpmSim {
     // fold: the live bank top is reduced on the GPU (fold.wgsl); fold2.x is only the fallback
     const yMax = GEOMETRY.domain[1] - 3 * h;
     const bankTopFallback = Math.min(GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight, yMax);
-    f.set([bankTopFallback, GEOMETRY.length, 0.25 * GEOMETRY.length, GEOMETRY.nipZ], o + 32);
+    const gap = front.axisZ - back.axisZ - 2 * GEOMETRY.radius;
+    f.set([bankTopFallback, GEOMETRY.length, gap, GEOMETRY.nipZ], o + 32);
     // front-roll tack band: the adhesion layer is as thick as the sheet the nip
     // produces (the gap) plus one cell of stencil slack, so the whole sheet
     // rides the roll instead of only its innermost layer (design §3.3).
@@ -418,6 +427,14 @@ export class GpuMpm implements GpuMpmSim {
   // ---------------------------------------------------------------------------
   // dispatch helpers
   // ---------------------------------------------------------------------------
+
+  /** Change the live particle count (chunks added / reset) and the dispatch that covers it. */
+  private setCount(n: number): void {
+    this.count = n;
+    this.statsData.particleCount = n;
+    const maxDim = this.device.limits.maxComputeWorkgroupsPerDimension;
+    this.particleDispatch = dispatchSize(Math.ceil(Math.max(n, 1) / PARTICLE_WG), maxDim);
+  }
 
   private dispatchParticles(pass: GPUComputePassEncoder, k: Kernel, slot: number): void {
     pass.setPipeline(k.pipeline);
@@ -546,6 +563,7 @@ export class GpuMpm implements GpuMpmSim {
     this.statsData.simTime = 0;
     this.statsData.rollerAngleFront = 0;
     this.statsData.rollerAngleBack = 0;
+    this.setCount(this.seedCount);
     this.uploadInitialState();
   }
 
@@ -553,6 +571,68 @@ export class GpuMpm implements GpuMpmSim {
     if (this.destroyed) return;
     this.device.queue.writeBuffer(this.bufInject, 0, this.injectData(center, radius, latent, strength, 0));
     this.runParticleKernel(this.kernels.inject);
+  }
+
+  addPigmentChunk(x: number, z: number, radius: number, latent: Latent): number {
+    if (this.destroyed) return 0;
+    const h = this.dims.h;
+    const per = GEOMETRY.seedPerAxis;
+    const dom = GEOMETRY.domain;
+    const r = Math.max(radius, 2 * h);
+    // spawn just above the seeded bank top: the bank only ever gets lower, so the
+    // chunk starts in air (or touching the surface) and drops in under gravity
+    const cy = Math.min(GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight + r + 0.02, dom[1] - 1.5 * h - r);
+    const cx = Math.min(Math.max(x, 1.5 * h + r), dom[0] - 1.5 * h - r);
+    const cz = Math.min(Math.max(z, 1.5 * h + r), dom[2] - 1.5 * h - r);
+    const room = this.capacity - this.count;
+    if (room <= 0) return 0;
+    const pts: number[] = [];
+    const c0 = Math.floor((cx - r) / h), c1 = Math.ceil((cx + r) / h);
+    const d0 = Math.floor((cy - r) / h), d1 = Math.ceil((cy + r) / h);
+    const e0 = Math.floor((cz - r) / h), e1 = Math.ceil((cz + r) / h);
+    let seed = (Math.random() * 0xffffffff) >>> 0;
+    const rnd = (): number => { seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0; return seed / 4294967296; };
+    outer: for (let k = e0; k < e1; k++) for (let j = d0; j < d1; j++) for (let i = c0; i < c1; i++) {
+      for (let sz = 0; sz < per; sz++) for (let sy = 0; sy < per; sy++) for (let sx = 0; sx < per; sx++) {
+        const px = (i + (sx + 0.5 + (rnd() - 0.5) * 0.35) / per) * h;
+        const py = (j + (sy + 0.5 + (rnd() - 0.5) * 0.35) / per) * h;
+        const pz = (k + (sz + 0.5 + (rnd() - 0.5) * 0.35) / per) * h;
+        const dx = px - cx, dy = py - cy, dz = pz - cz;
+        if (dx * dx + dy * dy + dz * dz > r * r) continue;
+        pts.push(px, py, pz);
+        if (pts.length / 3 >= room) break outer;
+      }
+    }
+    const m = pts.length / 3;
+    if (m === 0) return 0;
+    const base = this.count;
+    const q = this.device.queue;
+    const pos4 = new Float32Array(4 * m);
+    const lat = new Float32Array(7 * m);
+    const F = new Float32Array(9 * m);
+    for (let i = 0; i < m; i++) {
+      pos4[4 * i] = pts[3 * i]; pos4[4 * i + 1] = pts[3 * i + 1]; pos4[4 * i + 2] = pts[3 * i + 2];
+      for (let c = 0; c < 7; c++) lat[7 * i + c] = latent[c];
+      F[9 * i] = 1; F[9 * i + 4] = 1; F[9 * i + 8] = 1;
+    }
+    q.writeBuffer(this.bufPos, 16 * base, pos4);
+    q.writeBuffer(this.bufVel, 16 * base, new Float32Array(4 * m));
+    q.writeBuffer(this.bufC, 36 * base, new Float32Array(9 * m));
+    q.writeBuffer(this.bufF, 36 * base, F);
+    q.writeBuffer(this.bufAff, 36 * base, new Float32Array(9 * m));
+    q.writeBuffer(this.bufLat, 28 * base, lat);
+    q.writeBuffer(this.bufFlags, 4 * base, new Uint32Array(m));
+    q.writeBuffer(this.bufFold, 16 * base, new Float32Array(4 * m));
+    this.setCount(base + m);
+    // refresh the uniform's particle count and the render volume right away
+    this.writeParams(0, 0);
+    q.writeBuffer(this.bufParams, 0, this.paramsData, 0, UNIFORM_STRIDE / 4);
+    const enc = this.device.createCommandEncoder({ label: 'GpuMpm-chunk' });
+    const pass = enc.beginComputePass();
+    this.encodeFrameKernels(pass, 0, false);
+    pass.end();
+    q.submit([enc.finish()]);
+    return m;
   }
 
   addPigmentOnSurface(x: number, z: number, radius: number, latent: Latent, strength = 1): void {

@@ -26,7 +26,7 @@ gap — we exaggerate the gap so it is resolvable on the grid).
 | Symbol | Value | Meaning |
 | --- | --- | --- |
 | `L` | 1.5 | Roller (and domain) length along x |
-| `domain` | (1.5, 1.25, 1.5) | Domain size (x, y, z); origin at (0,0,0) |
+| `domain` | (1.5, 1.75, 1.5) | Domain size (x, y, z); origin at (0,0,0); the headroom holds the operator's log and dropped pigment chunks |
 | `R` | 0.32 | Roller radius |
 | `yc` | 0.55 | Height of both roller axes |
 | `zNip` | 0.75 | z of the nip centre (mid-plane between rollers) |
@@ -54,10 +54,15 @@ Node counts are `N = round(domain / h) + 1` per axis; see
 
 | preset | cellsPerUnit | h | cells (x,y,z) | seeded particles (approx) |
 | --- | --- | --- | --- | --- |
-| low | 32 | 0.03125 | 48×40×48 | 85k |
-| medium | 48 | 0.02083 | 72×60×72 | 285k |
-| high (default) | 64 | 0.015625 | 96×80×96 | 683k |
-| ultra | 72 | 0.01389 | 108×90×108 | 972k |
+| low | 32 | 0.03125 | 48×56×48 | 85k (+50% pool) |
+| medium | 48 | 0.02083 | 72×84×72 | 285k (+50% pool) |
+| high (default) | 64 | 0.015625 | 96×112×96 | 683k (+50% pool) |
+| ultra | 72 | 0.01389 | 108×126×108 | 972k (+50% pool) |
+
+Each sim also reserves particle capacity for pigment chunks (50% of the
+seeded bank): a tap adds a sphere of new pigmented putty (radius 0.14) above
+the bank that drops in, instead of tinting existing particles. When the pool
+is used up, taps tint the surface (`addPigmentOnSurface`); Reset refills it.
 
 The default nip gap (0.04) at `high` is ~2.6 cells wide; the sheet is 2–4 cells thick. That
 is the minimum for a resolvable sheet; do not lower `cellsPerUnit` below 32.
@@ -204,7 +209,7 @@ Constants (in `config.material`):
 | `E` | 15 | Young's modulus (unit density; 60 makes a rigid slab that starves the nip) |
 | `nu` | 0.35 | Poisson ratio |
 | `thetaC` | 0.025 | plastic compression threshold |
-| `thetaS` | 0.0075 | plastic stretch threshold |
+| `thetaS` | 0.03 | plastic stretch threshold (tensile cohesion; 0.0075 gives a lacy sheet after operator moves) |
 | `mu`, `lambda` | derived | `mu = E/(2(1+nu))`, `lambda = E·nu/((1+nu)(1−2nu))` |
 
 Fixed corotated (Stomakhin 2013) with the MLS-MPM stress form:
@@ -267,29 +272,30 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
 
 ---
 
-## 6. Operator: cut & fold (implemented)
+## 6. Operator: cut, roll, turn and feed (implemented)
 
-A real operator cuts the sheet on the front roll and folds it across the
-mill to mix along x (there is no axial transport otherwise). Model it as a
-scripted kinematic move over `T = 1.2 s`:
+A real operator cuts the sheet off the front roll, rolls it into a log, turns
+the log 90° and feeds it back in end-on; that is the only source of mixing
+along the roll axis. Model it as a scripted kinematic move over `T = 1.6 s`:
 
-1. Select particles on the front roller sheet with `x < 0.75·L`,
-   `d < R + 3h` from the front axis, and `y < axisY` or `z > frontAxisZ`
-   (the visible sheet; never the nip channel).
-2. Parameterise each by `(x, t = d − R, θ)` with θ the angle around the
-   front axis from the nip, and map it onto a slab lying on the bank so the
-   sheet keeps its shape: `x1 = x + 0.25·L` (clamped to the guides),
-   `y1 = bankTop + t + h/2`, `z1 = zNip + 0.6·(θ·R − arcMid)`. `bankTop` is
-   the *live* bank top: the select kernel atomically maxes the y of bank
-   particles (|z − zNip| < bankHalfDepth, above the roller tops, in a node
-   with raster mass ≥ 2), so the slab lands on the bank as it is, not as it
-   was seeded. Move along a raised arc
-   `p(s) = lerp(p0,p1,s) + up·sin(π s)·0.25`, `s = smoothstep(t/T)`, with `v`
-   the analytical derivative and the lift clamped below the ceiling.
-3. On release keep `F` (the sheet's strain history), set `C = 0` and `v` to
-   the scripted end velocity, and rebuild the P2G affine term.
+1. Select the whole sheet on the front roll: `d < R + 3h` from the front axis
+   and `y < axisY` or `z > frontAxisZ` (never the nip channel).
+2. Parameterise each particle by `(x, t = d − R, s)` with `s` the arc length
+   around the front axis from the nip in the direction of rotation. Rolling
+   the sheet (thickness `g` = gap) from the cut end is an area-preserving
+   spiral: `ρ = sqrt(rc² + s·g/π)`, turns `n = (ρ − rc)/g`, `φ = 2πn`, with a
+   small core `rc = g`. Cross-section point `(u, v) = (ρ + t)(cos φ, sin φ)`.
+   Turning the log maps the sheet's x to the log's axis along z:
+   `x1 = L/2 + u`, `y1 = bankTop + rLog + v`, `z1 = zNip + 0.9·(x − L/2)`,
+   where `bankTop` is the live bank top reduced on the GPU (atomicMax over
+   bank particles in the select kernel) and `rLog` the log radius.
+3. Move along a raised arc `p(s) = lerp(p0,p1,s) + up·sin(π s)·0.25`,
+   `s = smoothstep(t/T)`, with `v` the analytical derivative. On release keep
+   `F`, set `C = 0`, and let the rolls draw the log in.
 
-Exposed as `GpuMpmSim.cutAndFold()`. The UI has a "Cut & fold" button (F).
+Nothing is placed inside existing material (the earlier "fold onto the bank"
+overlapped the bank and read as lost mass). Exposed as `GpuMpmSim.cutAndFold()`;
+the UI button is "Cut & roll" (F).
 
 ---
 

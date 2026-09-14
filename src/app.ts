@@ -15,7 +15,7 @@
 import './styles.css';
 import { BASE_LATENT, findPigment, rgbToLatentAsync } from './color/pigments';
 import {
-  DEFAULT_MATERIAL, DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS, QUALITY_PRESETS, estimateParticleCount, gridDims,
+  DEFAULT_MATERIAL, DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_RADIUS, QUALITY_PRESETS, estimateParticleCount, gridDims,
   type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
@@ -57,7 +57,7 @@ declare global {
 }
 
 const PRESETS: readonly QualityPreset[] = ['low', 'medium', 'high', 'ultra'];
-const PIGMENT_RADIUS = 0.1;
+
 const AUTO_ORBIT_RATE = 0.12; // rad/s
 const STATS_WINDOW = 60;
 /** Adaptive quality: step the preset down when frames average above this for a sustained period. */
@@ -204,7 +204,13 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     // finds the surface, so it works after the bank has slumped or drained)
     const z = GEOMETRY.nipZ;
     try {
-      sim.addPigmentOnSurface(x, z, PIGMENT_RADIUS, latent);
+      // a chunk of coloured putty dropped onto the bank; when the reserved pool is
+      // used up, tint the material at the surface instead
+      const added = sim.addPigmentChunk(x, z, PIGMENT_CHUNK_RADIUS, latent);
+      if (added === 0) {
+        sim.addPigmentOnSurface(x, z, PIGMENT_CHUNK_RADIUS, latent);
+        hud.showHint('Pigment pool used up: tinting the bank instead (Reset to refill)', 4000);
+      }
     } catch (e) {
       reportError('addPigment failed', e);
     }
@@ -487,7 +493,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   overlay.hide();
   ready = true;
   paintStats(true);
-  hud.showHint('Tap a colour to add pigment · drag to orbit · pinch or scroll to zoom');
+  hud.showHint('Tap a colour to drop pigmented putty on the bank · Cut & roll re-feeds the sheet · drag to orbit');
   canvas.focus({ preventScroll: true });
   rafId = requestAnimationFrame(frame);
 

@@ -47,7 +47,9 @@ export const DEFAULT_MATERIAL: MaterialConstants = {
   E: 15,
   nu: 0.35,
   thetaC: 0.025,
-  thetaS: 0.0075
+  /* tensile cohesion: at 0.0075 the sheet re-forming after an operator move
+     comes out lacy; 0.03 keeps it continuous (validated headlessly) */
+  thetaS: 0.03
 };
 
 /** Lamé parameters derived from E and nu. */
@@ -93,8 +95,9 @@ export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max:
 
 /** Fixed geometry (sim units). */
 export const GEOMETRY = {
-  /** domain size (x, y, z); origin at (0,0,0) */
-  domain: [1.5, 1.25, 1.5] as readonly [number, number, number],
+  /** domain size (x, y, z); origin at (0,0,0). y leaves headroom above the bank
+      for a rolled-up sheet (the operator's log) and for pigment chunks to drop in. */
+  domain: [1.5, 1.75, 1.5] as readonly [number, number, number],
   /** roller length along x == domain x */
   length: 1.5,
   /** roller radius */
@@ -252,6 +255,12 @@ export function seedBankPositions(q: QualitySettings, params: MillParams, seed =
   }
   return Float32Array.from(out);
 }
+
+/** Extra particle capacity, as a fraction of the seeded bank, reserved for pigment chunks. */
+export const PIGMENT_POOL_FRACTION = 0.5;
+
+/** Radius of one pigment chunk (a dollop of coloured putty dropped on the bank). */
+export const PIGMENT_CHUNK_RADIUS = 0.14;
 
 /** Estimated particle count for a preset (bank volume / (h^3/8)), for UI/preset selection. */
 export function estimateParticleCount(q: QualitySettings): number {

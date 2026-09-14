@@ -27,10 +27,10 @@ describe('mill geometry', () => {
 
   it('computes the grid dims of the presets', () => {
     const d = gridDims(QUALITY_PRESETS.high);
-    expect([d.nx, d.ny, d.nz]).toEqual([97, 81, 97]);
+    expect([d.nx, d.ny, d.nz]).toEqual([97, 113, 97]);
     expect(d.h).toBeCloseTo(1 / 64, 9);
     const l = gridDims(QUALITY_PRESETS.low);
-    expect([l.nx, l.ny, l.nz]).toEqual([49, 41, 49]);
+    expect([l.nx, l.ny, l.nz]).toEqual([49, 57, 49]);
   });
 
   it('seeds the bank above the rollers, outside them, at roughly 8 particles per cell', () => {

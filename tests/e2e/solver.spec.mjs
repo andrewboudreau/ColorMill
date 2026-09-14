@@ -9,7 +9,7 @@
  *
  *   E2E_SOLVER_FRAMES=<n>      frames for the stability/sheet run (234 = 3 s)
  *   E2E_SOLVER_MIX_FRAMES=<n>  frames after injecting pigment (469 = 6 s)
- *   E2E_SOLVER_FOLD=1          also exercise cutAndFold() (adds ~1.4 s of sim): the
+ *   E2E_SOLVER_FOLD=1          also exercise cutAndFold() (adds ~1.8 s of sim): the
  *                              folded sheet must land as a slab (max node density
  *                              <= 6, >= 20 distinct z cells) and be released cleanly
  */
@@ -204,6 +204,20 @@ export default async function run() {
     console.log(`  late surface tap at x=0.75: ${late.changed} particles pigmented (highest y ${late.top.toFixed(3)})`);
     assert(!late.error && late.changed > 200, `a tap after ${((stabilityFrames + mixFrames) * secPerFrame).toFixed(1)} s of milling still pigments material (${late.changed} changed)`);
 
+    // --- pigment chunk: new coloured material from the reserved pool -------------
+    const chunk = await page.evaluate(async (red) => {
+      const n0 = window.__solver.stats().particleCount;
+      const added = window.__solver.sim.addPigmentChunk(0.4, 0.75, 0.14, red);
+      await window.__solver.stepFrames(3);
+      const s = await window.__solver.snapshot();
+      let bad = 0;
+      for (let p = n0; p < s.count; p++) for (let c = 0; c < 3; c++) if (!Number.isFinite(s.positions[3 * p + c])) bad++;
+      return { n0, added, count: s.count, statCount: window.__solver.stats().particleCount, capacity: window.__solver.stats().particleCapacity, bad, error: window.__solver.error };
+    }, RED);
+    console.log(`  pigment chunk: +${chunk.added} particles (${chunk.n0} -> ${chunk.count}, capacity ${chunk.capacity})`);
+    assert(!chunk.error && chunk.bad === 0, 'chunk particles are finite: ' + chunk.error);
+    assert(chunk.added > 500 && chunk.count === chunk.n0 + chunk.added && chunk.statCount === chunk.count, `chunk added particles consistently (${JSON.stringify(chunk)})`);
+
     // --- optional: cut & fold ---------------------------------------------
     if (doFold) {
       const mid = await page.evaluate(async () => {
@@ -220,7 +234,7 @@ export default async function run() {
 
       // just after release: the folded sheet must still be a sheet (design §6 revised):
       // no node carries more than ~40 particles' mass and the slab spans many z cells
-      const foldFrames = framesFor(1.2);
+      const foldFrames = framesFor(1.6); // FOLD_DURATION in src/sim/mpm.ts
       const rel = await page.evaluate(async ([n, idx, h]) => {
         await window.__solver.stepFrames(n);
         const s = await window.__solver.snapshot();
@@ -249,7 +263,7 @@ export default async function run() {
       }, framesFor(1.4) - (foldFrames - 10 + 2));
       const a3 = analyse(end, dims);
       console.log(`  after fold: ${JSON.stringify({ ...a3, minDf: +a3.minDf.toFixed(4), minDb: +a3.minDb.toFixed(4) })}`);
-      assert(!end.error && a3.bad === 0 && a3.outside === 0 && a3.inRoller === 0 && a3.kinematic === 0 && a3.n === init.count, 'state sane and all particles released after the fold');
+      assert(!end.error && a3.bad === 0 && a3.outside === 0 && a3.inRoller === 0 && a3.kinematic === 0 && a3.n === chunk.count, 'state sane and all particles released after the fold (count includes the pigment chunk)');
     }
   }, { mode: 'dev' }); // harness pages are dev-only, not part of the production build
 }

@@ -36,6 +36,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   let invh = P.hdt.y;
   let dt = P.hdt.z;
 
+  let pw = pos[p].w;
   var x = pos[p].xyz;
   let gx = x * invh;
   let base = vec3<i32>(floor(gx - 0.5));
@@ -96,7 +97,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   x = pushOut(P.back.x, P.back.y, R, x, h);
   x = clamp(x, lo, hi);
 
-  pos[p] = vec4<f32>(x, 0.0);
+  pos[p] = vec4<f32>(x, pw);
   vel[p] = vec4<f32>(v, 0.0);
   let cr = matRows(C);
   let fr = matRows(F);

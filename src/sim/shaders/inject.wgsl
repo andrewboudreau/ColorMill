@@ -16,7 +16,7 @@ struct Inject {
   mode : vec4<u32>,
 };
 @group(0) @binding(1) var<uniform> I : Inject;
-@group(0) @binding(2) var<storage, read> pos : array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read_write> pos : array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read_write> lat : array<f32>;
 // probe[0] = float bits of the highest y in the column (0 = nothing found)
 @group(0) @binding(4) var<storage, read_write> probe : array<atomic<u32>>;
@@ -56,5 +56,12 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   for (var c = 0u; c < 7u; c++) {
     let z = lat[7u * p + c];
     lat[7u * p + c] = z + a * (zp[c] - z);
+  }
+  // pigment load: base = 1 (set-all mode), tinted particles move toward a chunk's load
+  if (I.mode.x == 1u) {
+    pos[p].w = 1.0;
+  } else {
+    let w = pos[p].w;
+    pos[p].w = w + a * (PIGMENT_LOAD - w);
   }
 }

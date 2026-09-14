@@ -688,15 +688,27 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     let p = ro + rd * tVol;
     let sn = densityNormal(p);
     let n = sn.n;
-    // sample the latent slightly inside the surface and renormalise the pigment weights
-    // (trilinear blending with empty cells scales the latent toward zero)
-    let q = p - n * 0.75 * h;
-    let a = textureSampleLevel(volA, volSampler, volUvw(q), 0.0);
-    let b = textureSampleLevel(volB, volSampler, volUvw(q), 0.0);
-    var c = vec4f(a.yzw, b.x);
-    var resid = b.yzw;
-    let s = c.x + c.y + c.z + c.w;
-    if (s > 1e-4) { c = c / s; resid = resid / s; }
+    // colour: integrate the latent through the material behind the hit (uncured
+    // silicone is translucent, and milled pigment often sits one cell under a white
+    // skin), weighting samples by density and by depth so the surface dominates.
+    // Latents are renormalised by their pigment-weight sum because trilinear
+    // blending with empty cells scales them toward zero.
+    var c = vec4f(0.0);
+    var resid = vec3f(0.0);
+    var wsum = 0.0;
+    for (var k = 0; k < 5; k++) {
+      let depth = (0.5 + 0.8 * f32(k)) * h;
+      let q = p - n * depth;
+      let a = textureSampleLevel(volA, volSampler, volUvw(q), 0.0);
+      let b = textureSampleLevel(volB, volSampler, volUvw(q), 0.0);
+      let s = a.y + a.z + a.w + b.x;
+      if (s <= 1e-4) { continue; }
+      let w = smoothstep(0.15, 0.6, a.x) * exp(-0.45 * f32(k));
+      c += w * vec4f(a.yzw, b.x) / s;
+      resid += w * b.yzw / s;
+      wsum += w;
+    }
+    if (wsum > 1e-5) { c = c / wsum; resid = resid / wsum; } else { c = vec4f(0.0, 0.0, 0.0, 1.0); }
     let albedo = srgbToLinear(latentToRgb(c, resid));
     let ao = volumeAo(p, n);
     let thickness = sheetThickness(p, n);

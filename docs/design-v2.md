@@ -263,11 +263,19 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
 - **Inject** kernel: `addPigment(center, radius, latent, strength)` blends
   particle latents inside the sphere: `z = mix(z, zPigment, strength·t)`,
   `t = 1 − |d|/radius`.
+- **Pigment load.** Each particle carries a pigment load in `pos.w` (base
+  putty 1, a masterbatch chunk `PIGMENT_LOAD` = 6). Node latents are
+  accumulated weighted by load and normalised by the node's total load, so a
+  chunk stretched thin among white particles still reads as a dark streak (a
+  concentrated masterbatch tints several times its own mass of base to a
+  mid-tone). The raster uses the tight 8-node trilinear stencil so one-cell
+  streaks are not averaged away before they are drawn, and the renderer
+  integrates colour through the sheet's thickness.
 - **Disperse** kernel (once per frame): for each particle gather the
   node-averaged latent `zg` (from the raster of §3.5) with the 27-node
   stencil; compute the shear rate `γ = ‖(C + Cᵀ)/2‖_F` from the particle's
   current `C`; then `z += clamp(k · γ · frameDt, 0, 1) · (zg − z)` with
-  `k = config.dispersion` (default 0.6, UI 0–2). Mixing therefore happens
+  `k = config.dispersion` (default 0.02, UI 0–0.5; nearly off: colour mills as streaks that thin with folding, and at 0.1 a black chunk was 77% grey after 3 s). The load relaxes with the latent. Mixing therefore happens
   where the material is sheared — at the nip — and not in the resting bank.
 
 ---

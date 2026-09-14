@@ -232,5 +232,5 @@ export default async function run() {
       console.log(`  after fold: ${JSON.stringify({ ...a3, minDf: +a3.minDf.toFixed(4), minDb: +a3.minDb.toFixed(4) })}`);
       assert(!end.error && a3.bad === 0 && a3.outside === 0 && a3.inRoller === 0 && a3.kinematic === 0 && a3.n === init.count, 'state sane and all particles released after the fold');
     }
-  });
+  }, { mode: 'dev' }); // harness pages are dev-only, not part of the production build
 }

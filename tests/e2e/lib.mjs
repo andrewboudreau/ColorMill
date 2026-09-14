@@ -64,7 +64,9 @@ export async function freePort() {
 export async function startServer({ mode = process.env.E2E_MODE || 'dev', port = 0 } = {}) {
   if (!port) port = await freePort();
   const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
-  const args = mode === 'preview' ? [viteBin, 'preview', '--port', String(port), '--strictPort'] : [viteBin, '--port', String(port), '--strictPort'];
+  // bind IPv4 explicitly: on hosts where `localhost` resolves to ::1 the 127.0.0.1 probe below would never connect
+  const common = ['--host', '127.0.0.1', '--port', String(port), '--strictPort'];
+  const args = mode === 'preview' ? [viteBin, 'preview', ...common] : [viteBin, ...common];
   const child = spawn(process.execPath, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...process.env, BROWSER: 'none', E2E_NO_HMR: '1' } });
   let out = '';
   child.stdout.on('data', (d) => { out += d.toString(); });

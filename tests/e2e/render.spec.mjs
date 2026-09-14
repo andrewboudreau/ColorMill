@@ -131,5 +131,5 @@ export default async function run() {
     assert(yellowish(sheet.yellow), 'the yellow band on the thin sheet reads as yellow');
     assert(bluish(sheet.blue), 'the blue band on the thin sheet reads as blue');
     assert(reddish(sheet.red), 'the red band on the thin sheet reads as red');
-  });
+  }, { mode: 'dev' }); // harness pages are dev-only, not part of the production build
 }

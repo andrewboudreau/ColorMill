@@ -32,7 +32,7 @@ const FRAMES_AFTER_RESET = 5;
 const NOT_INTEGRATED_GRACE_MS = 20_000; // window.__colormill must appear within this
 const READY_TIMEOUT_MS = 120_000; // ...and become ready within this (pipeline compile on SwiftShader is slow)
 const STEP_TIMEOUT_MS = 240_000; // a stepFrames() call
-const EVAL_TIMEOUT_MS = 60_000; // any other page.evaluate
+const EVAL_TIMEOUT_MS = 180_000; // any other page.evaluate (SwiftShader on a 2-core runner is slow)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -199,7 +199,10 @@ async function stats(page) {
 export default async function run() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   await withBrowser(async ({ page, baseUrl }) => {
-    await page.goto(`${baseUrl}?preset=low`, { waitUntil: 'load', timeout: 60_000 });
+    // paused: the animation loop must not keep queuing sim frames between the
+    // driven steps, or readbacks (snapshot/screenshot) starve behind them on a
+    // software GPU. stepFrames() forces steps while paused.
+    await page.goto(`${baseUrl}?preset=low&paused=1`, { waitUntil: 'load', timeout: 60_000 });
     await waitForApp(page);
 
     // --- 1. configuration honoured -------------------------------------------------

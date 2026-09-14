@@ -1,6 +1,10 @@
 node_modules/
 dist/
+build/
 .vite/
 coverage/
+tests/e2e/out/
+raylib/
+emsdk-cache/
 .DS_Store
 *.log

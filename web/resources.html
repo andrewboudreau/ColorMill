@@ -24,6 +24,7 @@
       code { padding:2px 5px; }
       pre { overflow:auto; padding:16px; border:1px solid var(--line); }
       .callout { border-left:4px solid var(--accent); padding:12px 16px; background:#111827; border-radius:12px; }
+      a.inline { color:var(--accent); }
     </style>
   </head>
   <body>
@@ -33,16 +34,31 @@
         <a href="project.html">Project notes</a>
         <a href="resources.html">Resources</a>
         <a href="pigment.html">Pigment demo</a>
+        <a href="legacy/index.html">Legacy CPU build</a>
         <a href="https://github.com/andrewboudreau/ColorMill/issues">GitHub issues</a>
       </nav>
 
       <p class="pill">Review and discussion resources</p>
       <h1>ColorMill Resources</h1>
-      <p class="lead">This page collects the working vocabulary, visual references, open questions, and future resources we want available from the UI while designing the two-roll mill simulator.</p>
+      <p class="lead">This page collects the papers and specifications ColorMill v2 is built on, the working vocabulary, visual references and open questions we want available from the UI while designing the two-roll mill simulator.</p>
 
       <section class="callout">
-        <strong>Reference angle:</strong> the simulator is based on a mostly front-on view of the mill, looking at the visible band where material feeds into the roller nip and returns along the lower/front region.
+        <strong>Reference angle:</strong> the simulator looks at the mill from the front (+z toward the viewer): the bank on top of the two rolls, the nip between them, and the sheet wrapping the front roll. The camera orbits, but that is the home view.
       </section>
+
+      <h2>Simulation references (v2)</h2>
+      <p>What the WebGPU solver, material model and colour model are built on. The design spec (<a class="inline" href="https://github.com/andrewboudreau/ColorMill/blob/main/docs/design-v2.md"><code>docs/design-v2.md</code></a>) cites these by section.</p>
+      <table>
+        <tr><th>Reference</th><th>What we use it for</th></tr>
+        <tr><td>Hu, Fang, Ge, Qu, Zhu, Pradhana &amp; Jiang, <em>A Moving Least Squares Material Point Method with Displacement Discontinuity and Two-Way Rigid Body Coupling</em>, SIGGRAPH 2018. <a class="inline" href="https://dl.acm.org/doi/10.1145/3197517.3201293">ACM</a> &middot; <a class="inline" href="https://yuanming.taichi.graphics/publication/2018-mlsmpm/">project page</a></td><td><strong>MLS-MPM</strong>: the substep in <code>src/sim/shaders/</code> &mdash; the shared quadratic B-spline weights, the <code>4/h&sup2;</code> affine/stress term in P2G, and the <code>C</code> gather in G2P. The <code>mpm88</code> Taichi demo from the same lineage is the shortest readable version.</td></tr>
+        <tr><td>Jiang, Schroeder, Selle, Teran &amp; Stomakhin, <em>The Affine Particle-In-Cell Method</em>, SIGGRAPH 2015. <a class="inline" href="https://dl.acm.org/doi/10.1145/2766996">ACM</a></td><td><strong>APIC</strong> transfers: each particle carries the affine velocity matrix <code>C</code>, which also gives the shear rate used for dispersion.</td></tr>
+        <tr><td>Stomakhin, Schroeder, Chai, Teran &amp; Selle, <em>A Material Point Method for Snow Simulation</em>, SIGGRAPH 2013. <a class="inline" href="https://dl.acm.org/doi/10.1145/2461912.2461948">ACM</a> &middot; <a class="inline" href="https://disneyanimation.com/publications/a-material-point-method-for-snow-simulation/">Disney</a></td><td>The <strong>elastoplastic material model</strong>: fixed-corotated elasticity with the singular values of <code>F</code> clamped to a yield band. We run it with hardening off, which reads as putty rather than snow (design &sect;4).</td></tr>
+        <tr><td>Jiang, Schroeder, Stomakhin, Selle &amp; Teran, <em>The Material Point Method for Simulating Continuum Materials</em>, SIGGRAPH 2016 course. <a class="inline" href="https://dl.acm.org/doi/10.1145/2897826.2927348">ACM</a> &middot; <a class="inline" href="https://history.siggraph.org/learning/the-material-point-method-for-simulating-continuum-materials-by-schroeder-stomakhin-selle-and-teran/">archive</a></td><td>The from-scratch derivation of P2G / grid / G2P, the deformation-gradient update, and grid-side collision handling (how the rolls, walls and tray are applied).</td></tr>
+        <tr><td>Sochorov&aacute; &amp; Jamri&scaron;ka, <em>Practical Pigment Mixing for Digital Painting</em> (Mixbox), SIGGRAPH Asia 2021. <a class="inline" href="https://scrtwpns.com/mixbox/">project</a> &middot; <a class="inline" href="https://github.com/scrtwpns/mixbox">GitHub</a></td><td>The <strong>colour model</strong>: a 7-float latent per particle, averaged in latent space and decoded to RGB in the render shader. Vendored under <code>vendor/mixbox/</code>; license CC BY-NC 4.0 (non-commercial, attribution).</td></tr>
+        <tr><td>W3C, <em>WebGPU</em> specification. <a class="inline" href="https://www.w3.org/TR/webgpu/">w3.org/TR/webgpu</a> &middot; <em>WebGPU Shading Language</em> (WGSL). <a class="inline" href="https://www.w3.org/TR/WGSL/">w3.org/TR/WGSL</a></td><td>Compute pipelines, storage buffers, 3D textures and the canvas context. WGSL has no float atomics, hence the <code>i32</code> fixed-point accumulators in P2G (design &sect;3.1).</td></tr>
+        <tr><td><em>WebGPU Fundamentals</em>. <a class="inline" href="https://webgpufundamentals.org/">webgpufundamentals.org</a> &middot; Chrome status: <a class="inline" href="https://caniuse.com/webgpu">caniuse.com/webgpu</a></td><td>Practical reference for bind groups, workgroup sizing and canvas presentation; browser support table for the fallback message.</td></tr>
+        <tr><td>Thiffeault, <em>The Mathematics of Taffy Pullers</em>, 2018. <a class="inline" href="https://arxiv.org/abs/1608.00152">arXiv:1608.00152</a></td><td>Why folding mixes: stretch-and-fold as a pseudo-Anosov map. The conceptual reason cut &amp; fold matters more than another pass through the nip.</td></tr>
+      </table>
 
       <h2>Visual reference notes</h2>
       <ul>
@@ -60,10 +76,12 @@
         <tr><td>Roller</td><td>A rotating cylinder with diameter, width, RPM, surface speed, grip, and direction.</td></tr>
         <tr><td>Nip</td><td>The narrow gap where the rollers are closest. The primary active mixing event.</td></tr>
         <tr><td>Gap</td><td>The distance between rollers at the nip. Smaller gap means more compression and shear.</td></tr>
-        <tr><td>Band</td><td>The sheet of material carried by the rollers.</td></tr>
-        <tr><td>Feed zone</td><td>The region where material approaches the nip.</td></tr>
-        <tr><td>Mixing horizon</td><td>The narrow simulated strip where diffusion/dispersion are allowed to be strong.</td></tr>
-        <tr><td>Return path</td><td>The lower/front visible region where material travels after the nip.</td></tr>
+        <tr><td>Bank</td><td>The rolling slab of material resting on top of the two rolls, feeding the nip.</td></tr>
+        <tr><td>Sheet (band)</td><td>The thin layer carried around the front roll after the nip; what you cut and fold.</td></tr>
+        <tr><td>Friction ratio</td><td>Back roll surface speed divided by front roll surface speed. 1.0 is pure counter-rotation; above it the nip shears.</td></tr>
+        <tr><td>Tack</td><td>The stickiness that makes the sheet follow a roll. In v2 the front roll is sticky (nodes near it take its velocity) and the back roll is a separating contact.</td></tr>
+        <tr><td>End guides</td><td>The cheeks that confine the bank along the roll axis; the domain's x walls.</td></tr>
+        <tr><td>Shear rate</td><td>How fast neighbouring material slides past itself; read from the particle's affine velocity matrix and used to drive dispersion.</td></tr>
         <tr><td>Pass</td><td>One traversal of material through the nip.</td></tr>
         <tr><td>Cut/fold</td><td>Manual operation that layers or reorients material before another pass.</td></tr>
         <tr><td>Dispersion</td><td>How evenly pigment has been broken up and distributed through material.</td></tr>
@@ -72,32 +90,35 @@
 
       <h2>Simulation concepts</h2>
       <div class="grid">
-        <div class="card"><h3>SimulationGrid</h3><p>The numerical grid that stores the front-view state of the material band.</p></div>
-        <div class="card"><h3>GridCell</h3><p>A small patch of material state: material amount, pigment masses, velocity, and eventually thickness/dispersion.</p></div>
-        <div class="card"><h3>BandMask</h3><p>A 0..1 field defining where silicone is allowed to exist.</p></div>
-        <div class="card"><h3>MixMask</h3><p>A 0..1 field defining where active nip mixing is happening.</p></div>
-        <div class="card"><h3>VelocityField</h3><p>A grid of movement vectors generated from roller geometry and material path assumptions.</p></div>
-        <div class="card"><h3>Renderer</h3><p>Converts material/pigment state into visible color based on base material, opacity, and pigment concentration.</p></div>
+        <div class="card"><h3>Material point</h3><p>A parcel of putty: position, velocity, APIC affine matrix, elastic deformation gradient and a Mixbox latent. 60k to ~1M of them depending on the preset.</p></div>
+        <div class="card"><h3>Grid</h3><p>The background lattice (h = 1/32 to 1/80) rebuilt every substep: particles scatter mass and momentum to it, it applies gravity and the boundaries, particles gather back.</p></div>
+        <div class="card"><h3>Boundary</h3><p>The rolls, walls and tray, applied to grid-node velocities: sticky (front roll), separating with Coulomb friction (back roll, floor), or free-slip (end walls).</p></div>
+        <div class="card"><h3>Plastic return</h3><p>After each step the singular values of the deformation gradient are clamped to a small yield band. This is what makes it putty and not a spring.</p></div>
+        <div class="card"><h3>Dispersion</h3><p>Once per frame each particle relaxes its latent toward its neighbourhood at a rate proportional to its shear rate: mixing only where the material is sheared.</p></div>
+        <div class="card"><h3>Renderer</h3><p>A ray-march through the packed density/latent volume: iso-surface, gradient normals, glossy shading, Mixbox decode per pixel; analytic rolls and tray.</p></div>
       </div>
 
-      <h2>Open design questions</h2>
+      <h2>Design questions</h2>
+      <p>Answered in v2 (see <a class="inline" href="project.html">project notes</a>):</p>
       <ol>
-        <li>What real mill size should the default simulator represent?</li>
-        <li>Should the first scale target hobby/small-batch silicone, lab-size rubber mill, or an abstract educational mill?</li>
-        <li>What default roller diameter, roller width, RPM, and gap range should we use?</li>
-        <li>How should batch weight translate into grid material mass and thickness?</li>
-        <li>How should translucent silicone render differently from opaque white silicone?</li>
-        <li>How much mixing should happen from one pass through the nip?</li>
-        <li>How should cut/fold operations be represented: direct grid remap, layer stack, or separate pass object?</li>
-        <li>Should we represent left and right roller speeds separately to support speed ratio?</li>
-        <li>What is the simplest useful definition of dispersion quality?</li>
+        <li>Scale: a lab-size mill, abstracted &mdash; roller radius 0.32 sim units (about 64&nbsp;mm at 0.2&nbsp;m per unit), roll length 1.5, gap 0.02&ndash;0.10 exaggerated so the grid can resolve the sheet.</li>
+        <li>Speed ratio: yes, as the continuous <em>friction ratio</em> (back / front, 1.0&ndash;1.6).</li>
+        <li>Cut/fold: a scripted kinematic move of the visible sheet onto the bank, a quarter roll-length across.</li>
+        <li>Mixing per pass: set by the <em>dispersion</em> rate acting on the shear rate in the nip; tune the single knob.</li>
+      </ol>
+      <p>Still open:</p>
+      <ol>
+        <li>How should batch weight (bank size) be exposed &mdash; a seeding parameter, or added material at runtime?</li>
+        <li>How should translucent silicone render differently from opaque white silicone (the ray-marcher is opaque today)?</li>
+        <li>What is the simplest useful <em>measure</em> of dispersion quality to show in the HUD (latent variance in the sheet?)</li>
+        <li>How close is the putty model to real uncured silicone &mdash; what would a calibration experiment look like?</li>
       </ol>
 
       <h2>Color model</h2>
-      <p>Linear RGB averaging (the current <code>mixColors</code>) is physically wrong for pigment &mdash; blue + yellow should make green, not gray. We are adopting <strong>Mixbox</strong> (Kubelka&ndash;Munk pigment mixing, SIGGRAPH Asia 2021) for color blending.</p>
+      <p>Linear RGB averaging is physically wrong for pigment &mdash; blue + yellow should make green, not gray. ColorMill uses <strong>Mixbox</strong> (Kubelka&ndash;Munk pigment mixing, SIGGRAPH Asia 2021) for color blending; in v2 the latent-to-RGB polynomial is ported to WGSL and runs in the ray-march shader.</p>
       <ul>
-        <li>It ships an official GLSL shader, so it runs per-fragment on the GPU &mdash; the same path a 3D voxel renderer needs.</li>
-        <li>Its <em>latent</em> space (7 coefficients) lets us store pigment per cell/particle, accumulate weighted latents during advection, and convert to RGB only at render time.</li>
+        <li>It ships an official GLSL shader, so it runs per-fragment on the GPU &mdash; the same path the renderer needs.</li>
+        <li>Its <em>latent</em> space (7 coefficients) is what every particle carries: latents are averaged during rastering and dispersion and converted to RGB only at render time.</li>
         <li>License is CC BY-NC 4.0 (non-commercial); fine for this research project with attribution. Vendored under <code>web/vendor/mixbox/</code>.</li>
         <li>See the live <a href="pigment.html">pigment demo</a> &mdash; Mixbox vs. naive linear, side by side.</li>
       </ul>
@@ -105,7 +126,7 @@
       <h2>Planned resource types</h2>
       <table>
         <tr><th>Resource</th><th>Purpose</th><th>Status</th></tr>
-        <tr><td>Machine diagram</td><td>Explain rollers, nip, feed, band, return path, and simulation mapping.</td><td>Drafted conceptually; needs clean in-app version.</td></tr>
+        <tr><td>Machine diagram</td><td>Explain rollers, nip, bank, sheet, end guides, tray and the simulation mapping.</td><td>Side-view diagram on the <a class="inline" href="project.html">project notes</a> page.</td></tr>
         <tr><td>Reference photos</td><td>Keep visual target for front-on band geometry.</td><td>Currently discussed in chat; needs repo-hosted references or notes.</td></tr>
         <tr><td>Domain model notes</td><td>Define machine/material/process vocabulary.</td><td>This page and project notes are first pass.</td></tr>
         <tr><td>Run notes</td><td>Capture settings and screenshots from interesting simulator runs.</td><td>Future.</td></tr>
@@ -113,23 +134,21 @@
       </table>
 
       <h2>Implementation backlog</h2>
-      <pre>Immediate:
-- Fix white page / deployment reliability
-- Show docs links from simulator shell
-- Tune band mask and mix mask against reference angle
-- Add machine parameter panel
+      <pre>Done in v2:
+- GPU (WebGPU compute) solver, 48^3 to 120^3 cells
+- Elastoplastic putty; sheet forms on the front roll
+- Friction ratio, nip gap, dispersion, gravity in a parameter drawer
+- Mixbox latents per particle; eight pigments + colour picker
+- Cut &amp; fold; ray-marched rendering; e2e tests in headless WebGPU
 
 Near-term:
-- Explicit Roller, Nip, MaterialBatch settings
-- Separate roller speeds and speed ratio
-- Batch weight -> material mass/thickness
+- Calibrate sheet thickness and passes-to-homogenise against a real mill
+- Batch weight -> bank size
+- Dispersion quality readout in the HUD
 - Base material appearance: opaque/translucent/transparent
-- Cut/fold/pass operations
 
 Long-term:
-- Better mass conservation
-- Layer stack / lamination model
-- GPU shader grid path
+- Interactive knife / hand instead of the scripted fold
 - Saved runs and reviewable scenarios
 - More educational diagrams and calibration references</pre>
     </main>

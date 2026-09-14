@@ -1,15 +1,19 @@
 {
   "name": "colormill",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "node tests/e2e/run.mjs",
+    "gen:pigments": "node scripts/gen-pigments.mjs"
   },
   "devDependencies": {
+    "@webgpu/types": "0.1.64",
+    "playwright": "1.56.1",
     "typescript": "5.8.3",
     "vite": "6.3.5",
     "vitest": "3.2.4"

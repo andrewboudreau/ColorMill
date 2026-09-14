@@ -309,14 +309,126 @@ other. `main.c` draws the voxels as cubes with an orbiting 3D camera and
 cylinder roller overlays; it is syntax-checked against raylib 5.5 and built by
 `make web` in CI.
 
-### Next steps
+### Next steps (v1) — superseded by v2
 
-1. **Latents per particle** (see Color model section) — store the 7-float
-   Mixbox latent on each particle instead of two pigment scalars, so any number
-   of pigments mixes correctly during transport.
-2. **Cut/fold operations** and proper viscoelasticity (deformation gradient `F`
-   + plasticity) for true dough/taffy behavior.
-3. Performance: the 3D solver substeps ~20×/frame over a 24³ grid; a
-   fixed-timestep accumulator and SIMD/threads (or a WebGL/WebGPU compute port)
-   would lift resolution. Volumetric rendering (raymarch) instead of opaque
-   cubes would also read better.
+All three items below are done in v2 (see the next section and
+[`design-v2.md`](design-v2.md)); the list is kept for the record.
+
+1. ~~**Latents per particle**~~ — done: every particle carries the 7-float
+   Mixbox latent (design §2, §5).
+2. ~~**Cut/fold operations** and proper viscoelasticity (deformation gradient
+   `F` + plasticity)~~ — done: fixed-corotated elastoplastic putty (design §4)
+   and the scripted cut & fold (design §6).
+3. ~~Performance / WebGPU compute port / ray-marched rendering~~ — done: the
+   solver is WebGPU compute at up to 120³ cells and ~1M particles, rendered
+   by a single ray-march pass (design §7, §8).
+
+---
+
+## v2: GPU mill (implemented — see `design-v2.md`)
+
+v2 replaces the v1 proof of concept outright. The normative spec is
+[`docs/design-v2.md`](design-v2.md); this section records *why* the design
+went the way it did.
+
+### Why GPU (WebGPU compute)
+
+The v1 CPU solver topped out at a 40³ grid with the material occupying a
+~14×12×7-voxel box — too coarse to resolve a nip gap, let alone a sheet a few
+cells thick wrapping a roller. The interesting physics (a 1–5 mm sheet on a
+150 mm roll) lives in a thin layer, so resolution is the whole game. MLS-MPM
+is embarrassingly parallel per particle and per node; the only awkward part is
+the P2G scatter, which WebGPU handles with `i32` fixed-point atomics (no float
+atomics in WGSL). At `high` the grid is 96×80×96 with ~480k particles, 16
+substeps per frame, and it still runs near real time on a desktop GPU. WebGPU
+rather than WebGL because we need compute shaders and storage buffers; the
+same code runs in Chrome, Edge, Safari and Firefox without plugins. The v1
+wasm build stays as `legacy/` for browsers without WebGPU.
+
+### Why elastoplastic (fixed corotated + yield clamp), not a fluid
+
+v1 used a weakly compressible fluid (pressure from `J`), which is why it read
+as a puddle: a fluid cannot hold a bank on top of two rollers, and it cannot
+form a sheet that stays on the front roll. Uncured silicone on a mill is a
+putty — it keeps its shape under gravity, yields under the nip's shear, and
+does not spring back. That started as the snow model of Stomakhin 2013 with
+hardening turned off (fixed-corotated elasticity with the singular values of
+`F` clamped each step to `[1 − θc, 1 + θs]`), but validation (both the C
+reference in `docs/millref-notes.md` and the GPU runs) showed the snow clamp
+also clamps *volumetric* strain: the nip packed the putty to 2.5× rest density
+and swallowed the bank into a ring. The return is therefore deviatoric only —
+shape yields, volume is kept and the pressure term resists compression. Two
+thresholds and a Young's modulus give the whole behaviour range from stiff
+clay to soft putty; there is no viscosity solve and the explicit substep is
+cheap. The stiffness matters more than expected: at E = 60 (unit density) the
+bank is a rigid slab that starves the nip and the sheet comes out lacy; at
+E = 15 the bank slumps into a rolling bank, the nip stays fed and the sheet is
+continuous. The CFL bound sets `dt` per preset with a safety factor of ~4.
+
+### Why the rollers are boundary conditions, and why they differ
+
+Both rollers are analytic cylinders applied at the grid-node level, which is
+where MPM wants collisions. They are deliberately *not* the same kind of
+contact: the front roll is **sticky** (nodes within a tack band take the
+roller's full velocity, normal and tangential), because on a real mill the
+sheet follows the faster or tackier roll and that is what makes the sheet.
+The back roll is a **separating Coulomb** contact, so material can leave it.
+The **friction ratio** (back speed / front speed, 1.0–1.6) replaces v1's
+counter/friction toggle: at 1.0 the mill is pure counter-rotation, above it
+the nip shears. End guides are the domain's x walls; the tray is a floor with
+stick-slip friction so it is not a skating rink.
+
+### Why Mixbox latents per particle
+
+Pigment mixing in RGB is wrong (blue + yellow → grey). Mixbox's 7-float
+latent (3 Kubelka–Munk pigment weights + 4 residual) is *linear* under
+mass-weighted averaging, so a particle's latent can be transported, averaged
+into grid nodes, and blended with other particles' latents with plain
+arithmetic; the polynomial `latentToRgb` is evaluated once per pixel in the
+ray-march shader. This is the "store latents, convert at render time" plan
+from the colour-model section above, now done for real: the palette is eight
+named pigments with precomputed latents plus a runtime picker (converted with
+`mixbox.js`), and the render volume carries `(density, lat0..lat6)` in two
+`rgba16float` 3D textures.
+
+### Why shear-driven dispersion
+
+Pure Lagrangian pigment (v1) never actually *mixes* — two blobs fold into
+ever-thinner striations but each particle keeps its own colour forever, and
+at any finite resolution the striations alias. Real dispersion happens where
+the material is sheared: in the nip. So once per frame each particle relaxes
+its latent toward the node-averaged latent of its neighbourhood at a rate
+`k · γ`, where `γ = ‖(C + Cᵀ)/2‖_F` is the local shear rate from the APIC
+affine matrix the particle already carries. In the resting bank `γ ≈ 0` and
+colours stay crisp; in the nip they blend. The single knob `k`
+(`dispersion`, 0–2) tunes how many passes it takes to homogenise, which is
+exactly the quantity a mill operator reasons about.
+
+### Why a scripted cut & fold
+
+A two-roll mill has no axial transport: material goes round and round in its
+own x-slice. Operators cut the sheet and fold it across the mill, and that is
+where most of the *lateral* mixing comes from. Simulating a knife and a hand
+would be a project of its own, so v2 scripts it: select the visible sheet on
+the front roll, mark those particles kinematic, fly them along an arc to the
+bank a quarter-length over, then release them with `F = I`. It is a cheap
+kinematic move that produces the right topology (layers laid across layers).
+
+### Why ray marching
+
+Voxel cubes (v1) cannot show a sheet a few cells thick, and the whole appeal
+of the material is a glossy, creased surface. A single fullscreen ray-march
+against the density volume with a trilinear iso-surface, gradient normals,
+two-lobe Blinn-Phong specular and a density-sampled ambient occlusion gives
+that at negligible cost next to the sim. Rollers and tray are analytic
+(ray/cylinder, plane) and depth-composited, so they stay crisp at any grid
+resolution.
+
+### Verification
+
+Everything above is checked headlessly in CI: vitest for the pure parts
+(geometry, presets, latents), Playwright + SwiftShader WebGPU for the real
+app (no NaNs, particles in the domain and outside the rollers, count conserved
+across reset, pigment injection changes latents, a lit surface in the
+screenshot), and a C reference solver (`make ref`) of the same physics for
+cross-checking the GPU kernels. The acceptance bar is design-v2 §11.

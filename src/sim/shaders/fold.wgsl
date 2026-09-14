@@ -1,17 +1,22 @@
-// Operator cut & fold (design §6, revised): a scripted kinematic move of the
-// visible sheet on the front roller onto the bank, shifted by +0.25 L along x,
-// that PRESERVES the sheet's shape: each selected particle is parameterised by
-// (x, thickness t = d_front - R, arc angle theta around the front axis measured
-// from the nip) and mapped onto a slab lying flat on the live bank top:
-//   x1 = x + 0.25 L (clamped),  y1 = min(bankTop, yMax - 3h - clearance) + t + clearance,
-//   z1 = nipZ + (theta R - arcMid) * zScale        (unrolled along z, centred on the nip)
+// Operator move (design §6): cut the WHOLE sheet off the front roll, roll it up
+// into a log, turn the log 90 degrees so it lies across the mill over the nip,
+// and set it down on the bank for the rolls to draw in again. This is how an
+// operator mixes along the roll axis: material that sat at one x now spans the
+// log's cross-section, and the log is fed in end-on.
+//
+// Each selected particle is parameterised by (x, thickness t = d_front - R,
+// arc length s around the front axis from the nip, in the direction of rotation).
+// Rolling the sheet (thickness g = gap) from the cut end gives an area-preserving
+// spiral: radius rho = sqrt(rc^2 + s_rel * g / pi), turns n = (rho - rc) / g,
+// angle phi = 2 pi n; cross-section point (u, v) = (rho + t) (cos phi, sin phi).
+// Turning the log 90 degrees maps the sheet's x to the log's axis along z:
+//   x1 = L/2 + u,  y1 = liveBankTop + rLog + v,  z1 = nipZ + (x - L/2) * zScale
 // The bank top is the live one: `select` reduces max(y) over non-stray bank
-// particles (|z - nipZ| < bankHalfDepth, y > axisY, raster pmass at the
-// nearest node >= 2) into `info[0]` with atomicMax on the bit pattern of the
-// positive float (monotonic), and the min/max arc of the selection into
-// info[2]/info[1]; `move` and `finish` read them directly - no readback.
-//   select: mark the sheet (x < 0.75 L, d_front < R + 3h, y < axisY or z > frontAxisZ,
-//           i.e. never the nip channel) kinematic and store (p0, arc).
+// particles into info[0] with atomicMax on the float bits (monotonic for y > 0),
+// and the min/max arc of the selection into info[2]/info[1]; `move` and `finish`
+// read them directly - no readback.
+//   select: mark the sheet (d_front < R + 3h, y < axisY or z > frontAxisZ, i.e.
+//           never the nip channel) kinematic and store (p0, arc).
 //   move:   each substep while active: p(s) = lerp(p0, p1, s) + up * sin(pi s) * lift,
 //           v = dp/ds * ds/dt (P.fold = active, s, ds/dt, lift); y clamped to fold3.w.
 //   finish: clear the flag, x = p1, v = scripted end velocity, C = 0, F kept,
@@ -38,17 +43,23 @@ fn foldTarget(p0 : vec3<f32>, arc : f32) -> vec3<f32> {
   let h = P.hdt.x;
   let L = P.fold2.y;
   let R = P.front.w;
-  let x1 = clamp(p0.x + P.fold2.z, 1.5 * h, L - 1.5 * h);
-  let t = max(rollerDist(P.front.x, P.front.y, p0) - R, 0.0);
-  // slab base: the live bank top, lowered (pressed into the bank) when the full
-  // sheet thickness (3h) would not fit under the ceiling - keep the thickness
-  // rather than squashing the slab flat against fold3.w
-  let base = min(liveBankTop(), P.fold3.w - 3.0 * h - P.fold3.y);
-  let y1 = min(base + t + P.fold3.y, P.fold3.w);
+  let g = max(P.fold2.z, 2.0 * h);            // sheet thickness = nip gap
+  let t = clamp(rollerDist(P.front.x, P.front.y, p0) - R, 0.0, 0.95 * g);   // within one turn of the spiral
   let arcMax = bitcast<f32>(atomicLoad(&info[1]));
   let arcMin = bitcast<f32>(atomicLoad(&info[2]));
-  let arcMid = 0.5 * (arcMin + arcMax);
-  let z1 = clamp(P.fold2.w + (arc - arcMid) * P.fold3.z, 1.5 * h, P.domain.z - 1.5 * h);
+  let sRel = max(arc - arcMin, 0.0);
+  let sLen = max(arcMax - arcMin, g);
+  let rc = g;                                  // the small hole a rolled sheet leaves
+  let rho = sqrt(rc * rc + sRel * g / PI);
+  let rLog = sqrt(rc * rc + sLen * g / PI) + g;
+  let phi = 2.0 * PI * (rho - rc) / g;
+  let rr = rho + t;
+  let u = rr * cos(phi);
+  let v = rr * sin(phi);
+  let base = min(liveBankTop(), P.fold3.w - 2.0 * rLog - P.fold3.y);
+  let x1 = clamp(0.5 * L + u, 1.5 * h, L - 1.5 * h);
+  let y1 = clamp(base + rLog + v + P.fold3.y, 1.5 * h, P.fold3.w);
+  let z1 = clamp(P.fold2.w + (p0.x - 0.5 * L) * P.fold3.z, 1.5 * h, P.domain.z - 1.5 * h);
   return vec3<f32>(x1, y1, z1);
 }
 
@@ -80,7 +91,7 @@ fn select_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgrou
   }
 
   // the visible sheet: front half of the front roll or below the axis, never the nip channel
-  if (x.x < 0.75 * P.fold2.y && d < R + 3.0 * h && (x.y < P.front.x || x.z > P.front.y)) {
+  if (d < R + 3.0 * h && (x.y < P.front.x || x.z > P.front.y)) {
     // angle around the front axis from the nip, in the direction of rotation (nip -> bottom -> front -> top)
     var th = atan2(-dy, -dz);
     if (th < 0.0) { th += 2.0 * PI; }

@@ -20,7 +20,7 @@ const OUT_DIR = path.join(ROOT, 'tests', 'e2e', 'out');
 const SCREENSHOT = path.join(OUT_DIR, 'app.png');
 
 /** Fixed mill geometry — mirrors GEOMETRY in src/config/mill.ts (e2e is plain Node, no TS import). */
-const DOMAIN = [1.5, 1.25, 1.5];
+const DOMAIN = [1.5, 1.75, 1.5];
 const ROLLER_R = 0.32;
 const AXIS_Y = 0.55;
 const NIP_Z = 0.75;
@@ -212,7 +212,7 @@ export default async function run() {
     }), EVAL_TIMEOUT_MS, 'read sim config');
     console.log(`  preset ${cfg.preset}, grid ${cfg.dims.nx}x${cfg.dims.ny}x${cfg.dims.nz} (h=${cfg.dims.h}), ${cfg.particleCount} particles`);
     assert(cfg.preset === 'low', `?preset=low selected the low preset (got ${cfg.preset})`);
-    assert(cfg.dims.nx === 49 && cfg.dims.ny === 41 && cfg.dims.nz === 49, `low preset grid is 49x41x49 nodes (got ${cfg.dims.nx}x${cfg.dims.ny}x${cfg.dims.nz})`);
+    assert(cfg.dims.nx === 49 && cfg.dims.ny === 57 && cfg.dims.nz === 49, `low preset grid is 49x57x49 nodes (got ${cfg.dims.nx}x${cfg.dims.ny}x${cfg.dims.nz})`);
     assert(cfg.particleCount > 10_000, `low preset seeds a bank (particleCount ${cfg.particleCount})`);
 
     // --- 2. run and check the particle state ---------------------------------------

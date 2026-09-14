@@ -4,8 +4,9 @@ A browser-based **two-roll mill simulator**: a bank of white silicone putty
 
 ![The v2 mill after two seconds at the low preset: a rolling bank on the two rolls, a continuous sheet around the front roll, pigment dollops being drawn into the nip](docs/screenshots/mill-low-2s.png)
 sits on two counter-rotating rollers, gets dragged through the nip, sheets
-onto the front roll, and is cut and folded back onto the bank. Tap a pigment
-and watch it disperse — blue and yellow fold into real green, not grey.
+onto the front roll, and is cut off, rolled into a log, turned and fed back in
+end-on. Tap a pigment to drop a chunk of coloured putty on the bank and watch
+it disperse — blue and yellow fold into real green, not grey.
 
 Version 2 runs the whole thing on the GPU with **WebGPU compute** (MLS-MPM
 with hundreds of thousands of material points) and renders it with a
@@ -45,7 +46,7 @@ tray. Pigment is tracked as a **Mixbox latent** per particle and mixed only
 where the material is actually sheared: once per frame each particle relaxes
 its latent toward the local node average at a rate proportional to its shear
 rate, so mixing happens at the nip and not in the resting bank. A scripted
-**cut & fold** lifts the sheet off the front roll and lays it back on the
+**cut & roll** lifts the sheet off the front roll and lays it back on the
 bank a quarter-length along, which is the only axial transport a real mill
 gets. Full detail, including every constant, is in
 [`docs/design-v2.md`](docs/design-v2.md).
@@ -56,7 +57,7 @@ gets. Full detail, including every constant, is in
 | --- | --- |
 | Tap a swatch (bottom bar) | Inject a blob of that pigment at a random spot on the bank |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
-| **Cut & fold** / `F` | Run the operator's cut-and-fold move |
+| **Cut & roll** / `F` | Run the operator's cut-roll-and-feed move |
 | **Clear pigment** | Reset every particle to white silicone |
 | **Reset** / `R` | Re-seed the bank |
 | **Pause** / `Space` | Pause / resume |
@@ -69,10 +70,10 @@ gets. Full detail, including every constant, is in
 
 | Preset | Cells / unit | Grid (cells) | Particles (approx.) | Substep `dt` | Substeps / frame | Target |
 | --- | --- | --- | --- | --- | --- | --- |
-| low | 32 | 48 × 40 × 48 | 85k | 1.6e-3 | 8 | integrated / mobile GPU |
-| medium | 48 | 72 × 60 × 72 | 285k | 1.1e-3 | 12 | laptop GPU |
-| high (default) | 64 | 96 × 80 × 96 | 683k | 8e-4 | 16 | desktop GPU |
-| ultra | 72 | 108 × 90 × 108 | 972k | 7.1e-4 | 18 | discrete GPU |
+| low | 32 | 48 × 56 × 48 | 85k | 1.6e-3 | 8 | integrated / mobile GPU |
+| medium | 48 | 72 × 84 × 72 | 285k | 1.1e-3 | 12 | laptop GPU |
+| high (default) | 64 | 96 × 112 × 96 | 683k | 8e-4 | 16 | desktop GPU |
+| ultra | 72 | 108 × 126 × 108 | 972k | 7.1e-4 | 18 | discrete GPU |
 
 The app steps the preset down automatically when frames stay above 45 ms
 (unless a preset was chosen explicitly), so a slow GPU lands on the largest

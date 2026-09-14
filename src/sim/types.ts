@@ -9,6 +9,8 @@ export type Latent = readonly [number, number, number, number, number, number, n
 
 export interface SimStats {
   readonly particleCount: number;
+  /** particle buffer capacity (seeded bank + reserved pigment pool) */
+  readonly particleCapacity: number;
   readonly grid: GridDims;
   /** sim seconds advanced so far */
   readonly simTime: number;
@@ -79,9 +81,16 @@ export interface GpuMpmSim {
    * lands on the bank wherever it has slumped or drained to (design §5).
    */
   addPigmentOnSurface(x: number, z: number, radius: number, latent: Latent, strength?: number): void;
+  /**
+   * Add a chunk of NEW pigmented putty (particles from the reserved pool): a
+   * sphere of radius `radius` centred above the bank at (x, z) that drops in
+   * under gravity. Returns the number of particles added (0 when the pool is
+   * exhausted, in which case the caller may fall back to addPigmentOnSurface).
+   */
+  addPigmentChunk(x: number, z: number, radius: number, latent: Latent): number;
   /** Set every particle's pigment back to the base latent. */
   clearPigment(): void;
-  /** Start the scripted operator cut-and-fold move (design §6). No-op if one is running. */
+  /** Start the scripted operator move: cut the sheet off the front roll, roll it into a log, turn it and set it on the bank (design §6). No-op if one is running. */
   cutAndFold(): void;
   /** Read particle state back to the CPU (slow; tests and diagnostics only). */
   readParticles(): Promise<ParticleSnapshot>;

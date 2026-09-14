@@ -1,7 +1,7 @@
 /**
  * Bottom bar: large round pigment swatches (tap = inject), a custom colour
  * swatch backed by <input type="color">, and the action buttons
- * (Cut & fold, Clear pigment, Reset, Pause/Play).
+ * (Cut & roll, Clear pigment, Reset, Pause/Play).
  */
 import { PALETTE_ORDER, PIGMENTS } from '../color/pigments';
 
@@ -79,7 +79,7 @@ export class Palette {
 
     const actions = document.createElement('div');
     actions.className = 'cm-actions';
-    this.foldButton = this.button(actions, 'Cut & fold', 'F', () => this.cb.onCutFold());
+    this.foldButton = this.button(actions, 'Cut & roll', 'F', () => this.cb.onCutFold());
     this.button(actions, 'Clear pigment', undefined, () => this.cb.onClear());
     this.button(actions, 'Reset', 'R', () => this.cb.onReset());
     this.pauseButton = this.button(actions, 'Pause', 'Space', () => this.cb.onTogglePause());

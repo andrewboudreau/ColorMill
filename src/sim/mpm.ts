@@ -40,13 +40,16 @@ export const PARTICLE_WG = 128;
 export const GRID_WG = 4;
 /** Uniform ring stride (>= minUniformBufferOffsetAlignment). */
 const UNIFORM_STRIDE = 256;
-/** Cut & fold script length (design §6). */
+/** Operator move (design §6): roll the sheet into a log (FOLD_ROLL_SECONDS),
+ * then feed the standing log end-first into the nip at FOLD_FEED_SPEED. */
 /** Pigment load of a masterbatch chunk relative to the base putty (mirrors PIGMENT_LOAD in common.wgsl). */
 export const PIGMENT_LOAD = 6.0;
-export const FOLD_DURATION = 1.6;
-export const FOLD_LIFT = 0.25;
+export const FOLD_ROLL_SECONDS = 1.2;
+export const FOLD_FEED_SPEED = 0.15;          // sim units / s along the log axis (the nip only takes the log where it touches it)
+export const FOLD_TILT = 0.42;                // log axis tilt from vertical toward the viewer (rad)
+/** Total script length: roll, then feed the log (the sheet folded in half: L/2 long) through the nip. */
+export const FOLD_DURATION = FOLD_ROLL_SECONDS + (0.5 * GEOMETRY.length) / FOLD_FEED_SPEED + 0.3;
 /** Arc length along the front roll -> z on the bank (the unrolled sheet is compressed by this factor). */
-export const FOLD_Z_SCALE = 0.9;   // the turned log's length along z, as a fraction of the sheet width L
 /**
  * Reference material density. The stress force in P2G is scaled by
  * pMass / (pVol * MATERIAL_DENSITY) so that the elastic constants of §4 act
@@ -414,8 +417,7 @@ export class GpuMpm implements GpuMpmSim {
     f.set([front.axisY, front.axisZ, front.omegaX, GEOMETRY.radius], o + 16);
     f.set([mu, lambda, this.config.material.thetaC, this.config.material.thetaS], o + 20);
     f.set([pVol, pMass, pMass / (pVol * MATERIAL_DENSITY), p.dispersion], o + 24);
-    const fp = foldProfile(foldT, FOLD_DURATION);
-    f.set([foldActive ? 1 : 0, fp.s, fp.dsdt, FOLD_LIFT], o + 28);
+    f.set([foldActive ? 1 : 0, foldT, FOLD_ROLL_SECONDS, FOLD_FEED_SPEED], o + 28);
     // fold: the live bank top is reduced on the GPU (fold.wgsl); fold2.x is only the fallback
     const yMax = GEOMETRY.domain[1] - 3 * h;
     const bankTopFallback = Math.min(GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight, yMax);
@@ -426,7 +428,7 @@ export class GpuMpm implements GpuMpmSim {
     // rides the roll instead of only its innermost layer (design §3.3).
     const tackBand = p.gap + 1.0 * h;
     f.set([tackBand, 0.5 * h, 2 * h, 0.6], o + 36);
-    f.set([GEOMETRY.bankHalfDepth, 0.5 * h, FOLD_Z_SCALE, yMax], o + 40);
+    f.set([GEOMETRY.bankHalfDepth, 0.5 * h, FOLD_TILT, yMax], o + 40);
   }
 
   // ---------------------------------------------------------------------------

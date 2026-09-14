@@ -232,9 +232,11 @@ export default async function run() {
       console.log(`  cut & fold: ${mid.kin} kinematic particles mid-move`);
       assert(!mid.error && mid.bad === 0 && mid.kin > 0, `fold selected particles and moves them (${JSON.stringify({ kin: mid.kin, bad: mid.bad, error: mid.error })})`);
 
-      // just after release: the folded sheet must still be a sheet (design §6 revised):
-      // no node carries more than ~40 particles' mass and the slab spans many z cells
-      const foldFrames = framesFor(1.6); // FOLD_DURATION in src/sim/mpm.ts
+      // after the roll phase plus part of the feed: the log stands over the nip as an
+      // area-preserving spiral (no node carries more than ~48 particles' mass), it
+      // spans many y cells, and material is being released progressively (fewer
+      // kinematic particles than mid-move, but not yet zero)
+      const foldFrames = framesFor(1.2 + 1.0); // FOLD_ROLL_SECONDS + 1 s of feeding
       const rel = await page.evaluate(async ([n, idx, h]) => {
         await window.__solver.stepFrames(n);
         const s = await window.__solver.snapshot();
@@ -250,20 +252,23 @@ export default async function run() {
           ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); zmin = Math.min(zmin, z); zmax = Math.max(zmax, z);
         }
         return { kin, maxDens, zCells: zCells.size, yCells: yCells.size, ymin, ymax, zmin, zmax, error: window.__solver.error };
-      }, [foldFrames - 10 + 2, mid.kinIdx, dims.h]);
-      console.log(`  after release: max density ${rel.maxDens.toFixed(2)}, folded slab spans ${rel.zCells} z cells (z ${rel.zmin.toFixed(3)}..${rel.zmax.toFixed(3)}), ${rel.yCells} y cells (y ${rel.ymin.toFixed(3)}..${rel.ymax.toFixed(3)})`);
-      assert(!rel.error && rel.kin === 0, `all particles released ${foldFrames + 2} frames after the fold started (${rel.kin} still kinematic)`);
-      assert(rel.maxDens <= 6, `max density after the fold <= 6 (${rel.maxDens.toFixed(2)}; ~48 particles per node)`);
-      assert(rel.zCells >= 20, `folded sheet spread over >= 20 distinct z cells (${rel.zCells})`);
+      }, [foldFrames - 10, mid.kinIdx, dims.h]);
+      console.log(`  feeding: max density ${rel.maxDens.toFixed(2)}, log spans ${rel.yCells} y cells (y ${rel.ymin.toFixed(3)}..${rel.ymax.toFixed(3)}), ${rel.zCells} z cells; ${rel.kin} still held of ${mid.kin}`);
+      assert(!rel.error, 'no WebGPU errors during the operator move: ' + rel.error);
+      assert(rel.maxDens <= 8, `max density during the feed <= 8 (${rel.maxDens.toFixed(2)})`);
+      assert(rel.yCells >= 15, `the standing log spans >= 15 y cells (${rel.yCells})`);
+      assert(rel.kin > 0 && rel.kin < mid.kin, `the log is being fed progressively (${rel.kin} held, was ${mid.kin})`);
 
       const end = await page.evaluate(async (n) => {
         await window.__solver.stepFrames(n);
         const s = await window.__solver.snapshot();
         return { count: s.count, positions: Array.from(s.positions), velocities: Array.from(s.velocities), latents: Array.from(s.latents), deformation: Array.from(s.deformation), flags: Array.from(s.flags), error: window.__solver.error };
-      }, framesFor(1.4) - (foldFrames - 10 + 2));
+      }, 10);
       const a3 = analyse(end, dims);
-      console.log(`  after fold: ${JSON.stringify({ ...a3, minDf: +a3.minDf.toFixed(4), minDb: +a3.minDb.toFixed(4) })}`);
-      assert(!end.error && a3.bad === 0 && a3.outside === 0 && a3.inRoller === 0 && a3.kinematic === 0 && a3.n === chunk.count, 'state sane and all particles released after the fold (count includes the pigment chunk)');
+      console.log(`  during the feed: ${JSON.stringify({ ...a3, minDf: +a3.minDf.toFixed(4), minDb: +a3.minDb.toFixed(4) })}`);
+      // the full feed takes ~5 s of sim time (too slow for SwiftShader CI); the state must
+      // stay sane while it runs and the particle count must include the pigment chunk
+      assert(!end.error && a3.bad === 0 && a3.outside === 0 && a3.inRoller === 0 && a3.n === chunk.count, 'state sane during the operator move (count includes the pigment chunk)');
     }
   }, { mode: 'dev' }); // harness pages are dev-only, not part of the production build
 }

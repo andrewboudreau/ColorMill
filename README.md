@@ -4,8 +4,8 @@ A browser-based **two-roll mill simulator**: a bank of white silicone putty
 
 ![The v2 mill after two seconds at the low preset: a rolling bank on the two rolls, a continuous sheet around the front roll, pigment dollops being drawn into the nip](docs/screenshots/mill-low-2s.png)
 sits on two counter-rotating rollers, gets dragged through the nip, sheets
-onto the front roll, and is cut off, rolled into a log, turned and fed back in
-end-on. Tap a pigment to drop a chunk of concentrated coloured putty on the bank and
+onto the front roll, and is cut off, rolled into a log, stood over the nip and fed back
+in end-first. Tap a pigment to drop a chunk of concentrated coloured putty on the bank and
 watch it streak and fold through the batch — blue and yellow fold into real green, not grey.
 
 Version 2 runs the whole thing on the GPU with **WebGPU compute** (MLS-MPM
@@ -70,10 +70,10 @@ gets. Full detail, including every constant, is in
 
 | Preset | Cells / unit | Grid (cells) | Particles (approx.) | Substep `dt` | Substeps / frame | Target |
 | --- | --- | --- | --- | --- | --- | --- |
-| low | 32 | 48 × 56 × 48 | 85k | 1.6e-3 | 8 | integrated / mobile GPU |
-| medium | 48 | 72 × 84 × 72 | 285k | 1.1e-3 | 12 | laptop GPU |
-| high (default) | 64 | 96 × 112 × 96 | 683k | 8e-4 | 16 | desktop GPU |
-| ultra | 72 | 108 × 126 × 108 | 972k | 7.1e-4 | 18 | discrete GPU |
+| low | 32 | 48 × 72 × 48 | 85k | 1.6e-3 | 8 | integrated / mobile GPU |
+| medium | 48 | 72 × 108 × 72 | 285k | 1.1e-3 | 12 | laptop GPU |
+| high (default) | 64 | 96 × 144 × 96 | 683k | 8e-4 | 16 | desktop GPU |
+| ultra | 72 | 108 × 162 × 108 | 972k | 7.1e-4 | 18 | discrete GPU |
 
 The app steps the preset down automatically when frames stay above 45 ms
 (unless a preset was chosen explicitly), so a slow GPU lands on the largest

@@ -16,7 +16,7 @@ import './styles.css';
 import { BASE_LATENT, findPigment, rgbToLatentAsync } from './color/pigments';
 import {
   DEFAULT_MATERIAL, DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS, QUALITY_PRESETS, estimateParticleCount, gridDims,
-  type MillConfig, type MillParams, type QualityPreset
+  type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
 import type { CameraState, Renderer } from './render/types';
@@ -357,9 +357,16 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   document.addEventListener('visibilitychange', onVisibility);
 
   // --- build / rebuild --------------------------------------------------------------
+  // material constants can be overridden from the URL for experiments (?E=30&thetaS=0.02)
+  const materialOverride: { -readonly [K in keyof MaterialConstants]: number } = { ...DEFAULT_MATERIAL };
+  for (const k of ['E', 'nu', 'thetaC', 'thetaS'] as const) {
+    const v = parseFloat(query.get(k) ?? '');
+    if (Number.isFinite(v) && v > 0) materialOverride[k] = v;
+  }
+  const material: MaterialConstants = materialOverride;
   const buildConfig = (p: QualityPreset, params: MillParams): MillConfig => ({
     quality: QUALITY_PRESETS[p],
-    material: DEFAULT_MATERIAL,
+    material,
     params: { ...params }
   });
 

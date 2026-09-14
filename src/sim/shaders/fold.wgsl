@@ -1,26 +1,26 @@
 // Operator move (design §6): cut the WHOLE sheet off the front roll, roll it up
-// into a log, turn the log 90 degrees so it lies across the mill over the nip,
-// and set it down on the bank for the rolls to draw in again. This is how an
-// operator mixes along the roll axis: material that sat at one x now spans the
-// log's cross-section, and the log is fed in end-on.
+// into a log, stand the log over the nip and FEED it in end-first, the way an
+// operator does (the rolls consume it over a few seconds and its spiral
+// cross-section, every colour interleaved, is squeezed out across the full roll
+// width). That is how a two-roll mill mixes along the roll axis.
 //
-// Each selected particle is parameterised by (x, thickness t = d_front - R,
-// arc length s around the front axis from the nip, in the direction of rotation).
+// Each selected particle is parameterised by (x, thickness t = d_front - R, arc
+// length s around the front axis from the nip, in the direction of rotation).
 // Rolling the sheet (thickness g = gap) from the cut end gives an area-preserving
-// spiral: radius rho = sqrt(rc^2 + s_rel * g / pi), turns n = (rho - rc) / g,
-// angle phi = 2 pi n; cross-section point (u, v) = (rho + t) (cos phi, sin phi).
-// Turning the log 90 degrees maps the sheet's x to the log's axis along z:
-//   x1 = L/2 + u,  y1 = liveBankTop + rLog + v,  z1 = nipZ + (x - L/2) * zScale
-// The bank top is the live one: `select` reduces max(y) over non-stray bank
-// particles into info[0] with atomicMax on the float bits (monotonic for y > 0),
-// and the min/max arc of the selection into info[2]/info[1]; `move` and `finish`
-// read them directly - no readback.
+// spiral: rho = sqrt(rc^2 + s_rel * g / pi), turns n = (rho - rc) / g,
+// phi = 2 pi n; cross-section point (u, v) = (rho + t) (cos phi, sin phi).
+// The sheet is folded in half across its width first (log = L/2 long, 2g thick),
+// then the log stands tilted over the nip: axis a = (0, cos tilt, sin tilt) (up
+// and toward the viewer), lower end just above the rolls at (L/2, *, nipZ); the
+// sheet's x runs along the axis (the x = 0 and x = L ends go in first).
 //   select: mark the sheet (d_front < R + 3h, y < axisY or z > frontAxisZ, i.e.
-//           never the nip channel) kinematic and store (p0, arc).
-//   move:   each substep while active: p(s) = lerp(p0, p1, s) + up * sin(pi s) * lift,
-//           v = dp/ds * ds/dt (P.fold = active, s, ds/dt, lift); y clamped to fold3.w.
-//   finish: clear the flag, x = p1, v = scripted end velocity, C = 0, F kept,
-//           P2G affine rebuilt from F.
+//           never the nip channel) kinematic and store (p0, arc); reduce the live
+//           bank top and the arc range into `info` (atomics, no readback).
+//   move:   t < T_roll: p(s) = lerp(p0, pLog, smoothstep(t / T_roll)).
+//           t >= T_roll: the log translates along -a at the feed speed; a particle
+//           that reaches the release plane (the roll tops) is released: flag
+//           cleared, C = 0, F kept, v = feed velocity, P2G affine rebuilt.
+//   finish: release whatever is still held.
 @group(0) @binding(1) var<storage, read_write> pos : array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read_write> vel : array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read_write> cbuf : array<f32>;
@@ -39,28 +39,51 @@ fn liveBankTop() -> f32 {
   return select(y, P.fold2.x, y <= 0.0);   // fallback: seeded bank top
 }
 
+fn logAxis() -> vec3<f32> {
+  let tilt = P.fold3.z;
+  return vec3<f32>(0.0, cos(tilt), sin(tilt));
+}
+
+// (position in the standing log at t = T_roll, radius of the log)
+// (position in the standing log at t = T_roll). The sheet is first folded in
+// half across its width (x = L/2 onto x = 0) as an operator does, so the log is
+// half the roll length and twice the sheet thickness; then rolled up.
 fn foldTarget(p0 : vec3<f32>, arc : f32) -> vec3<f32> {
   let h = P.hdt.x;
   let L = P.fold2.y;
   let R = P.front.w;
   let g = max(P.fold2.z, 2.0 * h);            // sheet thickness = nip gap
-  let t = clamp(rollerDist(P.front.x, P.front.y, p0) - R, 0.0, 0.95 * g);   // within one turn of the spiral
+  let g2 = 2.0 * g;                            // folded sheet thickness
+  let tRaw = clamp(rollerDist(P.front.x, P.front.y, p0) - R, 0.0, 0.95 * g);
+  let secondHalf = p0.x >= 0.5 * L;
+  let along = select(p0.x, L - p0.x, secondHalf);      // x = 0 and x = L ends go in first
+  let t = tRaw + select(0.0, g, secondHalf);           // the folded-over half is the outer layer
   let arcMax = bitcast<f32>(atomicLoad(&info[1]));
   let arcMin = bitcast<f32>(atomicLoad(&info[2]));
   let sRel = max(arc - arcMin, 0.0);
-  let sLen = max(arcMax - arcMin, g);
-  let rc = g;                                  // the small hole a rolled sheet leaves
-  let rho = sqrt(rc * rc + sRel * g / PI);
-  let rLog = sqrt(rc * rc + sLen * g / PI) + g;
-  let phi = 2.0 * PI * (rho - rc) / g;
+  let sLen = max(arcMax - arcMin, g2);
+  let rc = g2;                                 // the small hole a rolled sheet leaves
+  let rho = sqrt(rc * rc + sRel * g2 / PI);
+  let rLog = sqrt(rc * rc + sLen * g2 / PI) + g2;
+  let phi = 2.0 * PI * (rho - rc) / g2;
   let rr = rho + t;
-  let u = rr * cos(phi);
-  let v = rr * sin(phi);
-  let base = min(liveBankTop(), P.fold3.w - 2.0 * rLog - P.fold3.y);
-  let x1 = clamp(0.5 * L + u, 1.5 * h, L - 1.5 * h);
-  let y1 = clamp(base + rLog + v + P.fold3.y, 1.5 * h, P.fold3.w);
-  let z1 = clamp(P.fold2.w + (p0.x - 0.5 * L) * P.fold3.z, 1.5 * h, P.domain.z - 1.5 * h);
-  return vec3<f32>(x1, y1, z1);
+  let a = logAxis();
+  let e1 = vec3<f32>(1.0, 0.0, 0.0);
+  let e2 = normalize(cross(a, e1));
+  // the log's lower end face rests on the live bank top (or clears the roll tops
+  // when the bank is gone); its lowest point is rLog * sin(tilt) below the centre
+  let tilt = P.fold3.z;
+  let endDrop = rLog * sin(tilt);
+  var baseY = max(liveBankTop() + endDrop + P.fold3.y, P.front.x + R + rLog + P.fold3.y);
+  // never squash the log against the ceiling: if the bank (or a chunk still in the
+  // air over it) is high, the log sinks into it instead
+  let logLen = 0.5 * L;
+  baseY = min(baseY, P.fold3.w - logLen * cos(tilt) - endDrop - h);
+  let base = vec3<f32>(0.5 * L, baseY, P.fold2.w);
+  var q = base + a * along + e1 * (rr * cos(phi)) + e2 * (rr * sin(phi));
+  let lo = vec3<f32>(1.5 * h);
+  q = clamp(q, lo, vec3<f32>(P.domain.x, P.fold3.w, P.domain.z) - lo);
+  return q;
 }
 
 fn loadMatF(p : u32) -> mat3x3<f32> {
@@ -82,8 +105,9 @@ fn select_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgrou
   let dz = x.z - P.front.y;
   let d = sqrt(dy * dy + dz * dz);
 
-  // live bank top: non-stray material over the nip region
-  if (abs(x.z - P.fold2.w) < P.fold3.x && x.y > P.front.x) {
+  // live bank top under the log's footprint (over the nip, around x = L/2):
+  // non-stray material only
+  if (abs(x.z - P.fold2.w) < P.fold3.x && abs(x.x - 0.5 * P.fold2.y) < 0.35 && x.y > P.front.x) {
     let c = clamp(vec3<i32>(round(x * P.hdt.y)), vec3<i32>(0), vec3<i32>(P.grid.xyz) - vec3<i32>(1));
     if (decodeFixed(pmass[nodeIndexI(c)], MASS_SCALE) >= PMASS_MIN) {
       atomicMax(&info[0], bitcast<u32>(x.y));
@@ -104,43 +128,8 @@ fn select_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgrou
   }
 }
 
-@compute @workgroup_size(128)
-fn move_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
-  let p = particleIndex(gid, nwg);
-  if (p >= P.grid.w) { return; }
-  if ((flags[p] & 1u) == 0u) { return; }
-  let f0 = fold0[p];
-  let p0 = f0.xyz;
-  let p1 = foldTarget(p0, f0.w);
-  let s = P.fold.y;
-  let dsdt = P.fold.z;
-  let lift = P.fold.w;
-  let up = vec3<f32>(0.0, 1.0, 0.0);
-  var x = mix(p0, p1, s) + up * (sin(PI * s) * lift);
-  var v = ((p1 - p0) + up * (PI * cos(PI * s) * lift)) * dsdt;
-  if (x.y > P.fold3.w) { x.y = P.fold3.w; v.y = 0.0; }
-  let lo = vec3<f32>(1.5 * P.hdt.x);
-  x = clamp(x, lo, P.domain.xyz - lo);
-  pos[p] = vec4<f32>(x, pos[p].w);
+fn release(p : u32, v : vec3<f32>) {
   vel[p] = vec4<f32>(v, 0.0);
-}
-
-@compute @workgroup_size(128)
-fn finish_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
-  let p = particleIndex(gid, nwg);
-  if (p >= P.grid.w) { return; }
-  if ((flags[p] & 1u) == 0u) { return; }
-  let f0 = fold0[p];
-  let p0 = f0.xyz;
-  let p1 = foldTarget(p0, f0.w);
-  let lo = vec3<f32>(1.5 * P.hdt.x);
-  let x = clamp(p1, lo, P.domain.xyz - lo);
-  // scripted velocity at the end of the move (ds/dt -> 0, so ~0)
-  let up = vec3<f32>(0.0, 1.0, 0.0);
-  let v = ((p1 - p0) + up * (PI * cos(PI * P.fold.y) * P.fold.w)) * P.fold.z;
-  pos[p] = vec4<f32>(x, pos[p].w);
-  vel[p] = vec4<f32>(v, 0.0);
-  // keep F (the sheet's deformation state), drop C, rebuild the P2G affine from F
   var F = loadMatF(p);
   if (isBadMat(F) || isBad(det3(F))) { F = identity3(); }
   let zero = mat3x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
@@ -153,4 +142,50 @@ fn finish_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgrou
     abuf[b + c] = ar[c];
   }
   flags[p] = flags[p] & ~1u;
+}
+
+@compute @workgroup_size(128)
+fn move_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
+  let p = particleIndex(gid, nwg);
+  if (p >= P.grid.w) { return; }
+  if ((flags[p] & 1u) == 0u) { return; }
+  let f0 = fold0[p];
+  let p0 = f0.xyz;
+  let pLog = foldTarget(p0, f0.w);
+  let t = P.fold.y;
+  let tRoll = P.fold.z;
+  let feed = P.fold.w;
+  let a = logAxis();
+  let lo = vec3<f32>(1.5 * P.hdt.x);
+  let hi = vec3<f32>(P.domain.x, P.fold3.w, P.domain.z) - lo;
+  if (t < tRoll) {
+    // roll: fly from the sheet into the standing log
+    let tau = clamp(t / tRoll, 0.0, 1.0);
+    let s = tau * tau * (3.0 - 2.0 * tau);
+    let dsdt = 6.0 * tau * (1.0 - tau) / tRoll;
+    let x = clamp(mix(p0, pLog, s), lo, hi);
+    let v = (pLog - p0) * dsdt;
+    pos[p] = vec4<f32>(x, pos[p].w);
+    vel[p] = vec4<f32>(v, 0.0);
+    return;
+  }
+  // feed: the log descends along its axis; release what reaches the roll tops
+  let x = clamp(pLog - a * (feed * (t - tRoll)), lo, hi);
+  let v = -a * feed;
+  pos[p] = vec4<f32>(x, pos[p].w);
+  // release where the log meets the bank (or the roll tops when there is no bank)
+  let releaseY = max(liveBankTop() + P.hdt.x, P.front.x + P.front.w + 3.0 * P.hdt.x);
+  if (x.y <= releaseY) {
+    release(p, v);
+  } else {
+    vel[p] = vec4<f32>(v, 0.0);
+  }
+}
+
+@compute @workgroup_size(128)
+fn finish_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
+  let p = particleIndex(gid, nwg);
+  if (p >= P.grid.w) { return; }
+  if ((flags[p] & 1u) == 0u) { return; }
+  release(p, -logAxis() * P.fold.w);
 }

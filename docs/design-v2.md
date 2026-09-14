@@ -26,7 +26,7 @@ gap — we exaggerate the gap so it is resolvable on the grid).
 | Symbol | Value | Meaning |
 | --- | --- | --- |
 | `L` | 1.5 | Roller (and domain) length along x |
-| `domain` | (1.5, 1.75, 1.5) | Domain size (x, y, z); origin at (0,0,0); the headroom holds the operator's log and dropped pigment chunks |
+| `domain` | (1.5, 2.25, 1.5) | Domain size (x, y, z); origin at (0,0,0); the headroom holds the operator's standing log and dropped pigment chunks |
 | `R` | 0.32 | Roller radius |
 | `yc` | 0.55 | Height of both roller axes |
 | `zNip` | 0.75 | z of the nip centre (mid-plane between rollers) |
@@ -54,10 +54,10 @@ Node counts are `N = round(domain / h) + 1` per axis; see
 
 | preset | cellsPerUnit | h | cells (x,y,z) | seeded particles (approx) |
 | --- | --- | --- | --- | --- |
-| low | 32 | 0.03125 | 48×56×48 | 85k (+50% pool) |
-| medium | 48 | 0.02083 | 72×84×72 | 285k (+50% pool) |
-| high (default) | 64 | 0.015625 | 96×112×96 | 683k (+50% pool) |
-| ultra | 72 | 0.01389 | 108×126×108 | 972k (+50% pool) |
+| low | 32 | 0.03125 | 48×72×48 | 85k (+50% pool) |
+| medium | 48 | 0.02083 | 72×108×72 | 285k (+50% pool) |
+| high (default) | 64 | 0.015625 | 96×144×96 | 683k (+50% pool) |
+| ultra | 72 | 0.01389 | 108×162×108 | 972k (+50% pool) |
 
 Each sim also reserves particle capacity for pigment chunks (50% of the
 seeded bank): a tap adds a sphere of new pigmented putty (radius 0.14) above
@@ -280,30 +280,37 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
 
 ---
 
-## 6. Operator: cut, roll, turn and feed (implemented)
+## 6. Operator: cut, roll and feed (implemented)
 
-A real operator cuts the sheet off the front roll, rolls it into a log, turns
-the log 90° and feeds it back in end-on; that is the only source of mixing
-along the roll axis. Model it as a scripted kinematic move over `T = 1.6 s`:
+A real operator cuts the sheet off the front roll, rolls it into a log, stands
+the log over the nip and feeds it in end-first; the rolls consume it over a few
+seconds and its spiral cross-section, every colour interleaved, is squeezed
+out across the full roll width. That is the only source of mixing along the
+roll axis. Modelled as a scripted kinematic move:
 
-1. Select the whole sheet on the front roll: `d < R + 3h` from the front axis
-   and `y < axisY` or `z > frontAxisZ` (never the nip channel).
-2. Parameterise each particle by `(x, t = d − R, s)` with `s` the arc length
-   around the front axis from the nip in the direction of rotation. Rolling
-   the sheet (thickness `g` = gap) from the cut end is an area-preserving
-   spiral: `ρ = sqrt(rc² + s·g/π)`, turns `n = (ρ − rc)/g`, `φ = 2πn`, with a
-   small core `rc = g`. Cross-section point `(u, v) = (ρ + t)(cos φ, sin φ)`.
-   Turning the log maps the sheet's x to the log's axis along z:
-   `x1 = L/2 + u`, `y1 = bankTop + rLog + v`, `z1 = zNip + 0.9·(x − L/2)`,
-   where `bankTop` is the live bank top reduced on the GPU (atomicMax over
-   bank particles in the select kernel) and `rLog` the log radius.
-3. Move along a raised arc `p(s) = lerp(p0,p1,s) + up·sin(π s)·0.25`,
-   `s = smoothstep(t/T)`, with `v` the analytical derivative. On release keep
-   `F`, set `C = 0`, and let the rolls draw the log in.
+1. **Select** the whole sheet on the front roll: `d < R + 3h` from the front
+   axis and `y < axisY` or `z > frontAxisZ` (never the nip channel). Reduce
+   the live bank top and the arc range of the selection into a small buffer
+   with atomics (no readback).
+2. **Roll** (`FOLD_ROLL_SECONDS` = 1.2 s): each particle, parameterised by
+   `(x, t = d − R, s)` with `s` the arc length from the nip, flies to its
+   place in the log. The sheet is first folded in half across its width
+   (x = L/2 onto x = 0, the folded half as the outer layer), so the log is
+   `L/2` long and `2g` thick; rolling it from the cut end is an
+   area-preserving spiral `ρ = sqrt(rc² + s·2g/π)`, `φ = 2π(ρ − rc)/2g`,
+   core `rc = 2g`. The log stands tilted `FOLD_TILT` (0.42 rad) from vertical
+   toward the viewer, axis `a = (0, cos, sin)`, lower end face resting on the
+   live bank top over the nip (never squashed against the ceiling: if the
+   bank is high the log sinks into it).
+3. **Feed** (`FOLD_FEED_SPEED` = 0.15 units/s along the axis): the held log
+   descends along `−a`; a particle that reaches the release plane (the live
+   bank top + h, or the roll tops + 3h) is released: flag cleared, `C = 0`,
+   `F` kept, `v` = feed velocity, P2G affine rebuilt. The rolls take the
+   released material through the nip. The move ends when the log is used up
+   (`FOLD_DURATION` ≈ 6.5 s); `finish` releases anything still held.
 
-Nothing is placed inside existing material (the earlier "fold onto the bank"
-overlapped the bank and read as lost mass). Exposed as `GpuMpmSim.cutAndFold()`;
-the UI button is "Cut & roll" (F).
+Nothing is placed inside existing material. Exposed as
+`GpuMpmSim.cutAndFold()`; the UI button is "Cut & roll" (F).
 
 ---
 

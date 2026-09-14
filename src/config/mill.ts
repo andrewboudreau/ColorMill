@@ -98,9 +98,10 @@ export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max:
 
 /** Fixed geometry (sim units). */
 export const GEOMETRY = {
-  /** domain size (x, y, z); origin at (0,0,0). y leaves headroom above the bank
-      for a rolled-up sheet (the operator's log) and for pigment chunks to drop in. */
-  domain: [1.5, 1.75, 1.5] as readonly [number, number, number],
+  /** domain size (x, y, z); origin at (0,0,0). y leaves headroom above the rolls
+      for the operator's rolled-up sheet standing over the nip while it is fed in,
+      and for pigment chunks to drop in. */
+  domain: [1.5, 2.25, 1.5] as readonly [number, number, number],
   /** roller length along x == domain x */
   length: 1.5,
   /** roller radius */

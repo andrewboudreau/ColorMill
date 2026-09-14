@@ -44,7 +44,7 @@
 
       <p class="pill">Project documentation &middot; version 2</p>
       <h1>ColorMill</h1>
-      <p class="lead">ColorMill is a browser-based two-roll mill simulator. A bank of white silicone putty rests on two counter-rotating rollers, is dragged through the nip, sheets onto the front roll and is cut off, rolled into a log, turned and fed back in end-on. Tap a pigment to drop a chunk of coloured putty onto the bank and watch it disperse. Version 2 runs the whole simulation on the GPU with WebGPU compute (MLS-MPM, up to a million material points), models the material as an elastoplastic putty, and renders it as a ray-marched glossy surface with physically plausible pigment mixing.</p>
+      <p class="lead">ColorMill is a browser-based two-roll mill simulator. A bank of white silicone putty rests on two counter-rotating rollers, is dragged through the nip, sheets onto the front roll and is cut off, rolled into a log, stood over the nip and fed back in end-first. Tap a pigment to drop a chunk of coloured putty onto the bank and watch it disperse. Version 2 runs the whole simulation on the GPU with WebGPU compute (MLS-MPM, up to a million material points), models the material as an elastoplastic putty, and renders it as a ray-marched glossy surface with physically plausible pigment mixing.</p>
 
       <section class="callout">
         <strong>Design rule (unchanged since v1):</strong> transport happens everywhere, but <em>mixing</em> happens where the material is sheared &mdash; at the nip. In v2 that rule is literal: pigment dispersion is driven by the local shear rate, so colours stay crisp in the resting bank and blend in the gap.
@@ -133,7 +133,7 @@
       <p>Every particle carries a 7-float <strong>Mixbox latent</strong> (three Kubelka&ndash;Munk pigment weights plus a residual). Latents are linear under mass-weighted averaging, so transport, rastering and blending are plain arithmetic, and the polynomial that turns a latent into RGB is evaluated once per pixel in the render shader. Mixing is not diffusion: once per frame each particle moves its latent toward the node-averaged latent around it by <code>k &middot; &gamma; &middot; dt</code>, where <code>&gamma;</code> is the local shear rate read off the particle's own APIC affine matrix. In the resting bank <code>&gamma; &asymp; 0</code> and colours stay crisp; in the nip they blend. Blue and yellow fold into green because the mixing is done in pigment space, not RGB.</p>
 
       <h3>Cut &amp; roll</h3>
-      <p>A two-roll mill has no axial transport; the operator cuts the sheet off the front roll, rolls it into a log, turns the log 90&deg; and feeds it back in end-on, and that is where lateral mixing comes from. v2 scripts the move: the whole sheet is marked kinematic, each particle is mapped into an area-preserving spiral (the rolled sheet) whose axis now runs across the mill, flown along a raised arc onto the live bank top (1.6&nbsp;s), then released for the rolls to draw the log in. Nothing is placed inside existing material, so no volume is lost; material from every position along the roll ends up in the log's cross-section and is spread back out as the nip flattens it.</p>
+      <p>A two-roll mill has no axial transport; the operator cuts the sheet off the front roll, rolls it into a log, turns the log 90&deg; and feeds it back in end-on, and that is where lateral mixing comes from. v2 scripts the move: the whole sheet is marked kinematic, folded in half across its width and mapped into an area-preserving spiral (the rolled log) standing tilted over the nip on the bank (1.2&nbsp;s); the log is then fed down at a fixed speed and released progressively where it meets the bank, so the rolls consume it end-first over a few seconds. Nothing is placed inside existing material, so no volume is lost; material from every position along the roll ends up in the log's cross-section and is spread back out across the width as the nip flattens it.</p>
 
       <h3>Rendering</h3>
       <p>A single fullscreen ray-march pass walks the density volume, finds the iso-surface, takes the normal from the density gradient, decodes the latent at the hit into an albedo and shades it with a key, fill and rim light, a two-lobe specular (silicone putty is glossy) and a cheap density-based ambient occlusion that darkens creases and the nip. The rolls (brushed metal with a rotating stripe so speed is visible) and the tray are analytic and depth-composited, so they stay crisp at every grid resolution.</p>
@@ -151,10 +151,10 @@ URL          ?preset=low|medium|high|ultra forces a quality preset</pre>
       <div class="wrap">
       <table>
         <tr><th>Preset</th><th>Cells / unit</th><th>Grid (cells)</th><th>Particles</th><th>Substep dt</th><th>Substeps / frame</th><th>Target</th></tr>
-        <tr><td>low</td><td>32</td><td>48 &times; 56 &times; 48</td><td>~85k</td><td>1.6e-3</td><td>8</td><td>integrated / mobile GPU</td></tr>
-        <tr><td>medium</td><td>48</td><td>72 &times; 84 &times; 72</td><td>~285k</td><td>1.1e-3</td><td>12</td><td>laptop GPU</td></tr>
-        <tr><td>high (default)</td><td>64</td><td>96 &times; 112 &times; 96</td><td>~683k</td><td>8e-4</td><td>16</td><td>desktop GPU</td></tr>
-        <tr><td>ultra</td><td>72</td><td>108 &times; 126 &times; 108</td><td>~972k</td><td>7.1e-4</td><td>18</td><td>discrete GPU</td></tr>
+        <tr><td>low</td><td>32</td><td>48 &times; 72 &times; 48</td><td>~85k</td><td>1.6e-3</td><td>8</td><td>integrated / mobile GPU</td></tr>
+        <tr><td>medium</td><td>48</td><td>72 &times; 108 &times; 72</td><td>~285k</td><td>1.1e-3</td><td>12</td><td>laptop GPU</td></tr>
+        <tr><td>high (default)</td><td>64</td><td>96 &times; 144 &times; 96</td><td>~683k</td><td>8e-4</td><td>16</td><td>desktop GPU</td></tr>
+        <tr><td>ultra</td><td>72</td><td>108 &times; 162 &times; 108</td><td>~972k</td><td>7.1e-4</td><td>18</td><td>discrete GPU</td></tr>
       </table>
       </div>
       <p>Only <code>dt</code> and the substep count change between presets; the material constants are the same, so the mill behaves the same at every quality. Simulated time per frame is <code>dt &times; substeps</code> (about 13&nbsp;ms at <code>high</code>): at 60&nbsp;fps the mill runs at roughly 0.8&times; real time, and the HUD shows the actual ratio. The app picks <code>medium</code> on non-discrete GPUs (<code>low</code> on mobile) and <code>high</code> otherwise.</p>

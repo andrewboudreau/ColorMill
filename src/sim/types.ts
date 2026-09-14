@@ -73,6 +73,12 @@ export interface GpuMpmSim {
   reset(): void;
   /** Blend a pigment into particles inside a sphere (design §5). */
   addPigment(center: readonly [number, number, number], radius: number, latent: Latent, strength?: number): void;
+  /**
+   * Blend a pigment into a sphere sitting just under the material surface at
+   * (x, z): the GPU probes the highest particle in the column, so the dollop
+   * lands on the bank wherever it has slumped or drained to (design §5).
+   */
+  addPigmentOnSurface(x: number, z: number, radius: number, latent: Latent, strength?: number): void;
   /** Set every particle's pigment back to the base latent. */
   clearPigment(): void;
   /** Start the scripted operator cut-and-fold move (design §6). No-op if one is running. */

@@ -136,6 +136,7 @@ export class GpuMpm implements GpuMpmSim {
   private readonly paramsU32: Uint32Array;
   private readonly bufInject: GPUBuffer;
   private readonly bufInjectAll: GPUBuffer;
+  private readonly bufProbe: GPUBuffer;
   private readonly uniformSlots: number;
   private readonly volA: GPUTexture;
   private readonly volB: GPUTexture;
@@ -195,6 +196,7 @@ export class GpuMpm implements GpuMpmSim {
     this.paramsU32 = new Uint32Array(this.paramsData.buffer);
     this.bufInject = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bufInjectAll = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.bufProbe = device.createBuffer({ label: 'GpuMpm-probe', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
 
     const texUsage = GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC;
     this.volA = device.createTexture({ size: [d.nx, d.ny, d.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'volA' });
@@ -314,8 +316,9 @@ export class GpuMpm implements GpuMpmSim {
         [ro(this.bufPos), ro(this.bufC), rw(this.bufLat), ro(this.bufPMass), ro(this.bufPLat), ro(this.bufFlags)]),
       pack: this.makeKernel('pack', mod('pack', packSrc), 'main',
         [ro(this.bufPMass), ro(this.bufPLat), { kind: 'storageTexture', view: volAView }, { kind: 'storageTexture', view: volBView }]),
-      inject: this.makeKernel('inject', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInject }, ro(this.bufPos), rw(this.bufLat)]),
-      injectAll: this.makeKernel('injectAll', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInjectAll }, ro(this.bufPos), rw(this.bufLat)]),
+      inject: this.makeKernel('inject', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInject }, ro(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
+      probe: this.makeKernel('probe', injectMod, 'probeColumn', [{ kind: 'uniform', buffer: this.bufInject }, ro(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
+      injectAll: this.makeKernel('injectAll', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInjectAll }, ro(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
       reset: this.makeKernel('reset', mod('reset', resetSrc), 'main',
         [rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags)]),
       foldSelect: this.makeKernel('foldSelect', foldMod, 'select_', foldRes),
@@ -548,13 +551,32 @@ export class GpuMpm implements GpuMpmSim {
 
   addPigment(center: readonly [number, number, number], radius: number, latent: Latent, strength = 1): void {
     if (this.destroyed) return;
+    this.device.queue.writeBuffer(this.bufInject, 0, this.injectData(center, radius, latent, strength, 0));
+    this.runParticleKernel(this.kernels.inject);
+  }
+
+  addPigmentOnSurface(x: number, z: number, radius: number, latent: Latent, strength = 1): void {
+    if (this.destroyed) return;
+    // fallback centre (used when the column is empty): the seeded bank top
+    const yTop = GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight - 0.5 * radius;
+    this.device.queue.writeBuffer(this.bufInject, 0, this.injectData([x, yTop, z], radius, latent, strength, 2));
+    this.device.queue.writeBuffer(this.bufProbe, 0, new Uint32Array([0, 0, 0, 0]));
+    const enc = this.device.createCommandEncoder({ label: 'GpuMpm-inject-surface' });
+    const pass = enc.beginComputePass();
+    this.dispatchParticles(pass, this.kernels.probe, 0);
+    this.dispatchParticles(pass, this.kernels.inject, 0);
+    this.encodeFrameKernels(pass, 0, false);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+  }
+
+  private injectData(center: readonly [number, number, number], radius: number, latent: Latent, strength: number, mode: number): Float32Array {
     const inj = new Float32Array(16);
     inj.set([center[0], center[1], center[2], Math.max(radius, 1e-6)], 0);
     inj.set(latent.slice(0, 4), 4);
     inj.set([latent[4], latent[5], latent[6], strength], 8);
-    new Uint32Array(inj.buffer)[12] = 0;
-    this.device.queue.writeBuffer(this.bufInject, 0, inj);
-    this.runParticleKernel(this.kernels.inject);
+    new Uint32Array(inj.buffer)[12] = mode;
+    return inj;
   }
 
   clearPigment(): void {
@@ -644,7 +666,7 @@ export class GpuMpm implements GpuMpmSim {
     if (this.destroyed) return;
     this.destroyed = true;
     for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufFold, this.bufFoldInfo,
-      this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll]) {
+      this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll, this.bufProbe]) {
       b.destroy();
     }
     this.readbackStaging?.destroy();

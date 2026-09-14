@@ -19,6 +19,7 @@ import { DEFAULT_PARAMS, GEOMETRY, QUALITY_PRESETS, gridDims, rollerPoses } from
 // Mixbox endpoint latents (src/sim/mixbox.c)
 const BLUE = [0.86413725, 0.00441961, 0.02987264, 0.10157050, -0.05379499, -0.01226009, 0.00350272];
 const YELLOW = [0.00392157, 0.85950980, 0.00000000, 0.13656863, 0.03300247, 0.10249173, -0.08066935];
+const RED = [0.00000000, 0.33960806, 0.65860828, 0.00178365, 0.08873356, -0.01747544, -0.06755477];
 
 /** Mixbox latent -> rgb (port of EvalPolynomial + residual). */
 export function latentToRgb(z) {
@@ -184,6 +185,24 @@ export default async function run() {
     assert(dens.bad === 0, 'density volume has no NaN/Inf');
     assert(Math.abs(dens.sum * 8 - init.count) < 0.02 * init.count, 'density volume integrates to the particle count');
     assert(dens.max > 0.5, 'packed cells reach density ~1');
+
+    // --- late surface injection: after the bank has slumped/drained, a tap over the
+    // nip must still land on material (the GPU probes the column for the surface) ---
+    const late = await page.evaluate(async (red) => {
+      const before = await window.__solver.snapshot();
+      window.__solver.sim.addPigmentOnSurface(0.75, 0.75, 0.1, red);
+      await window.__solver.stepFrames(1);
+      const after = await window.__solver.snapshot();
+      let changed = 0, top = 0;
+      for (let p = 0; p < after.count; p++) {
+        let d = 0;
+        for (let c = 0; c < 7; c++) d += Math.abs(after.latents[7 * p + c] - before.latents[7 * p + c]);
+        if (d > 1e-3) { changed++; top = Math.max(top, after.positions[3 * p + 1]); }
+      }
+      return { changed, top, error: window.__solver.error };
+    }, RED);
+    console.log(`  late surface tap at x=0.75: ${late.changed} particles pigmented (highest y ${late.top.toFixed(3)})`);
+    assert(!late.error && late.changed > 200, `a tap after ${((stabilityFrames + mixFrames) * secPerFrame).toFixed(1)} s of milling still pigments material (${late.changed} changed)`);
 
     // --- optional: cut & fold ---------------------------------------------
     if (doFold) {

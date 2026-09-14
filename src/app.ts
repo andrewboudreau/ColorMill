@@ -200,15 +200,16 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     if (!sim) return;
     const L = GEOMETRY.length;
     const x = 0.15 + Math.random() * (L - 0.3);
-    // a dollop on top of the bank, sitting over the nip so the rollers draw it in
-    const y = GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight - 0.03;
+    // a dollop on top of whatever material is over the nip at this x (the GPU
+    // finds the surface, so it works after the bank has slumped or drained)
     const z = GEOMETRY.nipZ;
     try {
-      sim.addPigment([x, y, z], PIGMENT_RADIUS, latent);
+      sim.addPigmentOnSurface(x, z, PIGMENT_RADIUS, latent);
     } catch (e) {
       reportError('addPigment failed', e);
     }
   };
+
   const tapPigment = (name: string): void => {
     const p = findPigment(name);
     if (!p) throw new Error(`unknown pigment "${name}"`);

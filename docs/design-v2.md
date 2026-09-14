@@ -201,7 +201,7 @@ Constants (in `config.material`):
 
 | name | default | meaning |
 | --- | --- | --- |
-| `E` | 60 | Young's modulus |
+| `E` | 15 | Young's modulus (unit density; 60 makes a rigid slab that starves the nip) |
 | `nu` | 0.35 | Poisson ratio |
 | `thetaC` | 0.025 | plastic compression threshold |
 | `thetaS` | 0.0075 | plastic stretch threshold |
@@ -233,11 +233,11 @@ singular values, and fix the sign so `det(U)·det(V) > 0`. Alternatively use
 the polar decomposition for `Rot` and the eigendecomposition only for the
 clamp. Precision: f32 is fine.
 
-Stability: sound speed `c = sqrt((lambda + 2mu)/ρ)` with ρ = 8/h³ ⇒ in the
-scaling above the P2G stress term is already multiplied by `pVol·4/h²`, and
-the effective CFL condition is `dt < ~0.4·h/sqrt(E)`. For h = 1/64, E = 60:
-dt < 8e-4. Presets use the values in §7. Keep the constants of §4 the same
-across presets; only `dt` and `substepsPerFrame` change.
+Stability: sound speed `c = sqrt((lambda + 2mu)/ρ)` with ρ = 1; the measured
+stable limit is `dt ≈ 0.8·h/sqrt(E)` (docs/millref-notes.md §2) and the
+presets use `0.4·h/sqrt(60)`, i.e. a safety factor of 2 at E = 60 and 4 at
+the default E = 15. Keep the constants of §4 the same across presets; only
+`dt` and `substepsPerFrame` change.
 
 ---
 

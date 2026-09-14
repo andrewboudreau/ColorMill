@@ -36,8 +36,15 @@ export interface MaterialConstants {
   readonly thetaS: number;
 }
 
+/*
+ * Uncured silicone millbase is a soft yield-stress paste. E = 15 (unit
+ * density) lets the bank slump into the nip's V as a rolling bank and keeps
+ * the nip fed so the sheet on the front roll is continuous; at E = 60 the
+ * bank is a rigid slab that starves the nip and the sheet comes out lacy
+ * (validated on the GPU at the low preset, gravity 2, see docs/design-v2.md §4).
+ */
 export const DEFAULT_MATERIAL: MaterialConstants = {
-  E: 60,
+  E: 15,
   nu: 0.35,
   thetaC: 0.025,
   thetaS: 0.0075

@@ -93,8 +93,8 @@
       <div class="grid">
         <div class="card"><h3>Front roller</h3><p>Nearer the viewer. Modelled as a <strong>sticky</strong> boundary: grid nodes within a tack band (1.5 cells) of its surface take the roller's velocity, normal and tangential, so the sheet is carried around the roll. This is what makes a sheet form at all.</p></div>
         <div class="card"><h3>Back roller</h3><p>Further from the viewer and faster by the <strong>friction ratio</strong> (1.0&ndash;1.6, default 1.25). A <strong>separating</strong> Coulomb-friction contact: material can leave it. At ratio 1.0 the mill is pure counter-rotation; above it the nip shears.</p></div>
-        <div class="card"><h3>Bank</h3><p>The slab of material resting on top of the two rolls. Seeded at start as fresh white silicone (x from 0.05 to 1.45, 0.25 either side of the nip, 0.22 tall above the roll tops), 8 particles per grid cell.</p></div>
-        <div class="card"><h3>Nip</h3><p>The gap between the roll surfaces (0.02&ndash;0.10, default 0.05; about 3 cells at the <code>high</code> preset). Compression, stretch and shear are strongest here, and it is the only place pigment disperses quickly.</p></div>
+        <div class="card"><h3>Bank</h3><p>The slab of material resting on top of the two rolls. Seeded at start as fresh white silicone (x from 0.05 to 1.45, 0.25 either side of the nip, 0.36 tall above the roll tops), 8 particles per grid cell. It has to hold more material than a gap-thick sheet around the front roll, or the mill consumes it into a ring with no bank.</p></div>
+        <div class="card"><h3>Nip</h3><p>The gap between the roll surfaces (0.02&ndash;0.10, default 0.04; about 2.6 cells at the <code>high</code> preset). Compression, stretch and shear are strongest here, and it is the only place pigment disperses quickly.</p></div>
         <div class="card"><h3>Sheet</h3><p>The layer that wraps the front roll after the nip, 2&ndash;4 cells thick. It is what you cut and fold. A sheet forming within a few seconds of sim time is one of the acceptance checks.</p></div>
         <div class="card"><h3>End guides and tray</h3><p>The domain's x walls model the mill's guide cheeks (no penetration, free slip along the wall). The floor is the tray: a separating wall with stick-slip friction, so spilled material does not skate.</p></div>
       </div>
@@ -104,7 +104,7 @@
         <tr><td><code>domain</code></td><td>1.5 &times; 1.25 &times; 1.5</td><td>Domain size (x, y, z); the roller length equals the x extent</td></tr>
         <tr><td><code>R</code></td><td>0.32</td><td>Roller radius</td></tr>
         <tr><td><code>yc</code>, <code>zNip</code></td><td>0.55, 0.75</td><td>Height of both axes; z of the nip mid-plane</td></tr>
-        <tr><td><code>gap</code></td><td>0.02&ndash;0.10 (0.05)</td><td>Nip opening between the roll surfaces</td></tr>
+        <tr><td><code>gap</code></td><td>0.02&ndash;0.10 (0.04)</td><td>Nip opening between the roll surfaces</td></tr>
         <tr><td><code>omega</code></td><td>0&ndash;6 rad/s (3.0)</td><td>Front roller angular speed (rpm shown in the drawer)</td></tr>
         <tr><td><code>frictionRatio</code></td><td>1.0&ndash;1.6 (1.25)</td><td>Back roller speed / front roller speed</td></tr>
         <tr><td><code>gravity</code></td><td>0&ndash;6 (2.0)</td><td>Downward acceleration in sim units</td></tr>
@@ -124,7 +124,7 @@
       </div>
 
       <h3>Elastoplastic putty</h3>
-      <p>Version 1 used a weakly compressible fluid, which is why it read as a puddle: a fluid cannot hold a bank on top of two rolls. Uncured silicone is a putty &mdash; it keeps its shape under gravity, yields under the nip's shear, and does not spring back. v2 uses the fixed-corotated elastic model (Stomakhin et al. 2013) with the singular values of the deformation gradient clamped every step to a small yield band (<code>[1 &minus; 0.025, 1 + 0.0075]</code>): the snow model with hardening off. Young's modulus 60, Poisson ratio 0.35; the substep length per preset follows from the CFL bound.</p>
+      <p>Version 1 used a weakly compressible fluid, which is why it read as a puddle: a fluid cannot hold a bank on top of two rolls. Uncured silicone is a putty &mdash; it keeps its shape under gravity, yields under the nip's shear, and does not spring back. v2 uses the fixed-corotated elastic model (Stomakhin et al. 2013) with a <em>deviatoric-only</em> plastic return: every step the shape part of the deformation gradient is clamped to a small yield band (<code>[1 &minus; 0.025, 1 + 0.0075]</code>) while the volume part is kept, so the pressure term keeps resisting compression. (Clamping the raw singular values, as the snow model does, lets the nip pack the putty to several times rest density and swallow the bank.) Young's modulus 15 in unit-density sim units &mdash; soft enough that the bank slumps into a rolling bank and keeps the nip fed, which is what makes the sheet continuous &mdash; Poisson ratio 0.35; the substep length per preset follows from the CFL bound with a safety factor of 4.</p>
 
       <h3>Sticky and separating rollers, friction ratio</h3>
       <p>The rolls are analytic cylinders applied as grid boundary conditions, and they are deliberately different. The front roll takes full control of nodes inside its tack band (the sheet follows the roll). The back roll removes the approaching normal velocity and applies Coulomb friction to the tangential part (&mu; = 0.4), so material can leave it. Because the back roll is faster, the nip is a shear zone: the sheet ends up on the front (slower, tackier) roll, as on a real mill.</p>
@@ -151,10 +151,10 @@ URL          ?preset=low|medium|high|ultra forces a quality preset</pre>
       <div class="wrap">
       <table>
         <tr><th>Preset</th><th>Cells / unit</th><th>Grid (cells)</th><th>Particles</th><th>Substep dt</th><th>Substeps / frame</th><th>Target</th></tr>
-        <tr><td>low</td><td>32</td><td>48 &times; 40 &times; 48</td><td>~60k</td><td>1.6e-3</td><td>8</td><td>integrated / mobile GPU</td></tr>
-        <tr><td>medium</td><td>48</td><td>72 &times; 60 &times; 72</td><td>~204k</td><td>1.1e-3</td><td>12</td><td>laptop GPU</td></tr>
-        <tr><td>high (default)</td><td>64</td><td>96 &times; 80 &times; 96</td><td>~484k</td><td>8e-4</td><td>16</td><td>desktop GPU</td></tr>
-        <tr><td>ultra</td><td>80</td><td>120 &times; 100 &times; 120</td><td>~945k</td><td>6.4e-4</td><td>20</td><td>discrete GPU</td></tr>
+        <tr><td>low</td><td>32</td><td>48 &times; 40 &times; 48</td><td>~85k</td><td>1.6e-3</td><td>8</td><td>integrated / mobile GPU</td></tr>
+        <tr><td>medium</td><td>48</td><td>72 &times; 60 &times; 72</td><td>~285k</td><td>1.1e-3</td><td>12</td><td>laptop GPU</td></tr>
+        <tr><td>high (default)</td><td>64</td><td>96 &times; 80 &times; 96</td><td>~683k</td><td>8e-4</td><td>16</td><td>desktop GPU</td></tr>
+        <tr><td>ultra</td><td>72</td><td>108 &times; 90 &times; 108</td><td>~972k</td><td>7.1e-4</td><td>18</td><td>discrete GPU</td></tr>
       </table>
       </div>
       <p>Only <code>dt</code> and the substep count change between presets; the material constants are the same, so the mill behaves the same at every quality. Simulated time per frame is <code>dt &times; substeps</code> (about 13&nbsp;ms at <code>high</code>): at 60&nbsp;fps the mill runs at roughly 0.8&times; real time, and the HUD shows the actual ratio. The app picks <code>medium</code> on non-discrete GPUs (<code>low</code> on mobile) and <code>high</code> otherwise.</p>
@@ -162,7 +162,7 @@ URL          ?preset=low|medium|high|ultra forces a quality preset</pre>
       <h2>How v2 differs from v1</h2>
       <table>
         <tr><th>Area</th><th>v1 (C / raylib / Emscripten, now <a class="inline" href="legacy/index.html">legacy/</a>)</th><th>v2 (TypeScript / WebGPU)</th></tr>
-        <tr><td>Solver</td><td>MLS-MPM on the CPU, 40&sup3; grid, material in a ~14&times;12&times;7-voxel box, ~20 substeps per frame</td><td>MLS-MPM in WebGPU compute, 48&sup3; to 120&sup3; cells, 60k&ndash;945k particles, deterministic fixed substeps</td></tr>
+        <tr><td>Solver</td><td>MLS-MPM on the CPU, 40&sup3; grid, material in a ~14&times;12&times;7-voxel box, ~20 substeps per frame</td><td>MLS-MPM in WebGPU compute, 48&sup3; to 108&sup3; cells, 85k&ndash;972k particles, deterministic fixed substeps</td></tr>
         <tr><td>Material</td><td>Weakly compressible fluid (pressure from J): behaves like a puddle</td><td>Elastoplastic putty (fixed corotated + yield clamp): holds a bank, forms a sheet</td></tr>
         <tr><td>Mill geometry</td><td>Two short cylinders in a tight box; counter / friction mode toggle; particle-level collider</td><td>Real layout: bank, nip, sheet on the front roll, end guides, tray; sticky front roll, Coulomb back roll; continuous friction ratio</td></tr>
         <tr><td>Pigment</td><td>Red / blue / yellow scalars per particle, converted through Mixbox with fixed endpoints at render time; mixing by transport only</td><td>Full 7-float Mixbox latent per particle, eight named pigments plus a colour picker; shear-driven dispersion in the nip</td></tr>

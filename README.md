@@ -1,6 +1,8 @@
 # ColorMill
 
 A browser-based **two-roll mill simulator**: a bank of white silicone putty
+
+![The v2 mill after two seconds at the low preset: a rolling bank on the two rolls, a continuous sheet around the front roll, pigment dollops being drawn into the nip](docs/screenshots/mill-low-2s.png)
 sits on two counter-rotating rollers, gets dragged through the nip, sheets
 onto the front roll, and is cut and folded back onto the bank. Tap a pigment
 and watch it disperse — blue and yellow fold into real green, not grey.
@@ -26,10 +28,12 @@ deformation gradient and a 7-float Mixbox pigment latent; a background grid
 substep: particles scatter mass and momentum to grid nodes (fixed-point
 atomics), the grid integrates gravity and applies the boundaries, and the
 particles gather the new velocities back and advect. The material model is an
-**elastoplastic putty**: fixed-corotated elasticity with the singular values of
-the deformation gradient clamped to a small yield band each step (the snow
-model with hardening off). The bank holds its shape under gravity, yields and
-flows under the nip's shear, and does not spring back.
+**elastoplastic putty**: fixed-corotated elasticity with a deviatoric-only
+plastic return (the shape part of the deformation gradient is clamped to a
+small yield band each step; the volume part is kept, so the pressure term
+keeps resisting compression and the nip cannot pack material beyond rest
+density). The bank slumps into a rolling bank, yields and flows under the
+nip's shear, and does not spring back.
 
 The mill itself is a set of grid boundary conditions. The **front roller** is
 sticky: nodes within a tack band of its surface take the roller's velocity, so
@@ -65,10 +69,14 @@ gets. Full detail, including every constant, is in
 
 | Preset | Cells / unit | Grid (cells) | Particles (approx.) | Substep `dt` | Substeps / frame | Target |
 | --- | --- | --- | --- | --- | --- | --- |
-| low | 32 | 48 × 40 × 48 | 60k | 1.6e-3 | 8 | integrated / mobile GPU |
-| medium | 48 | 72 × 60 × 72 | 204k | 1.1e-3 | 12 | laptop GPU |
-| high (default) | 64 | 96 × 80 × 96 | 484k | 8e-4 | 16 | desktop GPU |
-| ultra | 80 | 120 × 100 × 120 | 945k | 6.4e-4 | 20 | discrete GPU |
+| low | 32 | 48 × 40 × 48 | 85k | 1.6e-3 | 8 | integrated / mobile GPU |
+| medium | 48 | 72 × 60 × 72 | 285k | 1.1e-3 | 12 | laptop GPU |
+| high (default) | 64 | 96 × 80 × 96 | 683k | 8e-4 | 16 | desktop GPU |
+| ultra | 72 | 108 × 90 × 108 | 972k | 7.1e-4 | 18 | discrete GPU |
+
+The app steps the preset down automatically when frames stay above 45 ms
+(unless a preset was chosen explicitly), so a slow GPU lands on the largest
+preset it can run.
 
 The app picks `medium` on non-discrete adapters (`low` on mobile user agents)
 and `high` otherwise; override with the quality select or `?preset=low` in the

@@ -351,13 +351,19 @@ v1 used a weakly compressible fluid (pressure from `J`), which is why it read
 as a puddle: a fluid cannot hold a bank on top of two rollers, and it cannot
 form a sheet that stays on the front roll. Uncured silicone on a mill is a
 putty — it keeps its shape under gravity, yields under the nip's shear, and
-does not spring back. That is the snow model of Stomakhin 2013 with hardening
-turned off: fixed-corotated elasticity with the singular values of `F` clamped
-each step to `[1 − θc, 1 + θs]`. Two thresholds and a Young's modulus give the
-whole behaviour range from stiff clay to soft putty; there is no viscosity
-solve and the explicit substep is cheap. The stiffness (E = 60 in sim units)
-is chosen so the bank sags visibly but holds, with the CFL bound setting `dt`
-per preset.
+does not spring back. That started as the snow model of Stomakhin 2013 with
+hardening turned off (fixed-corotated elasticity with the singular values of
+`F` clamped each step to `[1 − θc, 1 + θs]`), but validation (both the C
+reference in `docs/millref-notes.md` and the GPU runs) showed the snow clamp
+also clamps *volumetric* strain: the nip packed the putty to 2.5× rest density
+and swallowed the bank into a ring. The return is therefore deviatoric only —
+shape yields, volume is kept and the pressure term resists compression. Two
+thresholds and a Young's modulus give the whole behaviour range from stiff
+clay to soft putty; there is no viscosity solve and the explicit substep is
+cheap. The stiffness matters more than expected: at E = 60 (unit density) the
+bank is a rigid slab that starves the nip and the sheet comes out lacy; at
+E = 15 the bank slumps into a rolling bank, the nip stays fed and the sheet is
+continuous. The CFL bound sets `dt` per preset with a safety factor of ~4.
 
 ### Why the rollers are boundary conditions, and why they differ
 

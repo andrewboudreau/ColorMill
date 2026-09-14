@@ -121,7 +121,7 @@ fn move_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
   if (x.y > P.fold3.w) { x.y = P.fold3.w; v.y = 0.0; }
   let lo = vec3<f32>(1.5 * P.hdt.x);
   x = clamp(x, lo, P.domain.xyz - lo);
-  pos[p] = vec4<f32>(x, 0.0);
+  pos[p] = vec4<f32>(x, pos[p].w);
   vel[p] = vec4<f32>(v, 0.0);
 }
 
@@ -138,7 +138,7 @@ fn finish_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgrou
   // scripted velocity at the end of the move (ds/dt -> 0, so ~0)
   let up = vec3<f32>(0.0, 1.0, 0.0);
   let v = ((p1 - p0) + up * (PI * cos(PI * P.fold.y) * P.fold.w)) * P.fold.z;
-  pos[p] = vec4<f32>(x, 0.0);
+  pos[p] = vec4<f32>(x, pos[p].w);
   vel[p] = vec4<f32>(v, 0.0);
   // keep F (the sheet's deformation state), drop C, rebuild the P2G affine from F
   var F = loadMatF(p);

@@ -41,6 +41,8 @@ export const GRID_WG = 4;
 /** Uniform ring stride (>= minUniformBufferOffsetAlignment). */
 const UNIFORM_STRIDE = 256;
 /** Cut & fold script length (design §6). */
+/** Pigment load of a masterbatch chunk relative to the base putty (mirrors PIGMENT_LOAD in common.wgsl). */
+export const PIGMENT_LOAD = 6.0;
 export const FOLD_DURATION = 1.6;
 export const FOLD_LIFT = 0.25;
 /** Arc length along the front roll -> z on the bank (the unrolled sheet is compressed by this factor). */
@@ -134,6 +136,7 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufGVel: GPUBuffer;
   private readonly bufPMass: GPUBuffer;
   private readonly bufPLat: GPUBuffer;
+  private readonly bufPLoad: GPUBuffer;
   // uniforms
   private readonly bufParams: GPUBuffer;
   private readonly paramsData: Float32Array;
@@ -196,6 +199,7 @@ export class GpuMpm implements GpuMpmSim {
     this.bufGVel = mk(4 * d.nodeCount);
     this.bufPMass = mk(d.nodeCount);
     this.bufPLat = mk(7 * d.nodeCount);
+    this.bufPLoad = mk(d.nodeCount);
 
     this.uniformSlots = config.quality.substepsPerFrame + 1;
     this.bufParams = device.createBuffer({ size: UNIFORM_STRIDE * this.uniformSlots, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -304,7 +308,7 @@ export class GpuMpm implements GpuMpmSim {
     const clearMod = mod('clear', clearSrc);
     const foldMod = mod('fold', foldSrc);
     const injectMod = mod('inject', injectSrc);
-    const clearRes = [rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGVel), rw(this.bufPMass), rw(this.bufPLat)];
+    const clearRes = [rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGVel), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)];
     const foldRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags), rw(this.bufFold),
       rw(this.bufFoldInfo), ro(this.bufPMass)];
     const volAView = this.volA.createView({ dimension: '3d' });
@@ -319,14 +323,14 @@ export class GpuMpm implements GpuMpmSim {
       g2p: this.makeKernel('g2p', mod('g2p', g2pSrc), 'main',
         [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), ro(this.bufFlags), ro(this.bufGVel)]),
       raster: this.makeKernel('raster', mod('raster', rasterSrc), 'main',
-        [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat)]),
+        [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)]),
       disperse: this.makeKernel('disperse', mod('disperse', disperseSrc), 'main',
-        [ro(this.bufPos), ro(this.bufC), rw(this.bufLat), ro(this.bufPMass), ro(this.bufPLat), ro(this.bufFlags)]),
+        [rw(this.bufPos), ro(this.bufC), rw(this.bufLat), ro(this.bufPMass), ro(this.bufPLat), ro(this.bufFlags), ro(this.bufPLoad)]),
       pack: this.makeKernel('pack', mod('pack', packSrc), 'main',
-        [ro(this.bufPMass), ro(this.bufPLat), { kind: 'storageTexture', view: volAView }, { kind: 'storageTexture', view: volBView }]),
-      inject: this.makeKernel('inject', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInject }, ro(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
-      probe: this.makeKernel('probe', injectMod, 'probeColumn', [{ kind: 'uniform', buffer: this.bufInject }, ro(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
-      injectAll: this.makeKernel('injectAll', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInjectAll }, ro(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
+        [ro(this.bufPMass), ro(this.bufPLat), { kind: 'storageTexture', view: volAView }, { kind: 'storageTexture', view: volBView }, ro(this.bufPLoad)]),
+      inject: this.makeKernel('inject', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
+      probe: this.makeKernel('probe', injectMod, 'probeColumn', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
+      injectAll: this.makeKernel('injectAll', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInjectAll }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
       reset: this.makeKernel('reset', mod('reset', resetSrc), 'main',
         [rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags)]),
       foldSelect: this.makeKernel('foldSelect', foldMod, 'select_', foldRes),
@@ -360,6 +364,7 @@ export class GpuMpm implements GpuMpmSim {
       pos4[4 * i] = this.seeds[3 * i];
       pos4[4 * i + 1] = this.seeds[3 * i + 1];
       pos4[4 * i + 2] = this.seeds[3 * i + 2];
+      pos4[4 * i + 3] = 1; // base pigment load
     }
     q.writeBuffer(this.bufPos, 0, pos4);
     // "set all" inject uniform: white base
@@ -612,6 +617,7 @@ export class GpuMpm implements GpuMpmSim {
     const F = new Float32Array(9 * m);
     for (let i = 0; i < m; i++) {
       pos4[4 * i] = pts[3 * i]; pos4[4 * i + 1] = pts[3 * i + 1]; pos4[4 * i + 2] = pts[3 * i + 2];
+      pos4[4 * i + 3] = PIGMENT_LOAD; // masterbatch: concentrated pigment
       for (let c = 0; c < 7; c++) lat[7 * i + c] = latent[c];
       F[9 * i] = 1; F[9 * i + 4] = 1; F[9 * i + 8] = 1;
     }
@@ -746,7 +752,7 @@ export class GpuMpm implements GpuMpmSim {
     if (this.destroyed) return;
     this.destroyed = true;
     for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufFold, this.bufFoldInfo,
-      this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll, this.bufProbe]) {
+      this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll, this.bufProbe, this.bufPLoad]) {
       b.destroy();
     }
     this.readbackStaging?.destroy();

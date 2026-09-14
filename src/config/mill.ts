@@ -80,7 +80,10 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
   frictionRatio: 1.25,
   gap: 0.04,
   gravity: 2.0,
-  dispersion: 0.6,
+  /* nearly off: colour should mill as distinct streaks that thin with folding,
+     not fade to a tint (measured: at 0.1 a black chunk is 77% grey after 3 s of
+     milling; at 0 it stays black and streaks around the roll) */
+  dispersion: 0.02,
   backFriction: 0.4
 };
 
@@ -89,7 +92,7 @@ export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max:
   frictionRatio: { min: 1, max: 1.6, step: 0.01 },
   gap: { min: 0.02, max: 0.1, step: 0.002 },
   gravity: { min: 0, max: 6, step: 0.1 },
-  dispersion: { min: 0, max: 2, step: 0.02 },
+  dispersion: { min: 0, max: 0.5, step: 0.005 },
   backFriction: { min: 0, max: 1, step: 0.02 }
 };
 

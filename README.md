@@ -5,8 +5,8 @@ A browser-based **two-roll mill simulator**: a bank of white silicone putty
 ![The v2 mill after two seconds at the low preset: a rolling bank on the two rolls, a continuous sheet around the front roll, pigment dollops being drawn into the nip](docs/screenshots/mill-low-2s.png)
 sits on two counter-rotating rollers, gets dragged through the nip, sheets
 onto the front roll, and is cut off, rolled into a log, turned and fed back in
-end-on. Tap a pigment to drop a chunk of coloured putty on the bank and watch
-it disperse — blue and yellow fold into real green, not grey.
+end-on. Tap a pigment to drop a chunk of concentrated coloured putty on the bank and
+watch it streak and fold through the batch — blue and yellow fold into real green, not grey.
 
 Version 2 runs the whole thing on the GPU with **WebGPU compute** (MLS-MPM
 with hundreds of thousands of material points) and renders it with a

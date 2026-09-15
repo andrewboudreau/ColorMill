@@ -712,7 +712,28 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     let albedo = srgbToLinear(latentToRgb(c, resid));
     let ao = volumeAo(p, n);
     let thickness = sheetThickness(p, n);
-    col = shadePutty(p, n, v, albedo, ao, thickness, sn.rough);
+    // clear base: little diffuse (a clear material has almost no body colour), the
+    // look comes from specular and what shows through; pigment restores albedo
+    let pigmentDiffuse = saturate((1.0 - c.w) * 1.6);
+    let surface = shadePutty(p, n, v, mix(vec3f(0.58, 0.62, 0.64), albedo, pigmentDiffuse), ao, thickness, sn.rough);
+    // Uncured silicone is clear, not white: the base (titanium-white latent,
+    // white weight c.w ~ 1) is rendered translucent, going milky with thickness,
+    // while pigment (white weight falls) makes it opaque. What shows through is
+    // the analytic scene behind the hit along the same ray.
+    let pigment = saturate((1.0 - c.w) * 1.6);
+    var behind: vec3f;
+    if (roller.t < tFloor) {
+      let pb = ro + rd * roller.t;
+      if (roller.kind == 1) { behind = shadeRollerBody(pb, roller.n, v, rollerPose); } else { behind = shadeRollerCap(pb, roller.n, v, rollerPose); }
+    } else if (tFloor < INF) {
+      behind = shadeFloor(ro + rd * tFloor, rd);
+    } else {
+      behind = skyColor(rd);
+    }
+    let clearness = (1.0 - pigment) * exp(-thickness / (14.0 * h));  // clear sheet / bank: see through, milky when thick
+    let alpha = 1.0 - 0.8 * clearness;                                 // base alone: up to 80% shows through
+    let tint = mix(vec3f(0.84, 0.89, 0.92), albedo, pigment);         // transmitted light picks up the pigment
+    col = mix(behind * tint, surface, alpha);
   } else if (roller.t < tFloor) {
     tHit = roller.t;
     let p = ro + rd * roller.t;

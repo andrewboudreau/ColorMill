@@ -18,7 +18,7 @@ import mixboxSrc from './shaders/mixbox.wgsl?raw';
 import raymarchSrc from './shaders/raymarch.wgsl?raw';
 
 /** Density threshold that defines the putty surface (design §8). */
-export const ISO_THRESHOLD = 0.45;
+export const ISO_THRESHOLD = 0.32; // a gap-thick sheet is ~1.3 cells at `low`; 0.45 punched holes in it
 /** Cap on the backing-store scale (design §8). */
 export const MAX_DPR = 2;
 

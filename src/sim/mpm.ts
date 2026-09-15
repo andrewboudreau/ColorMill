@@ -96,6 +96,7 @@ interface Kernel {
 interface MutableStats {
   particleCount: number;
   particleCapacity: number;
+  materialVolume: number;
   grid: GridDims;
   simTime: number;
   simSecondsPerFrame: number;
@@ -117,6 +118,7 @@ export class GpuMpm implements GpuMpmSim {
 
   private readonly device: GPUDevice;
   private count: number;
+  private readonly batch: number;
   private readonly seedCount: number;
   private readonly capacity: number;
   private readonly seeds: Float32Array;
@@ -178,7 +180,8 @@ export class GpuMpm implements GpuMpmSim {
     this.dims = gridDims(config.quality);
     const d = this.dims;
 
-    this.seeds = seedBankPositions(config.quality, config.params);
+    this.batch = config.batch ?? 1;
+    this.seeds = seedBankPositions(config.quality, config.params, 1234, this.batch);
     this.clampSeeds();
     this.seedCount = this.seeds.length / 3;
     this.count = this.seedCount;
@@ -224,6 +227,7 @@ export class GpuMpm implements GpuMpmSim {
     this.statsData = {
       particleCount: this.count,
       particleCapacity: this.capacity,
+      materialVolume: (this.count * d.h * d.h * d.h) / 8,
       grid: d,
       simTime: 0,
       simSecondsPerFrame: config.quality.dt * config.quality.substepsPerFrame,
@@ -420,13 +424,13 @@ export class GpuMpm implements GpuMpmSim {
     f.set([foldActive ? 1 : 0, foldT, FOLD_ROLL_SECONDS, FOLD_FEED_SPEED], o + 28);
     // fold: the live bank top is reduced on the GPU (fold.wgsl); fold2.x is only the fallback
     const yMax = GEOMETRY.domain[1] - 3 * h;
-    const bankTopFallback = Math.min(GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight, yMax);
+    const bankTopFallback = Math.min(GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight * this.batch, yMax);
     const gap = front.axisZ - back.axisZ - 2 * GEOMETRY.radius;
     f.set([bankTopFallback, GEOMETRY.length, gap, GEOMETRY.nipZ], o + 32);
     // front-roll tack band: the adhesion layer is as thick as the sheet the nip
     // produces (the gap) plus one cell of stencil slack, so the whole sheet
     // rides the roll instead of only its innermost layer (design §3.3).
-    const tackBand = p.gap + 1.0 * h;
+    const tackBand = p.tackCells > 0 ? p.tackCells * h : p.gap + 1.0 * h;
     f.set([tackBand, 0.5 * h, 2 * h, 0.6], o + 36);
     f.set([GEOMETRY.bankHalfDepth, 0.5 * h, FOLD_TILT, yMax], o + 40);
   }
@@ -439,6 +443,8 @@ export class GpuMpm implements GpuMpmSim {
   private setCount(n: number): void {
     this.count = n;
     this.statsData.particleCount = n;
+    const h = this.dims.h;
+    this.statsData.materialVolume = (n * h * h * h) / 8;
     const maxDim = this.device.limits.maxComputeWorkgroupsPerDimension;
     this.particleDispatch = dispatchSize(Math.ceil(Math.max(n, 1) / PARTICLE_WG), maxDim);
   }
@@ -588,7 +594,7 @@ export class GpuMpm implements GpuMpmSim {
     const r = Math.max(radius, 2 * h);
     // spawn just above the seeded bank top: the bank only ever gets lower, so the
     // chunk starts in air (or touching the surface) and drops in under gravity
-    const cy = Math.min(GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight + r + 0.02, dom[1] - 1.5 * h - r);
+    const cy = Math.min(GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight * this.batch + r + 0.02, dom[1] - 1.5 * h - r);
     const cx = Math.min(Math.max(x, 1.5 * h + r), dom[0] - 1.5 * h - r);
     const cz = Math.min(Math.max(z, 1.5 * h + r), dom[2] - 1.5 * h - r);
     const room = this.capacity - this.count;
@@ -646,7 +652,7 @@ export class GpuMpm implements GpuMpmSim {
   addPigmentOnSurface(x: number, z: number, radius: number, latent: Latent, strength = 1): void {
     if (this.destroyed) return;
     // fallback centre (used when the column is empty): the seeded bank top
-    const yTop = GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight - 0.5 * radius;
+    const yTop = GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight * this.batch - 0.5 * radius;
     this.device.queue.writeBuffer(this.bufInject, 0, this.injectData([x, yTop, z], radius, latent, strength, 2));
     this.device.queue.writeBuffer(this.bufProbe, 0, new Uint32Array([0, 0, 0, 0]));
     const enc = this.device.createCommandEncoder({ label: 'GpuMpm-inject-surface' });

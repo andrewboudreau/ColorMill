@@ -59,6 +59,12 @@ Node counts are `N = round(domain / h) + 1` per axis; see
 | high (default) | 64 | 0.015625 | 96×144×96 | 683k (+50% pool) |
 | ultra | 72 | 0.01389 | 108×162×108 | 972k (+50% pool) |
 
+**Batch size.** `MillConfig.batch` scales the seeded bank height (0.5×–2×
+from the panel or `?batch=`); changing it rebuilds the sim. The HUD shows the
+material on the mill as litres and kg (one sim unit ≈ 0.2 m, putty 1.1 kg/L)
+and the particle count, so conservation is visible: the count only changes
+when a pigment chunk is added or the sim is reset.
+
 Each sim also reserves particle capacity for pigment chunks (50% of the
 seeded bank): a tap adds a sphere of new pigmented putty (radius 0.14) above
 the bank that drops in, instead of tinting existing particles. When the pool
@@ -155,7 +161,15 @@ Boundaries, applied in this order:
    the front roller axis, `n` the outward unit normal, `vr = ω_f × (p − axis)`
    the surface velocity. If `d < R + tackBand` (tackBand = gap + h, i.e. the
    thickness of the sheet the nip produces plus one cell of stencil slack):
-   `v = vr` (full no-slip incl. normal — the sheet is carried around).
+   `v = vr` (full no-slip incl. normal — the sheet is carried around) **except
+   in the wedge above the nip** (`y > axisY + 0.06`, `z < frontAxisZ`, the
+   region where the bank rests on the roll), where the roll drags material by
+   Coulomb friction only (μ = 0.8, separating). Intake is then set by the
+   friction / pressure balance, so material the gap cannot take slips and
+   rolls back into the bank instead of being force-fed: measured on `low`,
+   the nip's peak density fell from 2.9× to 1.3× rest and the sheet still
+   forms. (Releasing the normal constraint where the band is overpacked was
+   tried instead and dropped material off the underside.)
 2. **Back roller** (separating with Coulomb friction). If `d < R`:
    `vrel = v − vr`; `vn = dot(vrel, n)`; if `vn < 0`: `vt = vrel − vn·n`;
    `vt *= max(0, 1 − mu·(−vn)/|vt|)` with `mu = 0.4`; `v = vr + vt` (normal
@@ -207,7 +221,7 @@ Constants (in `config.material`):
 | name | default | meaning |
 | --- | --- | --- |
 | `E` | 15 | Young's modulus (unit density; 60 makes a rigid slab that starves the nip) |
-| `nu` | 0.35 | Poisson ratio |
+| `nu` | 0.45 | Poisson ratio (nearly incompressible: at 0.35 the nip packed the putty to 1.5× rest density and carried 50% more than the gap allows) |
 | `thetaC` | 0.025 | plastic compression threshold |
 | `thetaS` | 0.03 | plastic stretch threshold (tensile cohesion; 0.0075 gives a lacy sheet after operator moves) |
 | `mu`, `lambda` | derived | `mu = E/(2(1+nu))`, `lambda = E·nu/((1+nu)(1−2nu))` |
@@ -356,7 +370,11 @@ Single fullscreen ray-march pass (`src/render/shaders/raymarch.wgsl`):
    disagreement between the two widens the specular lobes so cell-scale
    noise reads as satin, not sparkle.
 3. Colour at the hit: sample `volA/volB`, decode the 7-float latent,
-   `latentToRgb` → albedo (sRGB-linearised for lighting).
+   `latentToRgb` → albedo (sRGB-linearised for lighting). The base putty is
+   **clear, not white**: where the latent's white weight is ~1 the surface is
+   rendered translucent (the analytic scene behind the hit shows through a
+   thin sheet, and the bank goes milky with thickness); pigment makes it
+   opaque.
 4. Shading: key light (warm, upper right front), fill (cool, left), rim from
    behind; Blinn-Phong specular with a wide + narrow lobe (silicone putty is
    glossy); ambient occlusion from density sampled along the normal plus an

@@ -11,6 +11,8 @@ export interface SimStats {
   readonly particleCount: number;
   /** particle buffer capacity (seeded bank + reserved pigment pool) */
   readonly particleCapacity: number;
+  /** material volume in sim units^3 (particles x rest volume); conserved except when chunks are added */
+  readonly materialVolume: number;
   readonly grid: GridDims;
   /** sim seconds advanced so far */
   readonly simTime: number;

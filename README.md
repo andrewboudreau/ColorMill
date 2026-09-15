@@ -75,6 +75,10 @@ gets. Full detail, including every constant, is in
 | high (default) | 64 | 96 × 144 × 96 | 683k | 8e-4 | 16 | desktop GPU |
 | ultra | 72 | 108 × 162 × 108 | 972k | 7.1e-4 | 18 | discrete GPU |
 
+A batch-size control (0.5×–2×) rebuilds the bank with more or less material,
+and the HUD reports the material on the mill in litres and kg so conservation
+is visible. The base putty renders as clear silicone that pigment makes opaque.
+
 The app steps the preset down automatically when frames stay above 45 ms
 (unless a preset was chosen explicitly), so a slow GPU lands on the largest
 preset it can run.

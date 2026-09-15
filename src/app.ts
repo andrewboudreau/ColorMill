@@ -15,7 +15,7 @@
 import './styles.css';
 import { BASE_LATENT, findPigment, rgbToLatentAsync } from './color/pigments';
 import {
-  DEFAULT_MATERIAL, DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_RADIUS, QUALITY_PRESETS, estimateParticleCount, gridDims,
+  BATCH_CHOICES, DEFAULT_MATERIAL, DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_RADIUS, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, estimateParticleCount, gridDims, materialLitres,
   type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
@@ -143,6 +143,9 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   const query = new URLSearchParams(search);
   const chosen = choosePreset(ctx.caps, search);
   let preset: QualityPreset = chosen.preset;
+  // batch size multiplier (?batch=1.5); scales the seeded bank
+  const batchQuery = parseFloat(query.get('batch') ?? '');
+  let batch = BATCH_CHOICES.includes(batchQuery) ? batchQuery : 1;
   let autoOrbit = query.get('orbit') === '1';
   const startPaused = query.get('paused') === '1';
   // Unless the preset was pinned by the user or the URL, drop a level when the
@@ -192,9 +195,10 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     onParam: (key, value) => {
       if (sim) sim.params[key] = value;
     },
-    onQuality: (p) => { adaptive = false; void setQuality(p); },
+    onQuality: (p) => { adaptive = false; void rebuildSim(p, batch); },
+    onBatch: (b) => { void rebuildSim(preset, b); },
     onAutoOrbit: (on) => { autoOrbit = on; }
-  }, { params: { ...DEFAULT_PARAMS }, preset, autoOrbit, open: wideScreen });
+  }, { params: { ...DEFAULT_PARAMS }, preset, batch, autoOrbit, open: wideScreen });
 
   const injectLatent = (latent: Latent): void => {
     if (!sim) return;
@@ -273,7 +277,8 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     const msFrame = frameTimes.length ? (frameTimeSum / frameTimes.length) * 1000 : 0;
     const st = sim.stats;
     const simSpeed = sim.paused ? 0 : st.simSecondsPerFrame * fps;
-    hud.setStatus({ preset, particles: st.particleCount, grid: gridText(sim), fps, msFrame, simSpeed, paused: sim.paused });
+    const litres = materialLitres(st.particleCount, sim.dims.h);
+    hud.setStatus({ preset, particles: st.particleCount, grid: gridText(sim), fps, msFrame, simSpeed, paused: sim.paused, litres, kg: litres * SILICONE_KG_PER_LITRE });
     panel.setStats({
       particles: st.particleCount, grid: gridText(sim), fps, msFrame, simSpeed,
       gpuMs: st.lastStepGpuMs, simTime: st.simTime, adapter: ctx.caps.adapterDescription
@@ -371,21 +376,25 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     if (Number.isFinite(v) && v > 0) materialOverride[k] = v;
   }
   const material: MaterialConstants = materialOverride;
-  const buildConfig = (p: QualityPreset, params: MillParams): MillConfig => ({
+  const tackQuery = parseFloat(query.get('tack') ?? '');
+  const tackCells = Number.isFinite(tackQuery) && tackQuery > 0 ? tackQuery : undefined;
+  const buildConfig = (p: QualityPreset, params: MillParams, b: number = batch): MillConfig => ({
     quality: QUALITY_PRESETS[p],
     material,
-    params: { ...params }
+    params: { ...params, ...(tackCells !== undefined ? { tackCells } : {}) },
+    batch: b
   });
 
-  async function setQuality(p: QualityPreset): Promise<void> {
-    if (!sim || !renderer || rebuilding || p === preset) { panel.setQuality(preset); return; }
+  /** Rebuild the sim at a preset and batch size (both re-seed the bank). */
+  async function rebuildSim(p: QualityPreset, b: number): Promise<void> {
+    if (!sim || !renderer || rebuilding || (p === preset && b === batch)) { panel.setQuality(preset); panel.setBatch(batch); return; }
     rebuilding = true;
     panel.setQualityEnabled(false);
     const old = sim;
-    hud.setText(`rebuilding at ${p} (~${estimateParticleCount(QUALITY_PRESETS[p]).toLocaleString()} particles)…`);
+    hud.setText(`rebuilding at ${p}, batch ${b}× (~${estimateParticleCount(QUALITY_PRESETS[p], b).toLocaleString()} particles)…`);
     await nextPaint();
     try {
-      const next = opts.makeSim(device, buildConfig(p, old.params));
+      const next = opts.makeSim(device, buildConfig(p, old.params, b));
       try {
         await next.ready;
       } catch (e) {
@@ -396,6 +405,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       renderer.setVolumes(next.volumes);
       sim = next;
       preset = p;
+      batch = b;
       old.destroy();
       frameTimes.length = 0;
       frameTimeSum = 0;
@@ -403,16 +413,18 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       runFrame(1 / 60);
       await device.queue.onSubmittedWorkDone();
     } catch (e) {
-      reportError(`Could not switch to ${p}`, e);
+      reportError(`Could not switch to ${p} / batch ${b}×`, e);
       if (sim === old) { try { renderer.setVolumes(old.volumes); } catch { /* keep going */ } }
     } finally {
       rebuilding = false;
       panel.setQualityEnabled(true);
       panel.setQuality(preset);
+      panel.setBatch(batch);
       panel.setParams(sim.params);
       paintStats(true);
     }
   }
+  const setQuality = (p: QualityPreset): Promise<void> => rebuildSim(p, batch);
 
   // --- construct sim + renderer -------------------------------------------------------
   overlay.setProgress(`Building the ${preset} simulation (${chosen.reason}, ~${estimateParticleCount(QUALITY_PRESETS[preset]).toLocaleString()} particles)…`);

@@ -227,10 +227,11 @@ export default async function run() {
         let kin = 0, bad = 0;
         const kinIdx = [];
         for (let p = 0; p < s.count; p++) { if (s.flags[p] & 1) { kin++; kinIdx.push(p); } for (let c = 0; c < 3; c++) if (!Number.isFinite(s.positions[3 * p + c])) bad++; }
-        return { kin, bad, kinIdx, error: window.__solver.error };
+        return { kin, bad, kinIdx, count: s.count, error: window.__solver.error };
       });
-      console.log(`  cut & fold: ${mid.kin} kinematic particles mid-move`);
-      assert(!mid.error && mid.bad === 0 && mid.kin > 0, `fold selected particles and moves them (${JSON.stringify({ kin: mid.kin, bad: mid.bad, error: mid.error })})`);
+      console.log(`  cut & fold: ${mid.kin} of ${mid.count} particles kinematic mid-move`);
+      // the operator takes everything off the mill: sheet, bank and all
+      assert(!mid.error && mid.bad === 0 && mid.kin === mid.count, `fold selected every particle and moves them (${JSON.stringify({ kin: mid.kin, count: mid.count, bad: mid.bad, error: mid.error })})`);
 
       // after the roll phase plus part of the feed: the log stands over the nip as an
       // area-preserving spiral (no node carries more than ~48 particles' mass), it

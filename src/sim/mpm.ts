@@ -47,8 +47,12 @@ export const PIGMENT_LOAD = 6.0;
 export const FOLD_ROLL_SECONDS = 1.2;
 export const FOLD_FEED_SPEED = 0.15;          // sim units / s along the log axis (the nip only takes the log where it touches it)
 export const FOLD_TILT = 0.42;                // log axis tilt from vertical toward the viewer (rad)
-/** Total script length: roll, then feed the log (the sheet folded in half: L/2 long) through the nip. */
-export const FOLD_DURATION = FOLD_ROLL_SECONDS + (0.5 * GEOMETRY.length) / FOLD_FEED_SPEED + 0.3;
+/** Arc bins and depth slices of the fold's thickness histogram (mirror NB / NS in fold.wgsl). */
+export const FOLD_BINS = 128;
+export const FOLD_SLICES = 32;
+/** Total script length: roll, then feed the log (the material folded in half: L/2 long,
+ * plus the tilted end face of a log up to ~0.7 units across) through the nip. */
+export const FOLD_DURATION = FOLD_ROLL_SECONDS + (0.5 * GEOMETRY.length + 0.6) / FOLD_FEED_SPEED + 0.3;
 /** Arc length along the front roll -> z on the bank (the unrolled sheet is compressed by this factor). */
 /**
  * Reference material density. The stress force in P2G is scaled by
@@ -133,8 +137,10 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufLat: GPUBuffer;
   private readonly bufFlags: GPUBuffer;
   private readonly bufFold: GPUBuffer;
-  /** cut & fold reductions (live bank top, arc range, count); zeroed on the CPU before each selection */
+  /** cut & fold reductions (live pile top, x range, count, per-bin histogram); zeroed on the CPU before each selection */
   private readonly bufFoldInfo: GPUBuffer;
+  /** cut & fold spiral tables (per arc bin) + header, built on the GPU from the histogram */
+  private readonly bufFoldTables: GPUBuffer;
   // grid
   private readonly bufGMass: GPUBuffer;
   private readonly bufGMom: GPUBuffer;
@@ -199,7 +205,8 @@ export class GpuMpm implements GpuMpmSim {
     this.bufLat = mk(7 * n);
     this.bufFlags = mk(n);
     this.bufFold = mk(4 * n);
-    this.bufFoldInfo = mk(4);
+    this.bufFoldInfo = mk(8 + 2 * FOLD_BINS + 2 * FOLD_BINS * FOLD_SLICES);
+    this.bufFoldTables = mk(8 * FOLD_BINS + 8 + 2 * FOLD_BINS * (FOLD_SLICES + 1));
     this.bufGMass = mk(d.nodeCount);
     this.bufGMom = mk(3 * d.nodeCount);
     this.bufGVel = mk(4 * d.nodeCount);
@@ -317,7 +324,7 @@ export class GpuMpm implements GpuMpmSim {
     const injectMod = mod('inject', injectSrc);
     const clearRes = [rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGVel), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)];
     const foldRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags), rw(this.bufFold),
-      rw(this.bufFoldInfo), ro(this.bufPMass)];
+      rw(this.bufFoldInfo), ro(this.bufPMass), rw(this.bufFoldTables)];
     const volAView = this.volA.createView({ dimension: '3d' });
     const volBView = this.volB.createView({ dimension: '3d' });
 
@@ -328,7 +335,8 @@ export class GpuMpm implements GpuMpmSim {
         [ro(this.bufPos), ro(this.bufVel), ro(this.bufAff), ro(this.bufFlags), rw(this.bufGMass), rw(this.bufGMom)]),
       grid: this.makeKernel('grid', mod('grid', gridSrc), 'main', [ro(this.bufGMass), ro(this.bufGMom), rw(this.bufGVel)]),
       g2p: this.makeKernel('g2p', mod('g2p', g2pSrc), 'main',
-        [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), ro(this.bufFlags), ro(this.bufGVel)]),
+        [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), ro(this.bufFlags), ro(this.bufGVel),
+          ro(this.bufGMass), rw(this.bufFoldInfo), ro(this.bufFold)]),
       raster: this.makeKernel('raster', mod('raster', rasterSrc), 'main',
         [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)]),
       disperse: this.makeKernel('disperse', mod('disperse', disperseSrc), 'main',
@@ -341,6 +349,7 @@ export class GpuMpm implements GpuMpmSim {
       reset: this.makeKernel('reset', mod('reset', resetSrc), 'main',
         [rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags)]),
       foldSelect: this.makeKernel('foldSelect', foldMod, 'select_', foldRes),
+      foldTables: this.makeKernel('foldTables', foldMod, 'tables_', foldRes),
       foldMove: this.makeKernel('foldMove', foldMod, 'move_', foldRes),
       foldFinish: this.makeKernel('foldFinish', foldMod, 'finish_', foldRes)
     };
@@ -503,8 +512,14 @@ export class GpuMpm implements GpuMpmSim {
     this.writeParams(frameSlot, foldT, foldActive);
     this.device.queue.writeBuffer(this.bufParams, 0, this.paramsData, 0, (UNIFORM_STRIDE / 4) * this.uniformSlots);
     if (this.foldPending) {
-      // reductions: [0] max bank y (atomicMax on float bits), [1] max arc, [2] min arc (atomicMin), [3] count
-      this.device.queue.writeBuffer(this.bufFoldInfo, 0, new Uint32Array([0, 0, 0xffffffff, 0]));
+      // reductions: [0] live pile top y bits, [1] max x bits, [2] min x bits (atomicMin, init +inf),
+      // [3] count, then the per-(half, bin) particle counts and dr sums
+      const init = new Uint32Array(8 + 2 * FOLD_BINS + 2 * FOLD_BINS * FOLD_SLICES);
+      init[2] = 0x7f800000;
+      this.device.queue.writeBuffer(this.bufFoldInfo, 0, init);
+    } else if (this.foldActive) {
+      // the pile top under the log is reduced afresh every frame (g2p, every substep)
+      this.device.queue.writeBuffer(this.bufFoldInfo, 0, new Uint32Array([0]));
     }
 
     const timestampWrites: GPUComputePassTimestampWrites | undefined = this.querySet
@@ -513,6 +528,9 @@ export class GpuMpm implements GpuMpmSim {
     const pass = encoder.beginComputePass({ label: 'GpuMpm-step', timestampWrites });
     if (this.foldPending) {
       this.dispatchParticles(pass, k.foldSelect, 0);
+      pass.setPipeline(k.foldTables.pipeline);
+      pass.setBindGroup(0, k.foldTables.bindGroup, [0]);
+      pass.dispatchWorkgroups(1, 1, 1);
       this.foldPending = false;
       this.foldActive = true;
       this.foldTime = 0;
@@ -759,7 +777,7 @@ export class GpuMpm implements GpuMpmSim {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufFold, this.bufFoldInfo,
+    for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufFold, this.bufFoldInfo, this.bufFoldTables,
       this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll, this.bufProbe, this.bufPLoad]) {
       b.destroy();
     }

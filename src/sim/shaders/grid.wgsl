@@ -22,22 +22,20 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
   // 1. front roller. The sheet is carried around by a sticky band (full no-slip,
   //    gap + h thick) from the nip downward and up the front face. In the wedge
-  //    above the nip, where the bank rests on the roll, the putty is tacky: the
-  //    layer on the roll moves with the roll tangentially (so intake does not
-  //    depend on how heavy the bank is), but its normal component is free to
-  //    separate, so the pressure of material the gap cannot take squeezes it
-  //    back out into the bank instead of being force-fed (honest nip metering).
+  //    above the nip, where the bank rests on the roll, the roll is simply a no-slip wall: the nodes inside its
+  //    surface move with it and nothing else is prescribed, so the surface
+  //    layer (as far as the particles' stencils reach, about a cell) is dragged
+  //    in, the bank presses material onto the roll and packs the layer the nip
+  //    takes to rest density, and when the channel cannot pass what arrives the
+  //    material's own pressure holds the rest back and the bank rolls instead
+  //    of being force-fed. (A hard tangential constraint through the whole band
+  //    with the approach blocked froze the returning sheet at half density,
+  //    lacy on every preset; with the approach free it packed the whole batch
+  //    onto the roll at twice rest density, then starved.)
   let df = rollerDist(P.front.x, P.front.y, p);
-  if (df < R + P.bands.x) {
-    let vr = rollerVel(P.front.x, P.front.y, P.front.z, p);
-    let inWedge = p.y > P.front.x + 0.06 && p.z < P.front.y;
-    if (inWedge && df > R) {
-      let nrm = rollerNormal(P.front.x, P.front.y, p);
-      let vn = dot(v - vr, nrm);
-      v = vr + max(vn, 0.0) * nrm;
-    } else {
-      v = vr;
-    }
+  let inWedge = p.y > P.front.x + 0.06 && p.z < P.front.y;
+  if (df < R + P.bands.x && !(inWedge && df > R)) {
+    v = rollerVel(P.front.x, P.front.y, P.front.z, p);
   }
 
   // 2. back roller: separating with Coulomb friction

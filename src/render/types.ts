@@ -27,6 +27,8 @@ export interface RenderFrameInfo {
 
 export interface Renderer {
   readonly camera: CameraState;
+  /** Density iso-surface threshold as a fraction of rest density (debug-tunable). */
+  iso?: number;
   /** Swap the volumes the ray-marcher samples (called when the sim is rebuilt). */
   setVolumes(volumes: RenderVolumes): void;
   /** Match the canvas backing store to its CSS size * dpr (capped at 2). Returns true if it changed. */

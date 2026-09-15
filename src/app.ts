@@ -446,6 +446,8 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   try {
     renderer = opts.makeRenderer(ctx, canvas);
     if (offscreen) renderer.setPresentation?.(false);
+    const isoQuery = parseFloat(query.get('iso') ?? '');
+    if (Number.isFinite(isoQuery) && isoQuery > 0.05 && isoQuery < 1) renderer.iso = isoQuery;   // debug: iso-surface threshold
     renderer.setVolumes(sim.volumes);
   } catch (e) {
     reportError('Could not build the renderer', e);
@@ -465,6 +467,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
 
   // --- debug api ------------------------------------------------------------------------
   const api: DebugApi = {
+    get renderer() { return renderer as Renderer; },
     get sim(): GpuMpmSim { return sim as GpuMpmSim; },
     async stepFrames(n: number): Promise<void> {
       stepping = true;

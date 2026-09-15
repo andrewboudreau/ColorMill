@@ -70,6 +70,8 @@ function normalize3(v: readonly [number, number, number]): [number, number, numb
 
 export class RayMarchRenderer implements Renderer {
   readonly camera: CameraState = defaultCamera();
+  /** density iso-surface threshold (fraction of rest density); debug-tunable via ?iso= */
+  iso = ISO_THRESHOLD;
   readonly lights: LightRig = defaultLightRig();
   /** Draw the translucent end-guide plates at x = 0 and x = L (design §8, optional). */
   endGuides = true;
@@ -258,7 +260,7 @@ export class RayMarchRenderer implements Renderer {
     set4(1, basis.right[0], basis.right[1], basis.right[2], basis.aspect);
     set4(2, basis.up[0], basis.up[1], basis.up[2], info.timeSeconds);
     set4(3, basis.forward[0], basis.forward[1], basis.forward[2], hCell);
-    set4(4, vol ? vol.dims.nx : 1, vol ? vol.dims.ny : 1, vol ? vol.dims.nz : 1, ISO_THRESHOLD);
+    set4(4, vol ? vol.dims.nx : 1, vol ? vol.dims.ny : 1, vol ? vol.dims.nz : 1, this.iso);
     set4(5, GEOMETRY.domain[0], GEOMETRY.domain[1], GEOMETRY.domain[2], GEOMETRY.length);
     set4(6, poses.back.axisY, poses.back.axisZ, poses.back.radius, info.rollerAngleBack);
     set4(7, poses.front.axisY, poses.front.axisZ, poses.front.radius, info.rollerAngleFront);

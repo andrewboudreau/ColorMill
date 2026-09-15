@@ -46,9 +46,9 @@ tray. Pigment is tracked as a **Mixbox latent** per particle and mixed only
 where the material is actually sheared: once per frame each particle relaxes
 its latent toward the local node average at a rate proportional to its shear
 rate, so mixing happens at the nip and not in the resting bank. A scripted
-**cut & roll** lifts the sheet off the front roll and lays it back on the
-bank a quarter-length along, which is the only axial transport a real mill
-gets. Full detail, including every constant, is in
+**cut & roll** takes everything off the mill, winds it into a log (bank at
+the core, sheet around it) and feeds the log back in end-first over the nip,
+which is the only axial transport a real mill gets. Full detail, including every constant, is in
 [`docs/design-v2.md`](docs/design-v2.md).
 
 ## Controls

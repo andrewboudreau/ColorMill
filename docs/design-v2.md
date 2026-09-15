@@ -167,19 +167,34 @@ Boundaries, applied in this order:
    thickness of the sheet the nip produces plus one cell of stencil slack):
    `v = vr` (full no-slip incl. normal — the sheet is carried around) **except
    in the wedge above the nip** (`y > axisY + 0.06`, `z < frontAxisZ`, the
-   region where the bank rests on the roll). There the putty is tacky but not
-   captured: the tangential velocity is the roll's (`v = vr + max(vn, 0)·n`
-   with `vn = dot(v − vr, n)`), so intake does not depend on how heavy the
-   bank is, while the normal component is free to separate, so the pressure
-   of material the gap cannot take squeezes it back out into the bank instead
-   of being force-fed. Measured on `low` at the default 1.2 L batch: nip peak
-   density 1.0–1.5× rest in steady state (a 2.2× transient below the nip in
-   the first 1.5 s while the seeded pocket clears), full sheet on the front
-   roll. Two alternatives were tried and rejected: Coulomb friction only in
-   the wedge (μ = 0.8) starves the nip once the bank is small, because the
-   drag then scales with the bank's weight, and the sheet came out lacy and
-   pulsing; releasing the normal constraint of the whole band where it is
-   overpacked dropped material off the underside.
+   region where the bank rests on the roll). There the roll is simply a
+   no-slip wall: only the nodes inside its surface (`d ≤ R`) take `v = vr`,
+   nothing else is prescribed, and g2p pushes particles out of the roll. The
+   surface layer is dragged in as far as the particles' stencils reach (about
+   a cell), the bank presses material onto the roll and packs the layer the
+   nip is about to take, and when the channel cannot pass what arrives the
+   material's own pressure (ν = 0.45) holds the rest back and the bank rolls
+   instead of being force-fed.
+   Measured (particles per 0.35 rad of sheet; 1650 at `low`, 5550 at `medium`
+   is a gap-thick sheet at rest density): `low` 1.2 L 2000–2700 in every bin,
+   `low` 2.4 L 2200–2900, `medium` 1.2 L 7700–8300, all steady from 1.3 s to
+   3.9 s, nothing dropped, the sheet rendered without a hole. The channel
+   itself is still velocity-prescribed, so it packs the sheet to 1.3–1.5× rest
+   density (more with a heavier bank); that is the remaining dishonesty of the
+   nip and it is bounded.
+   Alternatives tried and rejected: Coulomb friction only (μ = 0.8) starves
+   the nip once the bank is small, because the drag scales with the bank's
+   weight (lacy, pulsing sheet); a hard tangential tack constraint through the
+   whole band with the approach blocked freezes the returning sheet at the
+   density it first formed with (700–1000 per bin at `low`, ~2800 at `medium`:
+   half density, lacy on every preset once the seeded pocket is used up, and
+   8800 particles dropped to the tray at `medium`); the same with the approach
+   free packs the whole batch onto the roll at twice rest density in the first
+   turn, then starves; a tack of bounded shear strength (1.0) pulls the batch
+   onto the roll in pulses and leaves gaps; a deeper tack layer (2× the band)
+   force-feeds and drops material off the underside; releasing the band's
+   normal constraint where it is overpacked drops material off the underside
+   too.
 2. **Back roller** (separating with Coulomb friction). If `d < R`:
    `vrel = v − vr`; `vn = dot(vrel, n)`; if `vn < 0`: `vt = vrel − vn·n`;
    `vt *= max(0, 1 − mu·(−vn)/|vt|)` with `mu = 0.4`; `v = vr + vt` (normal
@@ -312,28 +327,49 @@ seconds and its spiral cross-section, every colour interleaved, is squeezed
 out across the full roll width. That is the only source of mixing along the
 roll axis. Modelled as a scripted kinematic move:
 
-1. **Select** the whole sheet on the front roll: `d < R + 3h` from the front
-   axis and `y < axisY` or `z > frontAxisZ` (never the nip channel). Reduce
-   the live bank top and the arc range of the selection into a small buffer
-   with atomics (no readback).
-2. **Roll** (`FOLD_ROLL_SECONDS` = 1.2 s): each particle, parameterised by
-   `(x, t = d − R, s)` with `s` the arc length from the nip, flies to its
-   place in the log. The sheet is first folded in half across its width
-   (x = L/2 onto x = 0, the folded half as the outer layer), so the log is
-   `L/2` long and `2g` thick; rolling it from the cut end is an
-   area-preserving spiral `ρ = sqrt(rc² + s·2g/π)`, `φ = 2π(ρ − rc)/2g`,
-   core `rc = 2g`. The log stands tilted `FOLD_TILT` (0.42 rad) from vertical
-   toward the viewer, axis `a = (0, cos, sin)`, lower end face resting on the
-   live bank top over the nip (never squashed against the ceiling: if the
-   bank is high the log sinks into it).
-3. **Feed** (`FOLD_FEED_SPEED` = 0.15 units/s along the axis): the held log
-   descends along `−a`; a particle that reaches the release plane (the live
-   bank top + h, or the roll tops + 3h) is released: flag cleared, `C = 0`,
-   `F` kept, `v` = feed velocity, P2G affine rebuilt. The rolls take the
-   released material through the nip. The move ends when the log is used up
-   (`FOLD_DURATION` ≈ 6.5 s); `finish` releases anything still held.
+1. **Select** everything on the mill: the sheet on the front roll, the bank in
+   the nip and whatever rides the back roll (an operator takes the lot). Each
+   particle is parameterised by `(x, dr = d − R, s = θR)`: its depth off the
+   front roll and its arc from the nip in the direction of rotation; it is
+   binned by arc (`NB` = 128 bins over 2πR, per half of the width fold) and by
+   depth (`NS` = 32 square-root-spaced slices over 0.5 units, fine near the
+   roll so a gap-thick sheet is resolved, coarse deep in the bank). Counts go
+   into a small atomic buffer; no readback.
+2. **Tables** (one workgroup): the histogram becomes the log. Bin `b` holds
+   volume `n·Vp`; spread over the bin's footprint `ell × Lhalf` that is a layer
+   `t = n·Vp / (ell·Lhalf)` thick, where the bin's arc `ell` is stretched
+   beyond `ds` wherever the layer would exceed `1.5 g` per half (the operator
+   kneads the bank flat as it rolls it in). The spiral is then wound bin by
+   bin from the bank end (the bank is the core, the sheet wraps around it):
+   the angle advances by `ell / (ρ + T/2)` and a bin's inner radius is the
+   outer surface of the bin one full turn earlier at the same angle (`rc = 2g`
+   on the first turn), so layers of varying thickness stack without
+   overlapping. Within a bin a particle lands at the radius that gives it its
+   share of the layer's area (uniform in `r²`), ordered by the bin's depth
+   CDF, and along the axis at `x` (or `L − x`: the width fold, the folded half
+   as the outer sub-layer). Every bin is volume-preserving, so the log is never
+   denser than the material was (validated: ≤ 1.6× rest with a trilinear
+   raster, the same as the sheet it came from). The header stores the log's
+   radius and base: the lower end face rests just above the roll tops (nothing
+   is left on the mill), never squashed against the ceiling.
+3. **Roll** (`FOLD_ROLL_SECONDS` = 1.2 s): each particle flies from where it
+   was to its place in the standing log (smoothstep). The log stands tilted
+   `FOLD_TILT` (0.42 rad) from vertical toward the viewer, axis
+   `a = (0, cos, sin)`, over the nip at `x = L/2`.
+4. **Feed** (`FOLD_FEED_SPEED` = 0.15 units/s along the axis): the held log
+   descends along `−a`; a particle that reaches the release plane is released:
+   flag cleared, `C = 0`, `F` kept, `v` = feed velocity, P2G affine rebuilt.
+   The release plane is one cell above the **live pile** the nip is eating:
+   g2p reduces, every substep, the top of the settled material under the
+   log's footprint (node mass ≥ 2 particles; material released less than
+   0.5 s ago does not count, otherwise the log would let go of itself in a
+   cascade), falling back to the roll tops + 3h. So nothing is let go in
+   mid-air and the log is never pushed into a pile the nip has not taken.
+   The move ends when the log is used up (`FOLD_DURATION` ≈ 10.5 s: roll, then the
+   half-length log plus its tilted end face at the feed speed); `finish`
+   releases anything still held.
 
-Nothing is placed inside existing material. Exposed as
+Nothing is placed inside existing material and no material is left behind. Exposed as
 `GpuMpmSim.cutAndFold()`; the UI button is "Cut & roll" (F).
 
 ---

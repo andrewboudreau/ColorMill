@@ -4,7 +4,7 @@
  * sits in the top-right corner. Plain DOM, no framework.
  */
 import {
-  PARAM_LIMITS, QUALITY_PRESETS, estimateParticleCount, omegaToRpm,
+  BATCH_CHOICES, PARAM_LIMITS, QUALITY_PRESETS, estimateParticleCount, omegaToRpm,
   type MillParams, type QualityPreset
 } from '../config/mill';
 import { formatCount } from './hud';
@@ -12,6 +12,8 @@ import { formatCount } from './hud';
 export interface PanelCallbacks {
   onParam(key: keyof MillParams, value: number): void;
   onQuality(preset: QualityPreset): void;
+  /** batch size multiplier (rebuilds the bank) */
+  onBatch(batch: number): void;
   onAutoOrbit(on: boolean): void;
 }
 
@@ -30,6 +32,8 @@ export interface PanelStats {
 export interface PanelInitial {
   readonly params: MillParams;
   readonly preset: QualityPreset;
+  /** batch size multiplier */
+  readonly batch?: number;
   readonly autoOrbit: boolean;
   readonly open: boolean;
 }
@@ -56,6 +60,7 @@ export class Panel {
   readonly toggleButton: HTMLButtonElement;
   private readonly sliders = new Map<keyof MillParams, { input: HTMLInputElement; value: HTMLElement; spec: SliderSpec }>();
   private readonly quality: HTMLSelectElement;
+  private readonly batch: HTMLSelectElement;
   private readonly orbit: HTMLInputElement;
   private readonly stats: Record<string, HTMLElement> = {};
   private open: boolean;
@@ -136,6 +141,25 @@ export class Panel {
     qfield.append(qname, this.quality);
     qsec.appendChild(qfield);
 
+    const bfield = document.createElement('label');
+    bfield.className = 'cm-field';
+    const bname = document.createElement('span');
+    bname.className = 'cm-field-name';
+    bname.textContent = 'Batch size (rebuilds the bank)';
+    this.batch = document.createElement('select');
+    this.batch.className = 'cm-select';
+    this.batch.name = 'batch';
+    for (const b of BATCH_CHOICES) {
+      const o = document.createElement('option');
+      o.value = String(b);
+      o.textContent = `${b}× · ~${formatCount(estimateParticleCount(QUALITY_PRESETS[initial.preset], b))} particles`;
+      this.batch.appendChild(o);
+    }
+    this.batch.value = String(initial.batch ?? 1);
+    this.batch.addEventListener('change', () => this.cb.onBatch(parseFloat(this.batch.value)));
+    bfield.append(bname, this.batch);
+    qsec.appendChild(bfield);
+
     // --- camera ---------------------------------------------------------------
     const csec = this.section('Camera');
     const ofield = document.createElement('label');
@@ -200,6 +224,11 @@ export class Panel {
 
   setQualityEnabled(enabled: boolean): void {
     this.quality.disabled = !enabled;
+    this.batch.disabled = !enabled;
+  }
+
+  setBatch(b: number): void {
+    this.batch.value = String(b);
   }
 
   setAutoOrbit(on: boolean): void {

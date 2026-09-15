@@ -20,10 +20,29 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   let p = vec3<f32>(f32(gid.x), f32(gid.y), f32(gid.z)) * h;
   let R = P.front.w;
 
-  // 1. front roller: sticky / tack band (full no-slip, sheet is carried around)
+  // 1. front roller. The sheet is carried around by a sticky band (full no-slip,
+  //    gap + h thick) from the nip downward and up the front face. In the wedge
+  //    above the nip, where the bank rests on the roll, the roll drags material
+  //    in by Coulomb friction only: intake is then set by the friction / pressure
+  //    balance, so material the gap cannot take slips and rolls back into the
+  //    bank instead of being force-fed (honest nip metering).
   let df = rollerDist(P.front.x, P.front.y, p);
   if (df < R + P.bands.x) {
-    v = rollerVel(P.front.x, P.front.y, P.front.z, p);
+    let vr = rollerVel(P.front.x, P.front.y, P.front.z, p);
+    let inWedge = p.y > P.front.x + 0.06 && p.z < P.front.y;
+    if (inWedge && df > R) {
+      let nrm = rollerNormal(P.front.x, P.front.y, p);
+      let vrel = v - vr;
+      let vn = dot(vrel, nrm);
+      if (vn < 0.0) {
+        var vt = vrel - vn * nrm;
+        let vtl = length(vt);
+        if (vtl > 1e-9) { vt *= max(0.0, 1.0 - 0.8 * (-vn) / vtl); }
+        v = vr + vt;
+      }
+    } else {
+      v = vr;
+    }
   }
 
   // 2. back roller: separating with Coulomb friction

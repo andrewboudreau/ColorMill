@@ -45,7 +45,10 @@ export interface MaterialConstants {
  */
 export const DEFAULT_MATERIAL: MaterialConstants = {
   E: 15,
-  nu: 0.35,
+  /* nearly incompressible: at 0.35 the nip packed the putty to 1.5x rest density
+     and carried 50% more through than the gap allows; at 0.45 the nip meters a
+     gap-thick sheet and the excess backs up into a rolling bank */
+  nu: 0.45,
   thetaC: 0.025,
   /* tensile cohesion: at 0.0075 the sheet re-forming after an operator move
      comes out lacy; 0.03 keeps it continuous (validated headlessly) */
@@ -73,6 +76,8 @@ export interface MillParams {
   dispersion: number;
   /** back-roller Coulomb friction coefficient */
   backFriction: number;
+  /** front-roll adhesion layer thickness in cells (0 = auto: gap/h + 1) */
+  tackCells: number;
 }
 
 export const DEFAULT_PARAMS: Readonly<MillParams> = {
@@ -84,7 +89,8 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
      not fade to a tint (measured: at 0.1 a black chunk is 77% grey after 3 s of
      milling; at 0 it stays black and streaks around the roll) */
   dispersion: 0.02,
-  backFriction: 0.4
+  backFriction: 0.4,
+  tackCells: 0
 };
 
 export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max: number; step: number }>> = {
@@ -93,7 +99,8 @@ export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max:
   gap: { min: 0.02, max: 0.1, step: 0.002 },
   gravity: { min: 0, max: 6, step: 0.1 },
   dispersion: { min: 0, max: 0.5, step: 0.005 },
-  backFriction: { min: 0, max: 1, step: 0.02 }
+  backFriction: { min: 0, max: 1, step: 0.02 },
+  tackCells: { min: 0, max: 6, step: 0.1 }
 };
 
 /** Fixed geometry (sim units). */
@@ -198,13 +205,13 @@ export function millTopSurfaceY(z: number, params: Pick<MillParams, 'gap' | 'ome
 }
 
 /** Axis-aligned bounds of the initial bank (x, y, z ranges). */
-export function bankBounds(params: Pick<MillParams, 'gap' | 'omega' | 'frictionRatio'>): {
+export function bankBounds(params: Pick<MillParams, 'gap' | 'omega' | 'frictionRatio'>, batch = 1): {
   x: [number, number];
   y: [number, number];
   z: [number, number];
 } {
   void params;
-  const top = GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight;
+  const top = GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight * batch;
   return {
     x: [GEOMETRY.bankEndMargin, GEOMETRY.length - GEOMETRY.bankEndMargin],
     y: [GEOMETRY.axisY, top],
@@ -218,10 +225,10 @@ export function bankBounds(params: Pick<MillParams, 'gap' | 'omega' | 'frictionR
  * top surface. Returns a flat xyz array. Pure and testable (used by the GPU
  * sim to fill its position buffer and by tests to check counts).
  */
-export function seedBankPositions(q: QualitySettings, params: MillParams, seed = 1234): Float32Array {
+export function seedBankPositions(q: QualitySettings, params: MillParams, seed = 1234, batch = 1): Float32Array {
   const { h } = gridDims(q);
   const per = GEOMETRY.seedPerAxis;
-  const b = bankBounds(params);
+  const b = bankBounds(params, batch);
   const { back, front } = rollerPoses(params);
   const R = GEOMETRY.radius;
   const out: number[] = [];
@@ -267,9 +274,9 @@ export const PIGMENT_POOL_FRACTION = 0.5;
 export const PIGMENT_CHUNK_RADIUS = 0.14;
 
 /** Estimated particle count for a preset (bank volume / (h^3/8)), for UI/preset selection. */
-export function estimateParticleCount(q: QualitySettings): number {
+export function estimateParticleCount(q: QualitySettings, batch = 1): number {
   const { h } = gridDims(q);
-  const b = bankBounds(DEFAULT_PARAMS);
+  const b = bankBounds(DEFAULT_PARAMS, batch);
   // bank slab minus the roller caps under it; the caps remove roughly a third of the slab volume
   const vol = (b.x[1] - b.x[0]) * (b.y[1] - b.y[0]) * (b.z[1] - b.z[0]) * 0.72;
   return Math.round(vol / (h * h * h / 8));
@@ -284,6 +291,21 @@ export interface MillConfig {
   readonly quality: QualitySettings;
   readonly material: MaterialConstants;
   readonly params: MillParams;
+  /** batch size: scales the seeded bank height (1 = the default bank) */
+  readonly batch?: number;
+}
+
+export const BATCH_CHOICES: readonly number[] = [0.5, 0.75, 1, 1.5, 2];
+
+/** Physical scale used for the HUD readout only: one sim unit is about 0.2 m. */
+export const UNIT_METRES = 0.2;
+/** Uncured silicone putty is ~1.1 kg per litre. */
+export const SILICONE_KG_PER_LITRE = 1.1;
+
+/** Litres of material for a particle count at cell size h (rest volume h^3/8 per particle). */
+export function materialLitres(particles: number, h: number): number {
+  const units3 = (particles * h * h * h) / 8;
+  return units3 * UNIT_METRES ** 3 * 1000;
 }
 
 export function defaultConfig(preset: QualityPreset = 'high'): MillConfig {

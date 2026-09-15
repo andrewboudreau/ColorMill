@@ -50,6 +50,14 @@ describe('mill geometry', () => {
     }
   });
 
+  it('scales the seeded bank with the batch size', () => {
+    const one = seedBankPositions(QUALITY_PRESETS.low, DEFAULT_PARAMS, 1, 1).length / 3;
+    const half = seedBankPositions(QUALITY_PRESETS.low, DEFAULT_PARAMS, 1, 0.5).length / 3;
+    const twice = seedBankPositions(QUALITY_PRESETS.low, DEFAULT_PARAMS, 1, 2).length / 3;
+    expect(half).toBeLessThan(one);
+    expect(twice).toBeGreaterThan(one * 1.5);
+  });
+
   it('is deterministic for a given seed', () => {
     const a = seedBankPositions(QUALITY_PRESETS.low, DEFAULT_PARAMS, 7);
     const b = seedBankPositions(QUALITY_PRESETS.low, DEFAULT_PARAMS, 7);

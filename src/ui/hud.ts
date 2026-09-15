@@ -13,6 +13,9 @@ export interface HudStatus {
   /** sim seconds per real second */
   readonly simSpeed: number;
   readonly paused: boolean;
+  /** material on the mill, litres (at the assumed physical scale) */
+  readonly litres: number;
+  readonly kg: number;
 }
 
 /** 484096 -> "484k", 1234 -> "1.2k", 512 -> "512" */
@@ -55,7 +58,7 @@ export class Hud {
     const ms = s.msFrame > 0 ? s.msFrame.toFixed(1) : '–';
     const speed = s.paused ? 'paused' : `${s.simSpeed.toFixed(2)}× real time`;
     this.statusEl.textContent =
-      `${s.preset} · ${formatCount(s.particles)} particles · ${s.grid} · ${fps} fps · ${ms} ms · ${speed}`;
+      `${s.preset} · ${s.litres.toFixed(2)} L (${s.kg.toFixed(2)} kg) in ${formatCount(s.particles)} particles · ${s.grid} · ${fps} fps · ${ms} ms · ${speed}`;
   }
 
   /** Show (or clear with null) a persistent error line. */

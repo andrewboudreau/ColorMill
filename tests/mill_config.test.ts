@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_PARAMS, GEOMETRY, QUALITY_PRESETS, gridDims, lameParameters, millTopSurfaceY,
+  DEFAULT_PARAMS, GEOMETRY, QUALITY_PRESETS, bankTopY, bankVolumeBelow, gridDims, lameParameters, millTopSurfaceY,
   rollerAxisDistance, rollerPoses, rollerSurfaceVelocity, seedBankPositions
 } from '../src/config/mill';
 
@@ -37,8 +37,8 @@ describe('mill geometry', () => {
     const q = QUALITY_PRESETS.low;
     const pos = seedBankPositions(q, DEFAULT_PARAMS);
     const n = pos.length / 3;
-    expect(n).toBeGreaterThan(40000);
-    expect(n).toBeLessThan(110000);
+    expect(n).toBeGreaterThan(25000);
+    expect(n).toBeLessThan(60000);
     const { back, front } = rollerPoses(DEFAULT_PARAMS);
     for (let i = 0; i < n; i += 97) {
       const x = pos[3 * i], y = pos[3 * i + 1], z = pos[3 * i + 2];
@@ -50,12 +50,25 @@ describe('mill geometry', () => {
     }
   });
 
-  it('scales the seeded bank with the batch size', () => {
+  it('scales the seeded bank volume with the batch size', () => {
     const one = seedBankPositions(QUALITY_PRESETS.low, DEFAULT_PARAMS, 1, 1).length / 3;
     const half = seedBankPositions(QUALITY_PRESETS.low, DEFAULT_PARAMS, 1, 0.5).length / 3;
     const twice = seedBankPositions(QUALITY_PRESETS.low, DEFAULT_PARAMS, 1, 2).length / 3;
-    expect(half).toBeLessThan(one);
-    expect(twice).toBeGreaterThan(one * 1.5);
+    // batch is a volume multiplier (within the seeding skin around the rolls)
+    expect(half / one).toBeGreaterThan(0.4);
+    expect(half / one).toBeLessThan(0.6);
+    expect(twice / one).toBeGreaterThan(1.8);
+    expect(twice / one).toBeLessThan(2.2);
+  });
+
+  it('seeds about the nominal batch volume', () => {
+    const { h } = gridDims(QUALITY_PRESETS.high);
+    const n = seedBankPositions(QUALITY_PRESETS.high, DEFAULT_PARAMS, 1, 1).length / 3;
+    const vol = (n * h * h * h) / 8;
+    expect(vol).toBeGreaterThan(GEOMETRY.bankVolume * 0.85);
+    expect(vol).toBeLessThan(GEOMETRY.bankVolume * 1.05);
+    expect(bankVolumeBelow(bankTopY(1), DEFAULT_PARAMS)).toBeCloseTo(GEOMETRY.bankVolume, 5);
+    expect(bankVolumeBelow(bankTopY(2), DEFAULT_PARAMS)).toBeCloseTo(2 * GEOMETRY.bankVolume, 5);
   });
 
   it('is deterministic for a given seed', () => {

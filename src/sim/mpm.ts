@@ -14,7 +14,7 @@
  */
 import {
   PIGMENT_POOL_FRACTION,
-  GEOMETRY, gridDims, lameParameters, rollerPoses, seedBankPositions,
+  GEOMETRY, bankTopY, gridDims, lameParameters, rollerPoses, seedBankPositions,
   type GridDims, type MillConfig, type MillParams, type QualitySettings
 } from '../config/mill';
 import type {
@@ -424,7 +424,7 @@ export class GpuMpm implements GpuMpmSim {
     f.set([foldActive ? 1 : 0, foldT, FOLD_ROLL_SECONDS, FOLD_FEED_SPEED], o + 28);
     // fold: the live bank top is reduced on the GPU (fold.wgsl); fold2.x is only the fallback
     const yMax = GEOMETRY.domain[1] - 3 * h;
-    const bankTopFallback = Math.min(GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight * this.batch, yMax);
+    const bankTopFallback = Math.min(bankTopY(this.batch, this.config.params), yMax);
     const gap = front.axisZ - back.axisZ - 2 * GEOMETRY.radius;
     f.set([bankTopFallback, GEOMETRY.length, gap, GEOMETRY.nipZ], o + 32);
     // front-roll tack band: the adhesion layer is as thick as the sheet the nip
@@ -594,7 +594,7 @@ export class GpuMpm implements GpuMpmSim {
     const r = Math.max(radius, 2 * h);
     // spawn just above the seeded bank top: the bank only ever gets lower, so the
     // chunk starts in air (or touching the surface) and drops in under gravity
-    const cy = Math.min(GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight * this.batch + r + 0.02, dom[1] - 1.5 * h - r);
+    const cy = Math.min(bankTopY(this.batch, this.config.params) + r + 0.02, dom[1] - 1.5 * h - r);
     const cx = Math.min(Math.max(x, 1.5 * h + r), dom[0] - 1.5 * h - r);
     const cz = Math.min(Math.max(z, 1.5 * h + r), dom[2] - 1.5 * h - r);
     const room = this.capacity - this.count;
@@ -652,7 +652,7 @@ export class GpuMpm implements GpuMpmSim {
   addPigmentOnSurface(x: number, z: number, radius: number, latent: Latent, strength = 1): void {
     if (this.destroyed) return;
     // fallback centre (used when the column is empty): the seeded bank top
-    const yTop = GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight * this.batch - 0.5 * radius;
+    const yTop = bankTopY(this.batch, this.config.params) - 0.5 * radius;
     this.device.queue.writeBuffer(this.bufInject, 0, this.injectData([x, yTop, z], radius, latent, strength, 2));
     this.device.queue.writeBuffer(this.bufProbe, 0, new Uint32Array([0, 0, 0, 0]));
     const enc = this.device.createCommandEncoder({ label: 'GpuMpm-inject-surface' });

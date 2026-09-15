@@ -59,8 +59,12 @@ Node counts are `N = round(domain / h) + 1` per axis; see
 | high (default) | 64 | 0.015625 | 96×144×96 | 683k (+50% pool) |
 | ultra | 72 | 0.01389 | 108×162×108 | 972k (+50% pool) |
 
-**Batch size.** `MillConfig.batch` scales the seeded bank height (0.5×–2×
-from the panel or `?batch=`); changing it rebuilds the sim. The HUD shows the
+**Batch size.** `MillConfig.batch` is a volume multiplier on the seeded
+material (0.5×–3× from the panel, 0.25×–4× via `?batch=`); the bank top is
+solved from the volume (`bankTopY`), so 2× really is twice the putty. The
+default batch is `GEOMETRY.bankVolume` = 0.15 units³ ≈ 1.2 L: the pocket
+between the rolls plus a modest bank, of which a gap-thick sheet around the
+front roll takes about 0.11 units³. Changing the batch rebuilds the sim. The HUD shows the
 material on the mill as litres and kg (one sim unit ≈ 0.2 m, putty 1.1 kg/L)
 and the particle count, so conservation is visible: the count only changes
 when a pigment chunk is added or the sim is reset.
@@ -163,13 +167,19 @@ Boundaries, applied in this order:
    thickness of the sheet the nip produces plus one cell of stencil slack):
    `v = vr` (full no-slip incl. normal — the sheet is carried around) **except
    in the wedge above the nip** (`y > axisY + 0.06`, `z < frontAxisZ`, the
-   region where the bank rests on the roll), where the roll drags material by
-   Coulomb friction only (μ = 0.8, separating). Intake is then set by the
-   friction / pressure balance, so material the gap cannot take slips and
-   rolls back into the bank instead of being force-fed: measured on `low`,
-   the nip's peak density fell from 2.9× to 1.3× rest and the sheet still
-   forms. (Releasing the normal constraint where the band is overpacked was
-   tried instead and dropped material off the underside.)
+   region where the bank rests on the roll). There the putty is tacky but not
+   captured: the tangential velocity is the roll's (`v = vr + max(vn, 0)·n`
+   with `vn = dot(v − vr, n)`), so intake does not depend on how heavy the
+   bank is, while the normal component is free to separate, so the pressure
+   of material the gap cannot take squeezes it back out into the bank instead
+   of being force-fed. Measured on `low` at the default 1.2 L batch: nip peak
+   density 1.0–1.5× rest in steady state (a 2.2× transient below the nip in
+   the first 1.5 s while the seeded pocket clears), full sheet on the front
+   roll. Two alternatives were tried and rejected: Coulomb friction only in
+   the wedge (μ = 0.8) starves the nip once the bank is small, because the
+   drag then scales with the bank's weight, and the sheet came out lacy and
+   pulsing; releasing the normal constraint of the whole band where it is
+   overpacked dropped material off the underside.
 2. **Back roller** (separating with Coulomb friction). If `d < R`:
    `vrel = v − vr`; `vn = dot(vrel, n)`; if `vn < 0`: `vt = vrel − vn·n`;
    `vt *= max(0, 1 − mu·(−vn)/|vt|)` with `mu = 0.4`; `v = vr + vt` (normal

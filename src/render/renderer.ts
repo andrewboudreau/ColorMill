@@ -10,7 +10,7 @@
  */
 import type { GpuContext } from '../gpu/device';
 import { configureCanvas } from '../gpu/device';
-import { GEOMETRY, rollerPoses } from '../config/mill';
+import { GEOMETRY, bankTopY, rollerPoses } from '../config/mill';
 import type { RenderVolumes } from '../sim/types';
 import { assignCamera, cameraBasis, defaultCamera } from './camera';
 import type { CameraState, RenderFrameInfo, Renderer } from './types';
@@ -272,7 +272,7 @@ export class RayMarchRenderer implements Renderer {
     const m = this.mipSize;
     set4(15, m[0], m[1], m[2], MIP_BLOCK);
     // end-guide plates: plate top (a little above the settled bank), half depth in z, thickness, enabled
-    const guideTop = GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight * 0.75;
+    const guideTop = bankTopY(1) + 0.15;
     set4(16, guideTop, GEOMETRY.bankHalfDepth, 0.012, this.endGuides ? 1 : 0);
     this.device.queue.writeBuffer(this.uniformBuffer, 0, u);
   }

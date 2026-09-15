@@ -4,7 +4,7 @@
  * sits in the top-right corner. Plain DOM, no framework.
  */
 import {
-  BATCH_CHOICES, PARAM_LIMITS, QUALITY_PRESETS, estimateParticleCount, omegaToRpm,
+  BATCH_CHOICES, batchLitres, PARAM_LIMITS, QUALITY_PRESETS, estimateParticleCount, omegaToRpm,
   type MillParams, type QualityPreset
 } from '../config/mill';
 import { formatCount } from './hud';
@@ -149,10 +149,13 @@ export class Panel {
     this.batch = document.createElement('select');
     this.batch.className = 'cm-select';
     this.batch.name = 'batch';
-    for (const b of BATCH_CHOICES) {
+    const choices = [...BATCH_CHOICES];
+    const b0 = initial.batch ?? 1;
+    if (!choices.includes(b0)) choices.push(b0), choices.sort((a, b) => a - b);
+    for (const b of choices) {
       const o = document.createElement('option');
       o.value = String(b);
-      o.textContent = `${b}× · ~${formatCount(estimateParticleCount(QUALITY_PRESETS[initial.preset], b))} particles`;
+      o.textContent = `${b}× · ${batchLitres(b).toFixed(1)} L · ~${formatCount(estimateParticleCount(QUALITY_PRESETS[initial.preset], b))} particles`;
       this.batch.appendChild(o);
     }
     this.batch.value = String(initial.batch ?? 1);

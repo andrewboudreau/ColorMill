@@ -117,11 +117,13 @@ export const GEOMETRY = {
   axisY: 0.55,
   /** z of the nip mid-plane */
   nipZ: 0.75,
-  /** initial bank: half-width in z around nipZ, and height above the roller top */
+  /** initial bank: half-width in z around nipZ */
   bankHalfDepth: 0.25,
-  /* tall enough that a gap-thick sheet around the front roll (2πR·gap per unit
-     length) leaves a bank in front of the nip instead of consuming it */
-  bankHeight: 0.36,
+  /** volume (sim units³) of the default batch (batch = 1): the material seeded
+      in the pocket between the rolls and the bank above it. 0.15 units³ is
+      about 1.2 L at UNIT_METRES; a gap-thick sheet around the front roll
+      (2πR·gap per unit length) takes ~0.11 units³, leaving a modest bank. */
+  bankVolume: 0.15,
   /** x margin the bank keeps from the end guides at seeding */
   bankEndMargin: 0.05,
   /** particles per axis per cell at seeding (8 per cell) */
@@ -204,14 +206,53 @@ export function millTopSurfaceY(z: number, params: Pick<MillParams, 'gap' | 'ome
   return y;
 }
 
+type BankParams = Pick<MillParams, 'gap' | 'omega' | 'frictionRatio'>;
+
+/**
+ * Volume (sim units³) of the bank slab between the mill top surface and y = top,
+ * over the bank's x/z footprint (a 1-D quadrature over z of the free height).
+ */
+export function bankVolumeBelow(top: number, params: BankParams): number {
+  const z0 = GEOMETRY.nipZ - GEOMETRY.bankHalfDepth;
+  const z1 = GEOMETRY.nipZ + GEOMETRY.bankHalfDepth;
+  const n = 400;
+  const dz = (z1 - z0) / n;
+  let area = 0;
+  for (let i = 0; i < n; i++) {
+    const z = z0 + (i + 0.5) * dz;
+    area += Math.max(0, top - millTopSurfaceY(z, params)) * dz;
+  }
+  return area * (GEOMETRY.length - 2 * GEOMETRY.bankEndMargin);
+}
+
+/**
+ * Top of the seeded bank for a batch size: the height at which the bank slab
+ * holds `batch × GEOMETRY.bankVolume` of material. Batch is a volume (mass)
+ * multiplier, not a height multiplier, so 2× really is twice the putty.
+ */
+export function bankTopY(batch: number, params: BankParams = DEFAULT_PARAMS): number {
+  const target = GEOMETRY.bankVolume * Math.max(batch, 0);
+  let lo: number = GEOMETRY.axisY;
+  let hi: number = GEOMETRY.domain[1];
+  for (let i = 0; i < 48; i++) {
+    const mid = 0.5 * (lo + hi);
+    if (bankVolumeBelow(mid, params) < target) lo = mid; else hi = mid;
+  }
+  return 0.5 * (lo + hi);
+}
+
+/** Litres of putty in a batch (HUD/panel readout). */
+export function batchLitres(batch: number): number {
+  return GEOMETRY.bankVolume * batch * UNIT_METRES ** 3 * 1000;
+}
+
 /** Axis-aligned bounds of the initial bank (x, y, z ranges). */
-export function bankBounds(params: Pick<MillParams, 'gap' | 'omega' | 'frictionRatio'>, batch = 1): {
+export function bankBounds(params: BankParams, batch = 1): {
   x: [number, number];
   y: [number, number];
   z: [number, number];
 } {
-  void params;
-  const top = GEOMETRY.axisY + GEOMETRY.radius + GEOMETRY.bankHeight * batch;
+  const top = bankTopY(batch, params);
   return {
     x: [GEOMETRY.bankEndMargin, GEOMETRY.length - GEOMETRY.bankEndMargin],
     y: [GEOMETRY.axisY, top],
@@ -273,13 +314,10 @@ export const PIGMENT_POOL_FRACTION = 0.5;
 /** Radius of one pigment chunk (a dollop of coloured putty dropped on the bank). */
 export const PIGMENT_CHUNK_RADIUS = 0.14;
 
-/** Estimated particle count for a preset (bank volume / (h^3/8)), for UI/preset selection. */
+/** Estimated particle count for a preset (batch volume / (h^3/8)), for UI/preset selection. */
 export function estimateParticleCount(q: QualitySettings, batch = 1): number {
   const { h } = gridDims(q);
-  const b = bankBounds(DEFAULT_PARAMS, batch);
-  // bank slab minus the roller caps under it; the caps remove roughly a third of the slab volume
-  const vol = (b.x[1] - b.x[0]) * (b.y[1] - b.y[0]) * (b.z[1] - b.z[0]) * 0.72;
-  return Math.round(vol / (h * h * h / 8));
+  return Math.round((GEOMETRY.bankVolume * batch) / (h * h * h / 8));
 }
 
 /** Convert roller angular speed to the rpm shown in the HUD. */
@@ -291,11 +329,13 @@ export interface MillConfig {
   readonly quality: QualitySettings;
   readonly material: MaterialConstants;
   readonly params: MillParams;
-  /** batch size: scales the seeded bank height (1 = the default bank) */
+  /** batch size: volume multiplier on the seeded bank (1 = GEOMETRY.bankVolume) */
   readonly batch?: number;
 }
 
-export const BATCH_CHOICES: readonly number[] = [0.5, 0.75, 1, 1.5, 2];
+export const BATCH_CHOICES: readonly number[] = [0.5, 0.75, 1, 1.5, 2, 3];
+/** Range accepted from `?batch=` (the panel offers BATCH_CHOICES). */
+export const BATCH_LIMITS = { min: 0.25, max: 4 } as const;
 
 /** Physical scale used for the HUD readout only: one sim unit is about 0.2 m. */
 export const UNIT_METRES = 0.2;

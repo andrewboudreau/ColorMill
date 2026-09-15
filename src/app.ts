@@ -15,7 +15,7 @@
 import './styles.css';
 import { BASE_LATENT, findPigment, rgbToLatentAsync } from './color/pigments';
 import {
-  BATCH_CHOICES, DEFAULT_MATERIAL, DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_RADIUS, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, estimateParticleCount, gridDims, materialLitres,
+  BATCH_LIMITS, DEFAULT_MATERIAL, DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_RADIUS, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, estimateParticleCount, gridDims, materialLitres,
   type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
@@ -145,7 +145,9 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   let preset: QualityPreset = chosen.preset;
   // batch size multiplier (?batch=1.5); scales the seeded bank
   const batchQuery = parseFloat(query.get('batch') ?? '');
-  let batch = BATCH_CHOICES.includes(batchQuery) ? batchQuery : 1;
+  let batch = Number.isFinite(batchQuery) && batchQuery > 0
+    ? Math.min(Math.max(batchQuery, BATCH_LIMITS.min), BATCH_LIMITS.max)
+    : 1;
   let autoOrbit = query.get('orbit') === '1';
   const startPaused = query.get('paused') === '1';
   // Unless the preset was pinned by the user or the URL, drop a level when the

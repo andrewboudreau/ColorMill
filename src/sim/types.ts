@@ -93,7 +93,7 @@ export interface GpuMpmSim {
    * under gravity. Returns the number of particles added (0 when the pool is
    * exhausted, in which case the caller may fall back to addPigmentOnSurface).
    */
-  addPigmentChunk(x: number, z: number, radius: number, latent: Latent): number;
+  addPigmentChunk(x: number, z: number, radius: number, latent: Latent): Promise<number>;
   /** Set every particle's pigment back to the base latent. */
   clearPigment(): void;
   /** Start the scripted operator move: cut the sheet off the front roll, roll it into a log, turn it and set it on the bank (design §6). No-op if one is running. */

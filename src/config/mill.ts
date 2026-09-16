@@ -312,7 +312,7 @@ export function seedBankPositions(q: QualitySettings, params: MillParams, seed =
 export const PIGMENT_POOL_FRACTION = 0.5;
 
 /** Radius of one pigment chunk (a dollop of coloured putty dropped on the bank). */
-export const PIGMENT_CHUNK_RADIUS = 0.14;
+export const PIGMENT_CHUNK_RADIUS = 0.1;
 
 /** Estimated particle count for a preset (batch volume / (h^3/8)), for UI/preset selection. */
 export function estimateParticleCount(q: QualitySettings, batch = 1): number {

@@ -45,7 +45,7 @@ const PI : f32 = 3.14159265358979;
 // Pigment load of a masterbatch chunk relative to the base putty (pos.w per
 // particle; base = 1). Latents are averaged weighted by load, so a chunk tints
 // several times its own mass of base to a mid-tone instead of fading out.
-const PIGMENT_LOAD : f32 = 6.0;
+const PIGMENT_LOAD : f32 = 12.0;
 
 fn nodeIndex(i : u32, j : u32, k : u32) -> u32 {
   return (k * P.grid.y + j) * P.grid.x + i;

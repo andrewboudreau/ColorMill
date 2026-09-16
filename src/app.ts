@@ -209,17 +209,15 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     // a dollop on top of whatever material is over the nip at this x (the GPU
     // finds the surface, so it works after the bank has slumped or drained)
     const z = GEOMETRY.nipZ;
-    try {
-      // a chunk of coloured putty dropped onto the bank; when the reserved pool is
-      // used up, tint the material at the surface instead
-      const added = sim.addPigmentChunk(x, z, PIGMENT_CHUNK_RADIUS, latent);
-      if (added === 0) {
-        sim.addPigmentOnSurface(x, z, PIGMENT_CHUNK_RADIUS, latent);
+    // a chunk of coloured putty set down on the bank; when the reserved pool is
+    // used up, tint the material at the surface instead
+    const s = sim;
+    s.addPigmentChunk(x, z, PIGMENT_CHUNK_RADIUS, latent).then((added) => {
+      if (added === 0 && sim === s) {
+        s.addPigmentOnSurface(x, z, PIGMENT_CHUNK_RADIUS, latent);
         hud.showHint('Pigment pool used up: tinting the bank instead (Reset to refill)', 4000);
       }
-    } catch (e) {
-      reportError('addPigment failed', e);
-    }
+    }).catch((e) => reportError('addPigment failed', e));
   };
 
   const tapPigment = (name: string): void => {

@@ -45,7 +45,7 @@ const UNIFORM_STRIDE = 256;
 /** Pigment load of a masterbatch chunk (mirrors PIGMENT_LOAD in common.wgsl). The clear base
  * carries load 0: pigment is an opaque colourant in a transparent medium, so a node's colour
  * is the Mixbox mix of the pigments present and its load per unit mass sets the opacity. */
-export const PIGMENT_LOAD = 6.0;
+export const PIGMENT_LOAD = 12.0;
 export const FOLD_ROLL_SECONDS = 1.2;
 export const FOLD_FEED_SPEED = 0.15;          // sim units / s along the log axis (the nip only takes the log where it touches it)
 export const FOLD_TILT = 0.42;                // log axis tilt from vertical toward the viewer (rad)
@@ -223,7 +223,7 @@ export class GpuMpm implements GpuMpmSim {
     this.paramsU32 = new Uint32Array(this.paramsData.buffer);
     this.bufInject = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bufInjectAll = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.bufProbe = device.createBuffer({ label: 'GpuMpm-probe', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.bufProbe = device.createBuffer({ label: 'GpuMpm-probe', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
 
     const texUsage = GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC;
     this.volA = device.createTexture({ size: [d.nx, d.ny, d.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'volA' });
@@ -610,17 +610,41 @@ export class GpuMpm implements GpuMpmSim {
     this.runParticleKernel(this.kernels.inject);
   }
 
-  addPigmentChunk(x: number, z: number, radius: number, latent: Latent): number {
+  /** Highest material in the column |x - cx| < r, |z - cz| < r (GPU probe, one small readback); 0 if the column is empty. */
+  private async probeColumnTop(x: number, z: number, radius: number): Promise<number> {
+    const q = this.device.queue;
+    q.writeBuffer(this.bufInject, 0, this.injectData([x, 0, z], radius, WHITE_LATENT, 0, 2));
+    q.writeBuffer(this.bufProbe, 0, new Uint32Array([0, 0, 0, 0]));
+    const staging = this.device.createBuffer({ label: 'GpuMpm-probe-read', size: 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const enc = this.device.createCommandEncoder({ label: 'GpuMpm-probe' });
+    const pass = enc.beginComputePass();
+    this.dispatchParticles(pass, this.kernels.probe, 0);
+    pass.end();
+    enc.copyBufferToBuffer(this.bufProbe, 0, staging, 0, 16);
+    q.submit([enc.finish()]);
+    await staging.mapAsync(GPUMapMode.READ);
+    const top = new Float32Array(staging.getMappedRange())[0];
+    staging.unmap();
+    staging.destroy();
+    return top;
+  }
+
+  async addPigmentChunk(x: number, z: number, radius: number, latent: Latent): Promise<number> {
     if (this.destroyed) return 0;
     const h = this.dims.h;
     const per = GEOMETRY.seedPerAxis;
     const dom = GEOMETRY.domain;
     const r = Math.max(radius, 2 * h);
-    // spawn just above the seeded bank top: the bank only ever gets lower, so the
-    // chunk starts in air (or touching the surface) and drops in under gravity
-    const cy = Math.min(bankTopY(this.batch, this.config.params) + r + 0.02, dom[1] - 1.5 * h - r);
     const cx = Math.min(Math.max(x, 1.5 * h + r), dom[0] - 1.5 * h - r);
     const cz = Math.min(Math.max(z, 1.5 * h + r), dom[2] - 1.5 * h - r);
+    // set the chunk down touching whatever is in that column (the bank, the nip
+    // floor, an earlier chunk), as an operator does, instead of dropping it from
+    // the seeded bank height: falling into the empty V cost ~0.6 s before the
+    // rolls could even start on it
+    const top = await this.probeColumnTop(cx, cz, r);
+    if (this.destroyed) return 0;
+    const rest = top > 0 ? top + r + 0.5 * h : bankTopY(this.batch, this.config.params) + r + 0.02;
+    const cy = Math.min(Math.max(rest, GEOMETRY.axisY + r), dom[1] - 1.5 * h - r);
     const room = this.capacity - this.count;
     if (room <= 0) return 0;
     const pts: number[] = [];

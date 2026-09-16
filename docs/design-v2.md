@@ -70,9 +70,16 @@ and the particle count, so conservation is visible: the count only changes
 when a pigment chunk is added or the sim is reset.
 
 Each sim also reserves particle capacity for pigment chunks (50% of the
-seeded bank): a tap adds a sphere of new pigmented putty (radius 0.14) above
-the bank that drops in, instead of tinting existing particles. When the pool
-is used up, taps tint the surface (`addPigmentOnSurface`); Reset refills it.
+seeded bank): a tap adds a dab of new pigmented putty (radius 0.1, i.e. a
+40 mm dollop, load `PIGMENT_LOAD` = 12 so it carries as much pigment as a
+bigger chunk would) set down touching whatever is in that column over the
+nip (the GPU column probe finds the surface: the bank, the nip floor or an
+earlier chunk), instead of tinting existing particles. A dab this size is
+what the nip can take quickly: a lump's intake time is its volume over the
+nip's flux across its width (radius 0.14 measured ~1.5 s from tap to 80%
+through at `low`, most of it the lump sitting wedged in the V while the
+gap ate it; radius 0.1 is a third of the volume). When the pool is used
+up, taps tint the surface (`addPigmentOnSurface`); Reset refills it.
 
 The default nip gap (0.04) at `high` is ~2.6 cells wide; the sheet is 2–4 cells thick. That
 is the minimum for a resolvable sheet; do not lower `cellsPerUnit` below 32.
@@ -310,7 +317,7 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   particle latents inside the sphere: `z = mix(z, zPigment, strength·t)`,
   `t = 1 − |d|/radius`.
 - **Pigment load.** Each particle carries a pigment load in `pos.w` (clear
-  base 0, a masterbatch chunk `PIGMENT_LOAD` = 6). The raster accumulates
+  base 0, a masterbatch chunk `PIGMENT_LOAD` = 12). The raster accumulates
   per node the mass, the load and the load-weighted latent; `pack` writes
   `volA/volB` = density and the latent normalised by the node's load (the
   mix of the pigments only) and `volC` = load / 8 (same normalisation as the

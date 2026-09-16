@@ -36,7 +36,7 @@
 //           t >= T_roll: the log translates along -a at the feed speed; a particle
 //           that reaches the release plane (just above the live pile the nip is
 //           eating, reduced by g2p every substep, or the roll tops) is released:
-//           flag cleared, C = 0, F kept, v = feed velocity, P2G affine rebuilt.
+//           flag cleared, C = 0, F = I, v = feed velocity, P2G affine rebuilt.
 //   finish: release whatever is still held.
 @group(0) @binding(1) var<storage, read_write> pos : array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read_write> vel : array<vec4<f32>>;
@@ -261,8 +261,10 @@ fn tables_(@builtin(local_invocation_id) lid : vec3<u32>) {
 fn release(p : u32, v : vec3<f32>) {
   vel[p] = vec4<f32>(v, 0.0);
   fold0[p].w = P.fold.y;   // release time: g2p leaves it out of the pile-top estimate while it settles
-  var F = loadMatF(p);
-  if (isBadMat(F) || isBad(det3(F))) { F = identity3(); }
+  // the log was placed kinematically, so the particle's old F says nothing about
+  // its new neighbourhood: release it unstressed (with a nearly incompressible
+  // putty a stale J would fire it out of the pile)
+  let F = identity3();
   let zero = mat3x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
   let ar = matRows(p2gAffine(kirchhoffStressOf(F), zero));
   let fr = matRows(F);

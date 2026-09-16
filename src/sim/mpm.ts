@@ -42,7 +42,9 @@ export const GRID_WG = 4;
 const UNIFORM_STRIDE = 256;
 /** Operator move (design §6): roll the sheet into a log (FOLD_ROLL_SECONDS),
  * then feed the standing log end-first into the nip at FOLD_FEED_SPEED. */
-/** Pigment load of a masterbatch chunk relative to the base putty (mirrors PIGMENT_LOAD in common.wgsl). */
+/** Pigment load of a masterbatch chunk (mirrors PIGMENT_LOAD in common.wgsl). The clear base
+ * carries load 0: pigment is an opaque colourant in a transparent medium, so a node's colour
+ * is the Mixbox mix of the pigments present and its load per unit mass sets the opacity. */
 export const PIGMENT_LOAD = 6.0;
 export const FOLD_ROLL_SECONDS = 1.2;
 export const FOLD_FEED_SPEED = 0.15;          // sim units / s along the log axis (the nip only takes the log where it touches it)
@@ -158,6 +160,7 @@ export class GpuMpm implements GpuMpmSim {
   private readonly uniformSlots: number;
   private readonly volA: GPUTexture;
   private readonly volB: GPUTexture;
+  private readonly volC: GPUTexture;
 
   private readonly kernels: Record<string, Kernel>;
   private readonly modules: GPUShaderModule[] = [];
@@ -225,7 +228,8 @@ export class GpuMpm implements GpuMpmSim {
     const texUsage = GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC;
     this.volA = device.createTexture({ size: [d.nx, d.ny, d.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'volA' });
     this.volB = device.createTexture({ size: [d.nx, d.ny, d.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'volB' });
-    this.volumes = { volA: this.volA, volB: this.volB, dims: d };
+    this.volC = device.createTexture({ size: [d.nx, d.ny, d.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'volC' });
+    this.volumes = { volA: this.volA, volB: this.volB, volC: this.volC, dims: d };
 
     const maxDim = device.limits.maxComputeWorkgroupsPerDimension;
     this.particleDispatch = dispatchSize(Math.ceil(Math.max(this.count, 1) / PARTICLE_WG), maxDim);
@@ -327,6 +331,7 @@ export class GpuMpm implements GpuMpmSim {
       rw(this.bufFoldInfo), ro(this.bufPMass), rw(this.bufFoldTables)];
     const volAView = this.volA.createView({ dimension: '3d' });
     const volBView = this.volB.createView({ dimension: '3d' });
+    const volCView = this.volC.createView({ dimension: '3d' });
 
     return {
       clearGrid: this.makeKernel('clearGrid', clearMod, 'clearGrid', clearRes),
@@ -342,7 +347,8 @@ export class GpuMpm implements GpuMpmSim {
       disperse: this.makeKernel('disperse', mod('disperse', disperseSrc), 'main',
         [rw(this.bufPos), ro(this.bufC), rw(this.bufLat), ro(this.bufPMass), ro(this.bufPLat), ro(this.bufFlags), ro(this.bufPLoad)]),
       pack: this.makeKernel('pack', mod('pack', packSrc), 'main',
-        [ro(this.bufPMass), ro(this.bufPLat), { kind: 'storageTexture', view: volAView }, { kind: 'storageTexture', view: volBView }, ro(this.bufPLoad)]),
+        [ro(this.bufPMass), ro(this.bufPLat), { kind: 'storageTexture', view: volAView }, { kind: 'storageTexture', view: volBView }, ro(this.bufPLoad),
+          { kind: 'storageTexture', view: volCView }]),
       inject: this.makeKernel('inject', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
       probe: this.makeKernel('probe', injectMod, 'probeColumn', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
       injectAll: this.makeKernel('injectAll', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInjectAll }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
@@ -380,7 +386,7 @@ export class GpuMpm implements GpuMpmSim {
       pos4[4 * i] = this.seeds[3 * i];
       pos4[4 * i + 1] = this.seeds[3 * i + 1];
       pos4[4 * i + 2] = this.seeds[3 * i + 2];
-      pos4[4 * i + 3] = 1; // base pigment load
+      pos4[4 * i + 3] = 0; // clear base: no pigment load (colour comes only from masterbatch)
     }
     q.writeBuffer(this.bufPos, 0, pos4);
     // "set all" inject uniform: white base
@@ -738,10 +744,14 @@ export class GpuMpm implements GpuMpmSim {
       for (let i = 0; i < n; i++) { v3[3 * i] = v4[4 * i]; v3[3 * i + 1] = v4[4 * i + 1]; v3[3 * i + 2] = v4[4 * i + 2]; }
       return v3;
     };
+    const posRaw = new Float32Array(take(sizes[0]));
+    const loads = new Float32Array(n);
+    for (let i = 0; i < n; i++) loads[i] = posRaw[4 * i + 3];
     const snap: ParticleSnapshot = {
       count: n,
-      positions: strip(take(sizes[0])),
+      positions: strip(posRaw.buffer),
       velocities: strip(take(sizes[1])),
+      loads,
       latents: new Float32Array(take(sizes[2])),
       deformation: new Float32Array(take(sizes[3])),
       flags: new Uint32Array(take(sizes[4]))
@@ -787,5 +797,6 @@ export class GpuMpm implements GpuMpmSim {
     this.querySet?.destroy();
     this.volA.destroy();
     this.volB.destroy();
+    this.volC.destroy();
   }
 }

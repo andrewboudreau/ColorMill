@@ -292,7 +292,14 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
 `latentToRgb(z)` (the Mixbox polynomial; port of `src/sim/mixbox.c`
 `EvalPolynomial` + residual) is evaluated only in the render shader.
 
-- Fresh silicone base = Titanium White latent (`PIGMENTS.white`).
+- Fresh silicone base is **clear**: it carries no pigment load and no colour
+  of its own (its latent slot holds Titanium White but has zero weight
+  everywhere it is used). Pigment is an opaque colourant in a transparent
+  medium, so a node's colour is the Mixbox mix of the pigments present and
+  the pigment load per unit mass sets the opacity; the base never whitens a
+  streak. (Treating the base as white paint made every streak a pastel: a
+  sheet 10% masterbatch by particles was 60% white in the mix, a grey dash
+  where the reference footage shows a black streak.)
 - Pigments are a palette of named real pigments with precomputed latents
   (generated once with the official `web/vendor/mixbox/mixbox.js`
   `rgbToLatent`, stored as constants in `src/color/pigments.ts`):
@@ -302,20 +309,26 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
 - **Inject** kernel: `addPigment(center, radius, latent, strength)` blends
   particle latents inside the sphere: `z = mix(z, zPigment, strength·t)`,
   `t = 1 − |d|/radius`.
-- **Pigment load.** Each particle carries a pigment load in `pos.w` (base
-  putty 1, a masterbatch chunk `PIGMENT_LOAD` = 6). Node latents are
-  accumulated weighted by load and normalised by the node's total load, so a
-  chunk stretched thin among white particles still reads as a dark streak (a
-  concentrated masterbatch tints several times its own mass of base to a
-  mid-tone). The raster uses the tight 8-node trilinear stencil so one-cell
-  streaks are not averaged away before they are drawn, and the renderer
-  integrates colour through the sheet's thickness.
+- **Pigment load.** Each particle carries a pigment load in `pos.w` (clear
+  base 0, a masterbatch chunk `PIGMENT_LOAD` = 6). The raster accumulates
+  per node the mass, the load and the load-weighted latent; `pack` writes
+  `volA/volB` = density and the latent normalised by the node's load (the
+  mix of the pigments only) and `volC` = load / 8 (same normalisation as the
+  density, so `volC / density` is the load per unit mass). The raster uses
+  the tight 8-node trilinear stencil so one-cell streaks are not averaged
+  away before they are drawn, and the renderer integrates colour through
+  the sheet's thickness.
 - **Disperse** kernel (once per frame): for each particle gather the
   node-averaged latent `zg` (from the raster of §3.5) with the 27-node
   stencil; compute the shear rate `γ = ‖(C + Cᵀ)/2‖_F` from the particle's
   current `C`; then `z += clamp(k · γ · frameDt, 0, 1) · (zg − z)` with
-  `k = config.dispersion` (default 0.02, UI 0–0.5; nearly off: colour mills as streaks that thin with folding, and at 0.1 a black chunk was 77% grey after 3 s). The load relaxes with the latent. Mixing therefore happens
-  where the material is sheared — at the nip — and not in the resting bank.
+  `k = config.dispersion` (default 0.02, UI 0–0.5; nearly off: colour mills as streaks that thin with folding, and at 0.1 a black chunk was 77% grey after 3 s). The load relaxes toward the
+  neighbourhood's load per unit mass at the same rate; `zg` is the
+  load-weighted (pigments-only) neighbourhood latent, and a particle that
+  gains pigment blends `zg` in with the gained load, so a clear-base
+  particle picking up pigment takes the neighbourhood's colour outright.
+  Mixing therefore happens where the material is sheared — at the nip — and
+  not in the resting bank.
 
 ---
 
@@ -415,12 +428,18 @@ Single fullscreen ray-march pass (`src/render/shaders/raymarch.wgsl`):
    (±1.5 texels) and a tight central difference (±0.8 texel); the
    disagreement between the two widens the specular lobes so cell-scale
    noise reads as satin, not sparkle.
-3. Colour at the hit: sample `volA/volB`, decode the 7-float latent,
-   `latentToRgb` → albedo (sRGB-linearised for lighting). The base putty is
-   **clear, not white**: where the latent's white weight is ~1 the surface is
+3. Colour at the hit: five samples along −n behind the hit, weighted by
+   density and depth; the latent is the pigment-load-weighted mix of
+   `volA/volB` (the pigments only), decoded with `latentToRgb` → albedo
+   (sRGB-linearised for lighting); the mean pigment load per unit mass
+   `load = volC / density` gives the opacity
+   `pigment = 1 − exp(−PIGMENT_OPACITY · load)` (`PIGMENT_OPACITY` = 6: a
+   sheet 10% masterbatch by particles, load 0.6, is 97% opaque; the faint
+   fringe a chunk sheds into the base, load 0.2, is 70%). The base
+   putty is **clear, not white**: where there is no pigment the surface is
    rendered translucent (the analytic scene behind the hit shows through a
    thin sheet, and the bank goes milky with thickness); pigment makes it
-   opaque.
+   opaque with the pigments' own colour, never a pastel of it.
 4. Shading: key light (warm, upper right front), fill (cool, left), rim from
    behind; Blinn-Phong specular with a wide + narrow lobe (silicone putty is
    glossy); ambient occlusion from density sampled along the normal plus an

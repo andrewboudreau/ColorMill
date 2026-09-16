@@ -1,5 +1,10 @@
-// Disperse (design §5): shear-driven relaxation of each particle's latent toward
-// the node-averaged latent of its neighbourhood. gamma = ||sym(C)||_F.
+// Disperse (design §5): shear-driven relaxation of each particle's pigment
+// toward its neighbourhood. gamma = ||sym(C)||_F. Pigment is an opaque
+// colourant in a clear base: a particle's load (pos.w) relaxes toward the
+// neighbourhood's load per unit mass, and its latent toward the neighbourhood's
+// load-weighted latent (the mix of the pigments present; clear base has no
+// latent of its own, so a base particle that picks up pigment takes the
+// neighbourhood's colour outright instead of whitening it).
 @group(0) @binding(1) var<storage, read_write> pos : array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read> cbuf : array<f32>;
 @group(0) @binding(3) var<storage, read_write> lat : array<f32>;
@@ -55,13 +60,18 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
     }
   }
   if (msum <= 1e-6 || lsum <= 1e-6) { return; }
-  for (var c = 0u; c < 7u; c++) {
-    let zg = zsum[c] / lsum;              // load-weighted neighbourhood latent
-    let z = lat[7u * p + c];
-    lat[7u * p + c] = z + alpha * (zg - z);
-  }
-  // the pigment load spreads with the colour
+  // the pigment load spreads: relax toward the neighbourhood's load per unit mass
   let wg = lsum / msum;
   let w = pos[p].w;
-  pos[p].w = w + alpha * (wg - w);
+  let wNew = w + alpha * (wg - w);
+  let gained = max(wNew - w, 0.0);
+  for (var c = 0u; c < 7u; c++) {
+    let zg = zsum[c] / lsum;              // load-weighted neighbourhood latent (pigments only)
+    let z = lat[7u * p + c];
+    // exchange with the neighbourhood at rate alpha, plus whatever colour arrives
+    // with newly gained pigment; a particle with no pigment simply adopts zg
+    let zx = z + alpha * (zg - z);
+    lat[7u * p + c] = select(zg, (w * zx + gained * zg) / (w + gained), w + gained > 1e-6);
+  }
+  pos[p].w = wNew;
 }

@@ -114,7 +114,8 @@ export class RayMarchRenderer implements Renderer {
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
         { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
         { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
-        { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }
+        { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
+        { binding: 6, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } }
       ]
     });
 
@@ -165,7 +166,7 @@ export class RayMarchRenderer implements Renderer {
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
     });
     this.mipBuffer = this.makeMipBuffer(1);
-    this.bindGroup = this.makeBindGroup(this.placeholder, this.placeholder);
+    this.bindGroup = this.makeBindGroup(this.placeholder, this.placeholder, this.placeholder);
     this.mipBindGroup = this.makeMipBindGroup(this.placeholder);
     this.resize();
   }
@@ -195,7 +196,7 @@ export class RayMarchRenderer implements Renderer {
     return this.module.getCompilationInfo();
   }
 
-  private makeBindGroup(volA: GPUTexture, volB: GPUTexture): GPUBindGroup {
+  private makeBindGroup(volA: GPUTexture, volB: GPUTexture, volC: GPUTexture): GPUBindGroup {
     return this.device.createBindGroup({
       label: 'raymarch-bg',
       layout: this.pipeline.getBindGroupLayout(0),
@@ -204,7 +205,8 @@ export class RayMarchRenderer implements Renderer {
         { binding: 1, resource: volA.createView({ dimension: '3d' }) },
         { binding: 2, resource: volB.createView({ dimension: '3d' }) },
         { binding: 3, resource: this.sampler },
-        { binding: 4, resource: { buffer: this.mipBuffer } }
+        { binding: 4, resource: { buffer: this.mipBuffer } },
+        { binding: 6, resource: volC.createView({ dimension: '3d' }) }
       ]
     });
   }
@@ -218,7 +220,7 @@ export class RayMarchRenderer implements Renderer {
       this.mipBuffer = this.makeMipBuffer(cells);
     }
     this.mipSize = m;
-    this.bindGroup = this.makeBindGroup(volumes.volA, volumes.volB);
+    this.bindGroup = this.makeBindGroup(volumes.volA, volumes.volB, volumes.volC);
     this.mipBindGroup = this.makeMipBindGroup(volumes.volA);
   }
 

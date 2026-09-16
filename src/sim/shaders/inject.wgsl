@@ -57,9 +57,9 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
     let z = lat[7u * p + c];
     lat[7u * p + c] = z + a * (zp[c] - z);
   }
-  // pigment load: base = 1 (set-all mode), tinted particles move toward a chunk's load
+  // pigment load: the clear base carries none (set-all mode); tinted particles move toward a chunk's load
   if (I.mode.x == 1u) {
-    pos[p].w = 1.0;
+    pos[p].w = 0.0;
   } else {
     let w = pos[p].w;
     pos[p].w = w + a * (PIGMENT_LOAD - w);

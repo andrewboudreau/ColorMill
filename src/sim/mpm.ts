@@ -338,7 +338,7 @@ export class GpuMpm implements GpuMpmSim {
       clearRaster: this.makeKernel('clearRaster', clearMod, 'clearRaster', clearRes),
       p2g: this.makeKernel('p2g', mod('p2g', p2gSrc), 'main',
         [ro(this.bufPos), ro(this.bufVel), ro(this.bufAff), ro(this.bufFlags), rw(this.bufGMass), rw(this.bufGMom)]),
-      grid: this.makeKernel('grid', mod('grid', gridSrc), 'main', [ro(this.bufGMass), ro(this.bufGMom), rw(this.bufGVel)]),
+      grid: this.makeKernel('grid', mod('grid', gridSrc), 'main', [ro(this.bufGMass), ro(this.bufGMom), rw(this.bufGVel), ro(this.bufPMass)]),
       g2p: this.makeKernel('g2p', mod('g2p', g2pSrc), 'main',
         [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), ro(this.bufFlags), ro(this.bufGVel),
           ro(this.bufGMass), rw(this.bufFoldInfo), ro(this.bufFold)]),

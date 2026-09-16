@@ -32,6 +32,9 @@ fn pushOut(axisY : f32, axisZ : f32, R : f32, x : vec3<f32>, h : f32) -> vec3<f3
   return x;
 }
 
+const TAU_VP : f32 = 0.06;   // viscoplastic relaxation time (s) of stretch beyond yield
+const DEV_CAP : f32 = 1.0;   // most extra deviatoric stretch the relaxation may carry (shear thinning)
+
 @compute @workgroup_size(128)
 fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
   let p = particleIndex(gid, nwg);
@@ -81,7 +84,10 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   // deformation gradient update + plastic return (design §4)
   var F = (identity3() + dt * C) * loadMatF(p);
   var J = det3(F);
-  if (isBad(J) || J < 1e-6 || J > 1e6 || isBadMat(F)) {
+  // a particle squeezed or stretched far beyond anything the putty can carry has
+  // lost its history to a numerical event; restart it unstressed rather than
+  // let its pressure (bulk modulus ~500) fire it across the mill
+  if (isBad(J) || J < 0.5 || J > 2.0 || isBadMat(F)) {
     F = identity3();
   }
   var d = svd3(F);
@@ -92,7 +98,18 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   // (otherwise the nip could pack material to several times rest density).
   let Jraw = clamp(d.S.x * d.S.y * d.S.z, 0.25, 4.0);
   let Jc = pow(Jraw, 1.0 / 3.0);
-  var dev = clamp(d.S / Jc, vec3<f32>(1.0 - P.mat.z), vec3<f32>(1.0 + P.mat.w));
+  // Viscoplastic return (Perzyna): the deviatoric stretch beyond the yield range
+  // is not discarded at once but relaxes toward it with time constant TAU_VP, so
+  // for a short while the putty carries shear like a viscous fluid (effective
+  // viscosity ~ 2 mu TAU_VP) and the drag of the rolls reaches into the bank
+  // instead of stopping in a thin slip layer at the roll surface: the bank
+  // rolls instead of sitting as a rigid lump eroded from below.
+  //    The overstress is capped (DEV_CAP of extra stretch, ~2 mu DEV_CAP of
+  //    stress): putty shear-thins, and without the cap the nip's shear rate
+  //    (~25/s) would raise the drag enough to pack the sheet to 1.5x rest.
+  let devRaw = clamp(d.S / Jc, vec3<f32>(0.25), vec3<f32>(4.0));
+  let devC = clamp(devRaw, vec3<f32>(1.0 - P.mat.z), vec3<f32>(1.0 + P.mat.w));
+  var dev = devC + clamp(devRaw - devC, vec3<f32>(-DEV_CAP), vec3<f32>(DEV_CAP)) * exp(-dt / TAU_VP);
   dev = dev / pow(max(dev.x * dev.y * dev.z, 1e-6), 1.0 / 3.0);
   d.S = dev * Jc;
   let Sig = mat3x3<f32>(vec3<f32>(d.S.x, 0.0, 0.0), vec3<f32>(0.0, d.S.y, 0.0), vec3<f32>(0.0, 0.0, d.S.z));

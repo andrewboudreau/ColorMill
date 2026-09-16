@@ -172,7 +172,12 @@ Boundaries, applied in this order:
    the front roller axis, `n` the outward unit normal, `vr = ω_f × (p − axis)`
    the surface velocity. If `d < R + tackBand` (tackBand = gap + h, i.e. the
    thickness of the sheet the nip produces plus one cell of stencil slack):
-   `v = vr` (full no-slip incl. normal — the sheet is carried around) **except
+   `v = vr` (full no-slip incl. normal — the sheet is carried around; in the
+   channel itself, `|y − axisY| < 0.06`, a node whose render-raster density
+   (last frame's `pmass / 8`; a gap-wide channel at rest rasters to ~0.65 at
+   `low`) is past 0.8 is let go of in proportion,
+   `v = mix(vr, v_free, (density − 0.8)/0.4)`, so the material's pressure can
+   push excess back up rather than the band conveying it through) **except
    in the wedge above the nip** (`y > axisY + 0.06`, `z < frontAxisZ`, the
    region where the bank rests on the roll). There the roll is simply a
    no-slip wall: only the nodes inside its surface (`d ≤ R`) take `v = vr`,
@@ -180,7 +185,7 @@ Boundaries, applied in this order:
    surface layer is dragged in as far as the particles' stencils reach (about
    a cell), the bank presses material onto the roll and packs the layer the
    nip is about to take, and when the channel cannot pass what arrives the
-   material's own pressure (ν = 0.45) holds the rest back and the bank rolls
+   material's own pressure (ν = 0.47) holds the rest back and the bank rolls
    instead of being force-fed.
    Measured (particles per 0.35 rad of sheet; 1650 at `low`, 5550 at `medium`
    is a gap-thick sheet at rest density): `low` 1.2 L 2000–2700 in every bin,
@@ -202,11 +207,15 @@ Boundaries, applied in this order:
    force-feeds and drops material off the underside; releasing the band's
    normal constraint where it is overpacked drops material off the underside
    too.
-2. **Back roller** (separating with Coulomb friction). If `d < R`:
-   `vrel = v − vr`; `vn = dot(vrel, n)`; if `vn < 0`: `vt = vrel − vn·n`;
-   `vt *= max(0, 1 − mu·(−vn)/|vt|)` with `mu = 0.4`; `v = vr + vt` (normal
-   component removed). If `vn ≥ 0` leave v unchanged.
-   (Same test uses d < R + h·0.5 so the surface is not inside the grid cell.)
+2. **Back roller**. In the wedge above the nip (`y > axisY + 0.06`,
+   `z > backAxisZ`) it is the same tacky no-slip wall as the front roll:
+   nodes inside its surface (`d ≤ R`) take `v = vr`, so the bank is drawn in
+   from both sides. Everywhere else it is a separating contact with Coulomb
+   friction, so the sheet peels off it cleanly below the nip and follows the
+   front roll. If `d < R + backBand`: `vrel = v − vr`; `vn = dot(vrel, n)`;
+   if `vn < 0`: `vt = vrel − vn·n`; `vt *= max(0, 1 − mu·(−vn)/|vt|)` with
+   `mu = 0.4`; `v = vr + vt` (normal component removed). If `vn ≥ 0` leave v
+   unchanged.
 3. **Domain walls**. For x, z faces and the ceiling: if inside a `2h` margin
    and moving outward, zero that component. Floor (y < 2h): if `v.y < 0`
    then `v.y = 0` and scale the tangential part by `max(0, 1 − 0.6)` once
@@ -253,7 +262,7 @@ Constants (in `config.material`):
 | name | default | meaning |
 | --- | --- | --- |
 | `E` | 15 | Young's modulus (unit density; 60 makes a rigid slab that starves the nip) |
-| `nu` | 0.45 | Poisson ratio (nearly incompressible: at 0.35 the nip packed the putty to 1.5× rest density and carried 50% more than the gap allows) |
+| `nu` | 0.47 | Poisson ratio (nearly incompressible, bulk modulus ≈ 80: at 0.35 the nip packed the putty to 1.5× rest density and carried 50% more than the gap allows; at 0.45 it still packed the sheet to 1.5× once the viscoplastic drag pulled the bank in, and the wrap ran short; at 0.49 (bulk modulus ≈ 500, dt at ~0.85 of the elastic CFL limit) the sheet was continuous at ~1.0–1.3× rest but the fed pile of a cut & roll blew up, speeds of 10–25; 0.47 is stable through a cut & roll) |
 | `thetaC` | 0.025 | plastic compression threshold |
 | `thetaS` | 0.03 | plastic stretch threshold (tensile cohesion; 0.0075 gives a lacy sheet after operator moves) |
 | `mu`, `lambda` | derived | `mu = E/(2(1+nu))`, `lambda = E·nu/((1+nu)(1−2nu))` |
@@ -277,6 +286,25 @@ singular values (the snow model) lets the material lose volume plastically,
 so the nip packs it to several times rest density and swallows the bank
 (docs/millref-notes.md §5a); putty yields in shape, not in volume, and the
 pressure term must keep resisting compression.
+
+The return is **viscoplastic** (Perzyna): the deviatoric stretch beyond the
+yield range is not discarded at once but relaxes toward it,
+`dev = devC + clamp(dev − devC, ±DEV_CAP) · exp(−dt / TAU_VP)` with
+`TAU_VP` = 0.06 s and `DEV_CAP` = 1.0 (`g2p.wgsl`). For a short while the
+putty carries shear like a viscous fluid (effective viscosity ≈ 2μ·TAU_VP),
+so the drag of the roll surfaces reaches into the bank instead of stopping
+in a thin slip layer at the roll: a perfectly plastic bank sat over the back
+roll as a rigid lump moving at a fifth of roll speed while the rolls slid
+under it (the dead pocket that footage of a real mill does not show); with
+the relaxation its back half is drawn down into the nip at about half roll
+speed and the mass shifts toward the front roll. Measured at `low`, 2.4 L,
+z bands from the back roll to the front axis: mean speed of the back half
+0.05–0.2 → 0.4–0.57, the lump over the back roll clearing within 4 s. The
+extra drag would pack the sheet at the nip (1.5–1.8× rest at ν = 0.45, and
+the wrap then ran short, leaving a bare stretch of roll circulating), which
+is why ν went up: with a stiffer bulk modulus the excess is pushed back up
+the wedge instead of compressed through the gap (0.47; 0.49 was better still
+for the sheet but unstable under a cut & roll).
 
 SVD note: implement a 3×3 SVD as Jacobi eigen-decomposition of `FᵀF`
 (≤ 8 sweeps) to get `V` and `Σ²`, then `U = F·V·Σ⁻¹` with a guard for tiny

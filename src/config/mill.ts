@@ -46,9 +46,13 @@ export interface MaterialConstants {
 export const DEFAULT_MATERIAL: MaterialConstants = {
   E: 15,
   /* nearly incompressible: at 0.35 the nip packed the putty to 1.5x rest density
-     and carried 50% more through than the gap allows; at 0.45 the nip meters a
-     gap-thick sheet and the excess backs up into a rolling bank */
-  nu: 0.45,
+     and carried 50% more through than the gap allows; at 0.45 it still packed
+     the sheet to 1.5x once the viscoplastic drag pulled the bank in (and the
+     wrap ran short); at 0.49 (bulk modulus ~500) the sheet came out at
+     ~1.0-1.3x rest but the fed pile of a cut & roll blew up (speeds of 10-25,
+     dt at ~0.85 of the elastic CFL limit); 0.47 (bulk modulus ~80) is stable
+     through a cut & roll. */
+  nu: 0.47,
   thetaC: 0.025,
   /* tensile cohesion: at 0.0075 the sheet re-forming after an operator move
      comes out lacy; 0.03 keeps it continuous (validated headlessly) */
@@ -296,6 +300,10 @@ export function seedBankPositions(q: QualitySettings, params: MillParams, seed =
               const z = (cz + (sz + 0.5 + (rnd() - 0.5) * jitter) / per) * h;
               if (x < b.x[0] || x > b.x[1] || z < b.z[0] || z > b.z[1] || y > b.y[1]) continue;
               if (y < millTopSurfaceY(z, params) + 0.25 * h) continue;
+              // not inside the nip channel itself: material seeded in the throat
+              // over-fills the first wrap (1.5x rest) and the wrap then runs short
+              // and leaves a bare stretch of roll for the first few seconds
+              if (y < GEOMETRY.axisY + 0.06 && Math.abs(z - GEOMETRY.nipZ) < params.gap) continue;
               if (rollerAxisDistance(back, y, z) < R + 0.25 * h) continue;
               if (rollerAxisDistance(front, y, z) < R + 0.25 * h) continue;
               out.push(x, y, z);

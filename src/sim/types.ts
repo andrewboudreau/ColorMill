@@ -38,6 +38,8 @@ export interface ParticleSnapshot {
   readonly deformation: Float32Array;
   /** 1 uint per particle */
   readonly flags: Uint32Array;
+  /** 1 float per particle: pigment load (0 = clear base, PIGMENT_LOAD = pure masterbatch) */
+  readonly loads: Float32Array;
 }
 
 /** The render volume produced by the solver each frame (design §3.5 / §8). */
@@ -46,6 +48,8 @@ export interface RenderVolumes {
   readonly volA: GPUTexture;
   /** rgba16float 3D texture: (lat3, lat4, lat5, lat6) */
   readonly volB: GPUTexture;
+  /** rgba16float: (pigment load / 8, 0, 0, 0); pigment / density = load per unit mass (0 = clear base) */
+  readonly volC: GPUTexture;
   readonly dims: GridDims;
 }
 

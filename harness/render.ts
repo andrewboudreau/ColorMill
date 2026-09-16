@@ -9,6 +9,7 @@ import { createGpuContext } from '../src/gpu/device';
 import { DEFAULT_PARAMS, GEOMETRY, QUALITY_PRESETS, gridDims, rollerPoses } from '../src/config/mill';
 import type { GridDims } from '../src/config/mill';
 import type { Latent, RenderVolumes } from '../src/sim/types';
+import { PIGMENT_LOAD } from '../src/sim/mpm';
 import { RayMarchRenderer } from '../src/render/renderer';
 import { attachCameraControls, projectPoint } from '../src/render/camera';
 
@@ -104,6 +105,7 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
   const sheetMargin = 0.14;
   const a = new Uint16Array(nx * ny * nz * 4);
   const bb = new Uint16Array(nx * ny * nz * 4);
+  const cc = new Uint16Array(nx * ny * nz * 4);
   const edge = 1.2 * h;
   for (let k = 0; k < nz; k++) {
     const z = k * h;
@@ -138,6 +140,8 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
         const idx = ((k * ny + j) * nx + i) * 4;
         if (dens > 0) {
           const lat = latentAt(x);
+          // every band is pure opaque pigment (masterbatch load) so the colour checks see solid colour
+          cc[idx] = toHalf(dens * PIGMENT_LOAD);
           a[idx] = toHalf(dens);
           a[idx + 1] = toHalf(lat[0]);
           a[idx + 2] = toHalf(lat[1]);
@@ -161,7 +165,7 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
     device.queue.writeTexture({ texture: tex }, data, { bytesPerRow: nx * 8, rowsPerImage: ny }, { width: nx, height: ny, depthOrArrayLayers: nz });
     return tex;
   };
-  return { volA: make('harness-volA', a), volB: make('harness-volB', bb), dims };
+  return { volA: make('harness-volA', a), volB: make('harness-volB', bb), volC: make('harness-volC', cc), dims };
 }
 
 /**

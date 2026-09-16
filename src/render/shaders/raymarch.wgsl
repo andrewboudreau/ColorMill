@@ -37,6 +37,12 @@ struct Uniforms {
 // trilinear sample anywhere inside the block is bounded by it); rebuilt by csMip every frame
 @group(0) @binding(4) var<storage, read> mipMax: array<f32>;
 @group(0) @binding(5) var<storage, read_write> mipOut: array<f32>;
+@group(0) @binding(6) var volC: texture_3d<f32>;   // x = pigment load / 8 (same normalisation as density)
+
+// Pigment is an opaque colourant in a clear medium: the share of light a sample captures
+// rises with its pigment load per unit mass (0 = clear base, PIGMENT_LOAD = pure masterbatch);
+// a few percent of masterbatch already colours the sheet solidly, as it does on a real mill.
+const PIGMENT_OPACITY: f32 = 6.0;
 
 const PI: f32 = 3.14159265358979;
 const INF: f32 = 1e30;
@@ -688,39 +694,50 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     let p = ro + rd * tVol;
     let sn = densityNormal(p);
     let n = sn.n;
-    // colour: integrate the latent through the material behind the hit (uncured
-    // silicone is translucent, and milled pigment often sits one cell under a white
-    // skin), weighting samples by density and by depth so the surface dominates.
-    // Latents are renormalised by their pigment-weight sum because trilinear
-    // blending with empty cells scales them toward zero.
+    // colour: integrate through the material behind the hit (uncured silicone is
+    // translucent, and milled pigment often sits one cell under a clear skin),
+    // weighting samples by density and by depth so the surface dominates. The
+    // latent is the pigment-weighted Mixbox mix of the PIGMENTS along the ray
+    // (the clear base carries none, so it never whitens a streak); the pigment
+    // load per unit mass along the ray sets how opaque the colour is.
+    // Latents are renormalised by their weight sum because trilinear blending
+    // with empty cells scales them toward zero.
     var c = vec4f(0.0);
     var resid = vec3f(0.0);
-    var wsum = 0.0;
+    var csum = 0.0;
+    var dsum = 0.0;
+    var load = 0.0;
     for (var k = 0; k < 5; k++) {
       let depth = (0.5 + 0.8 * f32(k)) * h;
       let q = p - n * depth;
       let a = textureSampleLevel(volA, volSampler, volUvw(q), 0.0);
+      let w = smoothstep(0.15, 0.6, a.x) * exp(-0.45 * f32(k));
+      if (w <= 1e-5) { continue; }
+      let pl = textureSampleLevel(volC, volSampler, volUvw(q), 0.0).x / max(a.x, 1e-4);   // load per unit mass
+      dsum += w;
+      load += w * pl;
       let b = textureSampleLevel(volB, volSampler, volUvw(q), 0.0);
       let s = a.y + a.z + a.w + b.x;
-      if (s <= 1e-4) { continue; }
-      let w = smoothstep(0.15, 0.6, a.x) * exp(-0.45 * f32(k));
-      c += w * vec4f(a.yzw, b.x) / s;
-      resid += w * b.yzw / s;
-      wsum += w;
+      if (s <= 1e-4 || pl <= 1e-4) { continue; }
+      let wp = w * pl;
+      c += wp * vec4f(a.yzw, b.x) / s;
+      resid += wp * b.yzw / s;
+      csum += wp;
     }
-    if (wsum > 1e-5) { c = c / wsum; resid = resid / wsum; } else { c = vec4f(0.0, 0.0, 0.0, 1.0); }
-    let albedo = srgbToLinear(latentToRgb(c, resid));
+    if (dsum > 1e-5) { load = load / dsum; }
+    var albedo = vec3f(1.0);
+    if (csum > 1e-5) { c = c / csum; resid = resid / csum; albedo = srgbToLinear(latentToRgb(c, resid)); }
     let ao = volumeAo(p, n);
     let thickness = sheetThickness(p, n);
+    // an opaque colourant in a clear medium: its share of the mass sets how much of
+    // the light it captures; even a few percent of masterbatch reads solid
+    let pigment = 1.0 - exp(-PIGMENT_OPACITY * load);
     // clear base: little diffuse (a clear material has almost no body colour), the
     // look comes from specular and what shows through; pigment restores albedo
-    let pigmentDiffuse = saturate((1.0 - c.w) * 1.6);
-    let surface = shadePutty(p, n, v, mix(vec3f(0.58, 0.62, 0.64), albedo, pigmentDiffuse), ao, thickness, sn.rough);
-    // Uncured silicone is clear, not white: the base (titanium-white latent,
-    // white weight c.w ~ 1) is rendered translucent, going milky with thickness,
-    // while pigment (white weight falls) makes it opaque. What shows through is
+    let surface = shadePutty(p, n, v, mix(vec3f(0.58, 0.62, 0.64), albedo, pigment), ao, thickness, sn.rough);
+    // Uncured silicone is clear, not white: the base is rendered translucent, going
+    // milky with thickness, while pigment makes it opaque. What shows through is
     // the analytic scene behind the hit along the same ray.
-    let pigment = saturate((1.0 - c.w) * 1.6);
     var behind: vec3f;
     if (roller.t < tFloor) {
       let pb = ro + rd * roller.t;

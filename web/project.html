@@ -152,11 +152,11 @@ URL          ?preset=low|medium|high|ultra forces a quality preset  ?batch=1.5 s
       <h2>Quality presets</h2>
       <div class="wrap">
       <table>
-        <tr><th>Preset</th><th>Cells / unit</th><th>Grid (cells)</th><th>Particles</th><th>Substep dt</th><th>Substeps / frame</th><th>Target</th></tr>
-        <tr><td>low</td><td>32</td><td>48 &times; 72 &times; 48</td><td>~85k</td><td>1.6e-3</td><td>8</td><td>integrated / mobile GPU</td></tr>
-        <tr><td>medium</td><td>48</td><td>72 &times; 108 &times; 72</td><td>~285k</td><td>1.1e-3</td><td>12</td><td>laptop GPU</td></tr>
-        <tr><td>high (default)</td><td>64</td><td>96 &times; 144 &times; 96</td><td>~683k</td><td>8e-4</td><td>16</td><td>desktop GPU</td></tr>
-        <tr><td>ultra</td><td>72</td><td>108 &times; 162 &times; 108</td><td>~972k</td><td>7.1e-4</td><td>18</td><td>discrete GPU</td></tr>
+        <tr><th>Preset</th><th>Cells / unit</th><th>Grid (cells)</th><th>Particles (1&times; batch)</th><th>Substep dt</th><th>Substeps / frame</th><th>Target</th></tr>
+        <tr><td>low</td><td>32</td><td>49 &times; 73 &times; 49</td><td>~39k</td><td>1.6e-3</td><td>8</td><td>integrated / mobile GPU</td></tr>
+        <tr><td>medium</td><td>48</td><td>73 &times; 109 &times; 73</td><td>~133k</td><td>1.1e-3</td><td>12</td><td>laptop GPU</td></tr>
+        <tr><td>high (default)</td><td>64</td><td>97 &times; 145 &times; 97</td><td>~315k</td><td>8e-4</td><td>16</td><td>desktop GPU</td></tr>
+        <tr><td>ultra</td><td>72</td><td>109 &times; 163 &times; 109</td><td>~448k</td><td>7.1e-4</td><td>18</td><td>discrete GPU</td></tr>
       </table>
       </div>
       <p>Only <code>dt</code> and the substep count change between presets; the material constants are the same, so the mill behaves the same at every quality. Simulated time per frame is <code>dt &times; substeps</code> (about 13&nbsp;ms at <code>high</code>): at 60&nbsp;fps the mill runs at roughly 0.8&times; real time, and the HUD shows the actual ratio. The app picks <code>medium</code> on non-discrete GPUs (<code>low</code> on mobile) and <code>high</code> otherwise.</p>
@@ -164,7 +164,7 @@ URL          ?preset=low|medium|high|ultra forces a quality preset  ?batch=1.5 s
       <h2>How v2 differs from v1</h2>
       <table>
         <tr><th>Area</th><th>v1 (C / raylib / Emscripten, now <a class="inline" href="legacy/index.html">legacy/</a>)</th><th>v2 (TypeScript / WebGPU)</th></tr>
-        <tr><td>Solver</td><td>MLS-MPM on the CPU, 40&sup3; grid, material in a ~14&times;12&times;7-voxel box, ~20 substeps per frame</td><td>MLS-MPM in WebGPU compute, 48&sup3; to 108&sup3; cells, 85k&ndash;972k particles, deterministic fixed substeps</td></tr>
+        <tr><td>Solver</td><td>MLS-MPM on the CPU, 40&sup3; grid, material in a ~14&times;12&times;7-voxel box, ~20 substeps per frame</td><td>MLS-MPM in WebGPU compute, 49&sup3; to 109&sup3; cells (taller than wide), 39k&ndash;448k particles at the default batch, deterministic fixed substeps</td></tr>
         <tr><td>Material</td><td>Weakly compressible fluid (pressure from J): behaves like a puddle</td><td>Elastoplastic putty (fixed corotated + yield clamp): holds a bank, forms a sheet</td></tr>
         <tr><td>Mill geometry</td><td>Two short cylinders in a tight box; counter / friction mode toggle; particle-level collider</td><td>Real layout: bank, nip, sheet on the front roll, end guides, tray; sticky front roll, Coulomb back roll; continuous friction ratio</td></tr>
         <tr><td>Pigment</td><td>Red / blue / yellow scalars per particle, converted through Mixbox with fixed endpoints at render time; mixing by transport only</td><td>Full 7-float Mixbox latent per particle, eight named pigments plus a colour picker; shear-driven dispersion in the nip</td></tr>

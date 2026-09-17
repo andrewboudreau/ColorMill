@@ -9,7 +9,7 @@
  *
  *   E2E_SOLVER_FRAMES=<n>      frames for the stability/sheet run (234 = 3 s)
  *   E2E_SOLVER_MIX_FRAMES=<n>  frames after injecting pigment (469 = 6 s)
- *   E2E_SOLVER_FOLD=1          also exercise cutAndFold() (adds ~1.8 s of sim): the
+ *   E2E_SOLVER_FOLD=1          also exercise cutAndFold() (adds ~1.8 s of sim; cutAndFlop() always runs): the
  *                              folded sheet must land as a slab (max node density
  *                              <= 6, >= 20 distinct z cells) and be released cleanly
  */
@@ -217,6 +217,30 @@ export default async function run() {
     console.log(`  pigment chunk: +${chunk.added} particles (${chunk.n0} -> ${chunk.count}, capacity ${chunk.capacity})`);
     assert(!chunk.error && chunk.bad === 0, 'chunk particles are finite: ' + chunk.error);
     assert(chunk.added > 500 && chunk.count === chunk.n0 + chunk.added && chunk.statCount === chunk.count, `chunk added particles consistently (${JSON.stringify(chunk)})`);
+
+    // --- cut & fold (the flop): lifts part of the left half, lands it mirrored on the right ---
+    const flop = await page.evaluate(async (n) => {
+      window.__solver.sim.cutAndFlop('left');
+      await window.__solver.stepFrames(4);
+      const s = await window.__solver.snapshot();
+      const idx = [];
+      let sumX0 = 0;
+      for (let p = 0; p < s.count; p++) if (s.flags[p] & 1) { idx.push(p); sumX0 += s.positions[3 * p]; }
+      await window.__solver.stepFrames(n);
+      const e = await window.__solver.snapshot();
+      let kin = 0, sumX1 = 0, sumY1 = 0;
+      for (let p = 0; p < e.count; p++) if (e.flags[p] & 1) kin++;
+      for (const p of idx) { sumX1 += e.positions[3 * p]; sumY1 += e.positions[3 * p + 1]; }
+      return { lifted: idx.length, count: s.count, meanX0: sumX0 / idx.length, kin, meanX1: sumX1 / idx.length, meanY1: sumY1 / idx.length,
+        positions: Array.from(e.positions), velocities: Array.from(e.velocities), latents: Array.from(e.latents), deformation: Array.from(e.deformation), flags: Array.from(e.flags), error: window.__solver.error };
+    }, framesFor(0.8) + 4);
+    const aFlop = analyse(flop, dims);
+    console.log(`  cut & fold: lifted ${flop.lifted} of ${flop.count} (mean x ${flop.meanX0.toFixed(3)}), landed at mean x ${flop.meanX1.toFixed(3)}, y ${flop.meanY1.toFixed(3)}; ${flop.kin} still held; ${JSON.stringify({ bad: aFlop.bad, outside: aFlop.outside, inRoller: aFlop.inRoller })}`);
+    assert(!flop.error, 'no WebGPU errors during cut & fold: ' + flop.error);
+    assert(flop.lifted > 0.05 * flop.count && flop.lifted < 0.6 * flop.count, `cut & fold lifts part of the mill, not all of it (${flop.lifted} of ${flop.count})`);
+    assert(flop.meanX0 < 0.5 * 1.5 && flop.meanX1 > 0.5 * 1.5, `the lifted half lands on the other side (mean x ${flop.meanX0.toFixed(3)} -> ${flop.meanX1.toFixed(3)})`);
+    assert(flop.kin === 0, `everything is released once the flop is over (${flop.kin} still held)`);
+    assert(aFlop.bad === 0 && aFlop.outside === 0 && aFlop.inRoller === 0 && aFlop.n === chunk.count, 'state sane after cut & fold');
 
     // --- optional: cut & fold ---------------------------------------------
     if (doFold) {

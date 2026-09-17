@@ -133,6 +133,9 @@
       <h3>Shear-driven dispersion in Mixbox latent space</h3>
       <p>Every particle carries a 7-float <strong>Mixbox latent</strong> (three Kubelka&ndash;Munk pigment weights plus a residual). Latents are linear under mass-weighted averaging, so transport, rastering and blending are plain arithmetic, and the polynomial that turns a latent into RGB is evaluated once per pixel in the render shader. Mixing is not diffusion: once per frame each particle moves its latent toward the node-averaged latent around it by <code>k &middot; &gamma; &middot; dt</code>, where <code>&gamma;</code> is the local shear rate read off the particle's own APIC affine matrix. In the resting bank <code>&gamma; &asymp; 0</code> and colours stay crisp; in the nip they blend. Blue and yellow fold into green because the mixing is done in pigment space, not RGB.</p>
 
+      <h3>Cut &amp; fold</h3>
+      <p>The move most milling actually uses: cut the sheet across at the middle of the roll, lift what is on top of the mill on one side (the bank in the pocket and the sheet over the front crown) and flop it over onto the other half like turning a page hinged on the cut. The script measures the top of each half's material column by column, turns each lifted particle about the hinge at the mid-height between the two tops, and lands it mirrored with the flap's former top resting on the receiving half's top, so any thickness profile stacks exactly. Sides alternate; every flop interleaves the two halves of the width once.</p>
+
       <h3>Cut &amp; roll</h3>
       <p>A two-roll mill has no axial transport; the operator cuts the sheet off the front roll, rolls it into a log, turns the log 90&deg; and feeds it back in end-on, and that is where lateral mixing comes from. v2 scripts the move: everything on the mill (sheet, bank and all) is marked kinematic, folded in half across its width and wound into a volume-preserving spiral of varying thickness (a mass histogram along the arc; the bank is kneaded flat into the core, the sheet wraps around it) standing tilted over the nip (1.2&nbsp;s); the log is then fed down and released only onto the pile the nip is actually eating, so the rolls consume it end-first over a few seconds and nothing drips in mid-air. No material is left behind or packed denser than it was; material from every position along the roll ends up in the log's cross-section and is spread back out across the width as the nip flattens it.</p>
 
@@ -142,11 +145,11 @@
       <h2>Controls</h2>
       <pre>Bottom bar   drop-slot strip (which of 6 spots along the roll the next tap lands on),
              pigment swatches (tap = a chunk set down on the bank at that spot), colour picker,
-             Cut &amp; roll, Clear pigment, Reset, Pause
+             Cut &amp; fold (alternating sides), Cut &amp; roll, Clear pigment, Reset, Pause
 Right drawer roller speed (rpm), friction ratio, nip gap, dispersion, gravity,
              batch size, quality preset, camera auto-orbit, stats (particles, grid, fps, ms/frame, sim speed)
 Viewport     drag = orbit, wheel / pinch = zoom, double-tap = front view
-Keyboard     Space pause  R reset  F cut &amp; roll  1-8 pigments  up/down speed  left/right gap  [ ] drop slot  P drawer
+Keyboard     Space pause  R reset  F cut &amp; roll  C cut &amp; fold  1-8 pigments  up/down speed  left/right gap  [ ] drop slot  P drawer
 URL          ?preset=low|medium|high|ultra forces a quality preset  ?batch=1.5 scales the batch  ?slot=3 picks the drop slot</pre>
 
       <h2>Quality presets</h2>

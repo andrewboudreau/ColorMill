@@ -248,8 +248,18 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     paintStats(true);
   };
 
+  // cut & fold alternates sides, as an operator does: left half over, then right half over
+  let flopSide: 'left' | 'right' = 'left';
+  const cutFlop = (): void => withSim('cutAndFlop failed', (s) => {
+    if (s.operatorBusy) return;
+    s.cutAndFlop(flopSide);
+    hud.showHint(`Cut & fold: the ${flopSide} half flops over onto the ${flopSide === 'left' ? 'right' : 'left'}`, 2500);
+    flopSide = flopSide === 'left' ? 'right' : 'left';
+  });
+
   const palette = new Palette(root, {
     onPigment: (key) => injectLatent(findPigment(key)?.latent ?? BASE_LATENT),
+    onCutFlop: cutFlop,
     onSlot: (i) => {
       dropSlot = i;
       hud.showHint(`Pigment drops at slot ${i + 1} of ${DROP_SLOTS} (left to right along the roll)`, 2500);
@@ -274,6 +284,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     togglePause,
     reset: () => withSim('reset failed', (s) => s.reset()),
     cutFold: () => withSim('cutAndFold failed', (s) => s.cutAndFold()),
+    cutFlop,
     pigment: (i) => { const key = palette.order[i]; if (key) tapPigment(key); },
     speed: (d) => nudge('omega', d),
     gap: (d) => nudge('gap', d),
@@ -529,7 +540,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   overlay.hide();
   ready = true;
   paintStats(true);
-  hud.showHint('Tap a colour to drop pigmented putty on the bank (the strip picks where along the roll) · Cut & roll re-feeds the sheet · drag to orbit');
+  hud.showHint('Tap a colour to drop pigmented putty on the bank (the strip picks where along the roll) · Cut & fold / Cut & roll mix across the width · drag to orbit');
   canvas.focus({ preventScroll: true });
   rafId = requestAnimationFrame(frame);
 

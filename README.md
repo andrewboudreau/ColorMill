@@ -29,9 +29,12 @@ without WebGPU.
   zone, and it is the only place colours really mix.
 - **The sheet.** The front roll is tackier, so the putty leaves the nip stuck
   to it as a thin sheet and comes back over the top to rejoin the bank.
-- **Cut & roll.** A mill has no sideways transport of its own. The operator
-  cuts the sheet off, rolls it into a log and feeds it back in end-first.
-  ColorMill scripts that move; a few rounds turn stripes into a blend.
+- **Cut & fold, cut & roll.** A mill has no sideways transport of its own;
+  the operator supplies it. Cut & fold cuts the sheet across at the middle and
+  flops one half of what is on top of the mill over onto the other, like
+  turning a page, alternating sides. Cut & roll takes everything off, rolls it
+  into a log and feeds it back in end-first. ColorMill scripts both moves; a
+  few rounds turn stripes into a blend.
 - **Pigment.** The base is clear silicone. A tap sets a chunk of concentrated
   masterbatch down on the bank at one of six drop spots along the roll, and
   chunks stack if you tap the same spot again.
@@ -86,7 +89,11 @@ crisp in the resting bank and blend in the nip. The clear base carries no
 pigment at all; a chunk's load spreads out as it is milled and the colour
 gets deeper where the load is higher.
 
-**Cut & roll** takes everything on the mill, winds it into a
+**Cut & fold** lifts what is on top of the mill on one side of the cut, the
+bank in the pocket and the sheet over the front roll's crown, and turns it
+about the cut line like a page, so it lands mirrored on the other half with
+its former top resting on that half's top surface. **Cut & roll** takes
+everything on the mill, winds it into a
 volume-preserving log standing over the nip (bank kneaded into the core,
 sheet wrapped around it), and feeds the log down onto the pile the rolls are
 eating. Material from every position along the roll ends up in the log's
@@ -109,6 +116,7 @@ and rejected, is in [`docs/design-v2.md`](docs/design-v2.md) and
 | Drop-slot strip (bottom bar) | Pick which of the 6 spots along the roll the next tap lands on (also `[` / `]`, or `?slot=3`) |
 | Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack) |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
+| **Cut & fold** / `C` | Cut the sheet at the middle and flop one half over onto the other (sides alternate) |
 | **Cut & roll** / `F` | Run the operator's cut-roll-and-feed move |
 | **Clear pigment** | Reset every particle to clear silicone |
 | **Reset** / `R` | Re-seed the bank |

@@ -55,6 +55,11 @@ export const FOLD_SLICES = 32;
 /** Total script length: roll, then feed the log (the material folded in half: L/2 long,
  * plus the tilted end face of a log up to ~0.7 units across) through the nip. */
 export const FOLD_DURATION = FOLD_ROLL_SECONDS + (0.5 * GEOMETRY.length + 0.6) / FOLD_FEED_SPEED + 0.3;
+/** Cut & fold (flop one half of the top of the mill over onto the other; fold.wgsl): the page turn takes FLOP_SECONDS. */
+export const FLOP_SECONDS = 0.8;
+export const FLOP_DURATION = FLOP_SECONDS + 0.02;
+/** Operator-move modes carried in P.fold.x: 1 = cut & roll (log), 2 / 3 = cut & fold lifting the x < L/2 / x >= L/2 half. */
+export type FoldMode = 0 | 1 | 2 | 3;
 /** Arc length along the front roll -> z on the bank (the unrolled sheet is compressed by this factor). */
 /**
  * Reference material density. The stress force in P2G is scaled by
@@ -176,6 +181,7 @@ export class GpuMpm implements GpuMpmSim {
   private foldPending = false;
   private foldActive = false;
   private foldTime = 0;
+  private foldMode: FoldMode = 0;
 
   private readbackStaging: GPUBuffer | null = null;
   private destroyed = false;
@@ -436,7 +442,7 @@ export class GpuMpm implements GpuMpmSim {
     f.set([front.axisY, front.axisZ, front.omegaX, GEOMETRY.radius], o + 16);
     f.set([mu, lambda, this.config.material.thetaC, this.config.material.thetaS], o + 20);
     f.set([pVol, pMass, pMass / (pVol * MATERIAL_DENSITY), p.dispersion], o + 24);
-    f.set([foldActive ? 1 : 0, foldT, FOLD_ROLL_SECONDS, FOLD_FEED_SPEED], o + 28);
+    f.set([foldActive ? this.foldMode : 0, foldT, FOLD_ROLL_SECONDS, FOLD_FEED_SPEED], o + 28);
     // fold: the live bank top is reduced on the GPU (fold.wgsl); fold2.x is only the fallback
     const yMax = GEOMETRY.domain[1] - 3 * h;
     const bankTopFallback = Math.min(bankTopY(this.batch, this.config.params), yMax);
@@ -507,12 +513,13 @@ export class GpuMpm implements GpuMpmSim {
     // uniform ring: one slot per substep (fold script state differs per substep)
     let foldActive = this.foldActive || this.foldPending;
     let foldT = this.foldPending ? 0 : this.foldTime;
+    const duration = this.foldMode === 1 ? FOLD_DURATION : FLOP_DURATION;
     const finishAt: number[] = [];
     for (let s = 0; s < substeps; s++) {
       this.writeParams(s, foldT, foldActive);
       if (foldActive) {
         foldT += q.dt;
-        if (foldT >= FOLD_DURATION) { finishAt.push(s); foldActive = false; }
+        if (foldT >= duration) { finishAt.push(s); foldActive = false; }
       }
     }
     this.writeParams(frameSlot, foldT, foldActive);
@@ -738,7 +745,18 @@ export class GpuMpm implements GpuMpmSim {
 
   cutAndFold(): void {
     if (this.destroyed || this.foldActive || this.foldPending) return;
+    this.foldMode = 1;
     this.foldPending = true;
+  }
+
+  cutAndFlop(side: 'left' | 'right'): void {
+    if (this.destroyed || this.foldActive || this.foldPending) return;
+    this.foldMode = side === 'left' ? 2 : 3;
+    this.foldPending = true;
+  }
+
+  get operatorBusy(): boolean {
+    return this.foldActive || this.foldPending;
   }
 
   async readParticles(): Promise<ParticleSnapshot> {

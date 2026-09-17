@@ -23,6 +23,8 @@ export interface SimStats {
   /** front roller angle (rad) accumulated for rendering the rotation */
   readonly rollerAngleFront: number;
   readonly rollerAngleBack: number;
+  /** the operator's knife during a cut & fold stroke (blade edge on the sheet), null when not shown */
+  readonly blade: { readonly x: number; readonly y: number; readonly z: number } | null;
 }
 
 /** CPU readback of particle state (for tests / diagnostics). */
@@ -102,7 +104,7 @@ export interface GpuMpmSim {
    *  top of the mill on `side` (the x < L/2 half for 'left') over onto the other half, like turning a
    *  page (design §6). No-op if a move is running. */
   cutAndFlop(side: 'left' | 'right'): void;
-  /** true while an operator move (cut & roll or cut & fold) is running */
+  /** true while an operator move (cut & roll, or cut & fold including its knife stroke) is running */
   readonly operatorBusy: boolean;
   /** Read particle state back to the CPU (slow; tests and diagnostics only). */
   readParticles(): Promise<ParticleSnapshot>;

@@ -23,6 +23,8 @@ export interface RenderFrameInfo {
   readonly rollerAngleBack: number;
   /** seconds since start, for subtle animation */
   readonly timeSeconds: number;
+  /** the operator's knife, shown at this point (blade edge on the sheet) during a cut & fold stroke */
+  readonly blade?: { x: number; y: number; z: number } | null;
 }
 
 export interface Renderer {

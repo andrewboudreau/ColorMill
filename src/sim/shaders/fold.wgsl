@@ -58,15 +58,22 @@ const NB : u32 = 128u;          // arc bins
 const NS : u32 = 32u;           // depth slices per bin, square-root spaced (fine near the roll, coarse deep in the bank)
 const DMAX : f32 = 0.5;         // depth covered by the slices (sim units); deeper material lands in the last slice
 
-// Second operator move, "cut & fold" (P.fold.x = 2: the x < L/2 half is lifted, 3: the
-// x >= L/2 half): the operator cuts the sheet across at the middle of the roll,
-// peels what is on top of the mill on one side (the bank between the rolls and
-// the sheet over the front roll's crown, out to FLOP_CAP_SIN of the radius) and
-// flops it over onto the other half like turning a page, hinged on the cut. In
-// the flop the bins run along z (NB over the domain depth) and the slices up y
-// (NS over FLOP_YSPAN above the axes); the tables hold, per bin, the top of
-// each half's material (a high percentile of its column, or the mill surface
-// where the column is empty). A particle at (x, y) turns about the hinge line
+// Second operator move, "cut & fold" (P.fold.x = 2: the flap is cut from the x = 0
+// end, 3: from the x = L end): the operator holds a knife against the sheet on
+// the front roll's crown and draws it from the roll end to the middle while the
+// sheet passes underneath, so on the sheet the cut runs diagonally from the roll
+// end at the bank side to the middle at the knife line, and the freed flap is a
+// TRIANGLE: wide at the crown, tapering to a point at the far edge of the bank
+// (the host shows the blade sweeping during the stroke; here the stroke is
+// fixed: it spans the top of the mill, which is what an operator's stroke does
+// at the mill's speed). The flap (the triangle's columns: the sheet on the
+// crown and the bank beneath, out to FLOP_CAP_SIN of the radius on the back
+// roll) is then pulled across and flopped over onto the other half like turning
+// a page hinged on the middle line. In the flop the bins run along z (NB over
+// the domain depth) and the slices up y (NS over FLOP_YSPAN above the axes);
+// the tables hold, per bin, the top of the flap's column and of the receiving
+// half's column (a high percentile of its particles, or the mill surface where
+// the column is empty). A particle at (x, y) turns about the hinge line
 // x = L/2, y = (topLift + topRecv)/2 of its column through FLOP_SECONDS, so it
 // lands mirrored in x with the flap's former top resting on the receiving
 // half's top and its former underside on the outside. Nothing else moves; the
@@ -107,6 +114,21 @@ fn inFlopRegion(x : vec3<f32>) -> bool {
   let reach = FLOP_CAP_SIN * P.front.w;
   return x.y > P.front.x + 0.06 && x.z >= P.back.y - reach && x.z <= P.front.y + reach
       && x.y > millTop(x.z) - 0.5 * P.hdt.x;
+}
+
+/** The knife line: across the front roll's crown. Material in front of it has not reached the knife. */
+fn knifeZ() -> f32 { return P.front.y; }
+/** Where the cut sits at depth z: the roll end at the back edge of the bank, the middle at the knife line. */
+fn cutX(z : f32) -> f32 {
+  let zBack = P.back.y - FLOP_CAP_SIN * P.front.w;
+  let f = clamp((z - zBack) / max(knifeZ() - zBack, 1e-4), 0.0, 1.0);
+  return 0.5 * P.fold2.y * f;
+}
+/** Inside the triangular flap cut from side k (0: the x = 0 end, 1: the x = L end). */
+fn inFlap(x : vec3<f32>, k : u32) -> bool {
+  if (x.z > knifeZ()) { return false; }
+  let xc = cutX(x.z);
+  return select(x.x > P.fold2.y - xc, x.x < xc, k == 0u);
 }
 
 /** Top of half k's material at depth z (linear between bins). */
@@ -195,6 +217,8 @@ fn select_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgrou
     // bin what is on top of the mill by (half, z bin, y slice); flag the lifted half
     if (!inFlopRegion(x)) { return; }
     let k = select(0u, 1u, x.x >= 0.5 * P.fold2.y);
+    // the lifted half only counts (and flags) the flap; the receiving half counts everything on top
+    if (k == flopSide() && !inFlap(x, k)) { return; }
     let b = min(u32(x.z / flopBinWidth()), NB - 1u);
     let j = min(u32(max(x.y - P.front.x, 0.0) / flopSliceHeight()), NS - 1u);
     atomicAdd(&info[INFO_COUNT + k * NB + b], 1u);

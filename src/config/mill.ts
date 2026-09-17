@@ -322,6 +322,20 @@ export const PIGMENT_POOL_FRACTION = 0.5;
 /** Radius of one pigment chunk (a dollop of coloured putty dropped on the bank). */
 export const PIGMENT_CHUNK_RADIUS = 0.1;
 
+/** Number of fixed pigment drop positions along the roll. A tap sets its chunk
+    down over the nip at the chosen slot (left to right as the viewer sees the
+    mill) rather than at a random x, so an operator can lay stripes on purpose
+    and stack chunks on top of each other. */
+export const DROP_SLOTS = 6;
+
+/** x of drop slot `slot` (0-based, clamped): the slots are evenly spaced
+    between margins that keep a whole chunk clear of the end guides. */
+export function dropSlotX(slot: number, slots = DROP_SLOTS): number {
+  const margin = PIGMENT_CHUNK_RADIUS + 0.05;
+  const i = Math.min(slots - 1, Math.max(0, Math.round(slot)));
+  return margin + ((i + 0.5) * (GEOMETRY.length - 2 * margin)) / slots;
+}
+
 /** Estimated particle count for a preset (batch volume / (h^3/8)), for UI/preset selection. */
 export function estimateParticleCount(q: QualitySettings, batch = 1): number {
   const { h } = gridDims(q);

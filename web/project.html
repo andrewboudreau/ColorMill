@@ -35,6 +35,7 @@
     <main>
       <nav>
         <a href="index.html">Simulator</a>
+        <a href="overview.html">How it works</a>
         <a href="project.html">Project notes</a>
         <a href="resources.html">Resources</a>
         <a href="pigment.html">Pigment demo</a>
@@ -124,7 +125,7 @@
       </div>
 
       <h3>Elastoplastic putty</h3>
-      <p>Version 1 used a weakly compressible fluid, which is why it read as a puddle: a fluid cannot hold a bank on top of two rolls. Uncured silicone is a putty &mdash; it keeps its shape under gravity, yields under the nip's shear, and does not spring back. v2 uses the fixed-corotated elastic model (Stomakhin et al. 2013) with a <em>deviatoric-only</em> plastic return: every step the shape part of the deformation gradient is clamped to a small yield band (<code>[1 &minus; 0.025, 1 + 0.0075]</code>) while the volume part is kept, so the pressure term keeps resisting compression. (Clamping the raw singular values, as the snow model does, lets the nip pack the putty to several times rest density and swallow the bank.) Young's modulus 15 in unit-density sim units &mdash; soft enough that the bank slumps into a rolling bank and keeps the nip fed, which is what makes the sheet continuous &mdash; Poisson ratio 0.35; the substep length per preset follows from the CFL bound with a safety factor of 4.</p>
+      <p>Version 1 used a weakly compressible fluid, which is why it read as a puddle: a fluid cannot hold a bank on top of two rolls. Uncured silicone is a putty &mdash; it keeps its shape under gravity, yields under the nip's shear, and does not spring back. v2 uses the fixed-corotated elastic model (Stomakhin et al. 2013) with a <em>deviatoric-only</em> plastic return: every step the shape part of the deformation gradient is clamped to a small yield band (<code>[1 &minus; 0.025, 1 + 0.0075]</code>) while the volume part is kept, so the pressure term keeps resisting compression. (Clamping the raw singular values, as the snow model does, lets the nip pack the putty to several times rest density and swallow the bank.) Young's modulus 15 in unit-density sim units &mdash; soft enough that the bank slumps into a rolling bank and keeps the nip fed, which is what makes the sheet continuous &mdash; Poisson ratio 0.47, with a short viscoplastic relaxation so yielded material keeps flowing under sustained shear instead of locking into a shear band; the substep length per preset follows from the CFL bound with a safety factor of 4.</p>
 
       <h3>Sticky and separating rollers, friction ratio</h3>
       <p>The rolls are analytic cylinders applied as grid boundary conditions, and they are deliberately different. The front roll takes full control of nodes inside its tack band (the sheet follows the roll). The back roll removes the approaching normal velocity and applies Coulomb friction to the tangential part (&mu; = 0.4), so material can leave it. Because the back roll is faster, the nip is a shear zone: the sheet ends up on the front (slower, tackier) roll, as on a real mill.</p>
@@ -139,13 +140,14 @@
       <p>A single fullscreen ray-march pass walks the density volume, finds the iso-surface, takes the normal from the density gradient, decodes the latent at the hit into an albedo and shades it with a key, fill and rim light, a two-lobe specular (silicone putty is glossy) and a cheap density-based ambient occlusion that darkens creases and the nip. The rolls (brushed metal with a rotating stripe so speed is visible) and the tray are analytic and depth-composited, so they stay crisp at every grid resolution.</p>
 
       <h2>Controls</h2>
-      <pre>Bottom bar   pigment swatches (tap = blob at a random spot on the bank), colour picker,
+      <pre>Bottom bar   drop-slot strip (which of 6 spots along the roll the next tap lands on),
+             pigment swatches (tap = a chunk set down on the bank at that spot), colour picker,
              Cut &amp; roll, Clear pigment, Reset, Pause
 Right drawer roller speed (rpm), friction ratio, nip gap, dispersion, gravity,
-             quality preset, camera auto-orbit, stats (particles, grid, fps, ms/frame, sim speed)
+             batch size, quality preset, camera auto-orbit, stats (particles, grid, fps, ms/frame, sim speed)
 Viewport     drag = orbit, wheel / pinch = zoom, double-tap = front view
-Keyboard     Space pause  R reset  F cut &amp; roll  1-8 pigments  up/down speed  left/right gap
-URL          ?preset=low|medium|high|ultra forces a quality preset</pre>
+Keyboard     Space pause  R reset  F cut &amp; roll  1-8 pigments  up/down speed  left/right gap  [ ] drop slot  P drawer
+URL          ?preset=low|medium|high|ultra forces a quality preset  ?batch=1.5 scales the batch  ?slot=3 picks the drop slot</pre>
 
       <h2>Quality presets</h2>
       <div class="wrap">

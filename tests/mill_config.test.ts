@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_PARAMS, GEOMETRY, QUALITY_PRESETS, bankTopY, bankVolumeBelow, gridDims, lameParameters, millTopSurfaceY,
-  rollerAxisDistance, rollerPoses, rollerSurfaceVelocity, seedBankPositions
+  DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PIGMENT_CHUNK_RADIUS, QUALITY_PRESETS, bankTopY, bankVolumeBelow, dropSlotX, gridDims,
+  lameParameters, millTopSurfaceY, rollerAxisDistance, rollerPoses, rollerSurfaceVelocity, seedBankPositions
 } from '../src/config/mill';
 
 describe('mill geometry', () => {
@@ -81,5 +81,23 @@ describe('mill geometry', () => {
     const { mu, lambda } = lameParameters({ E: 60, nu: 0.35, thetaC: 0, thetaS: 0 });
     expect(mu).toBeCloseTo(22.22, 1);
     expect(lambda).toBeCloseTo(51.85, 1);
+  });
+});
+
+describe('pigment drop slots', () => {
+  it('spaces the slots evenly along the roll, clear of the end guides', () => {
+    const xs = Array.from({ length: DROP_SLOTS }, (_, i) => dropSlotX(i));
+    for (const x of xs) {
+      expect(x - PIGMENT_CHUNK_RADIUS).toBeGreaterThan(0);
+      expect(x + PIGMENT_CHUNK_RADIUS).toBeLessThan(GEOMETRY.length);
+    }
+    for (let i = 1; i < xs.length; i++) expect(xs[i] - xs[i - 1]).toBeCloseTo(xs[1] - xs[0], 9);
+    // mirror-symmetric about the middle of the roll
+    for (let i = 0; i < xs.length; i++) expect(xs[i] + xs[xs.length - 1 - i]).toBeCloseTo(GEOMETRY.length, 9);
+  });
+
+  it('clamps out-of-range slots to the ends', () => {
+    expect(dropSlotX(-3)).toBe(dropSlotX(0));
+    expect(dropSlotX(99)).toBe(dropSlotX(DROP_SLOTS - 1));
   });
 });

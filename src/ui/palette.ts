@@ -1,12 +1,16 @@
 /**
- * Bottom bar: large round pigment swatches (tap = inject), a custom colour
- * swatch backed by <input type="color">, and the action buttons
- * (Cut & roll, Clear pigment, Reset, Pause/Play).
+ * Bottom bar: the drop-slot strip (where along the roll the next tap lands),
+ * large round pigment swatches (tap = inject), a custom colour swatch backed
+ * by <input type="color">, and the action buttons (Cut & roll, Clear pigment,
+ * Reset, Pause/Play).
  */
 import { PALETTE_ORDER, PIGMENTS } from '../color/pigments';
+import { DROP_SLOTS } from '../config/mill';
 
 export interface PaletteCallbacks {
   onPigment(key: string): void;
+  /** the operator picked a drop slot (0-based, left to right along the roll) */
+  onSlot(slot: number): void;
   /** the picker closed on a new colour ('#rrggbb') */
   onCustom(hex: string): void;
   onCutFold(): void;
@@ -21,12 +25,34 @@ export class Palette {
   private readonly pauseButton: HTMLButtonElement;
   private readonly foldButton: HTMLButtonElement;
   private readonly swatches = new Map<string, HTMLButtonElement>();
+  private readonly slotButtons: HTMLButtonElement[] = [];
+  private slot = 0;
 
-  constructor(parent: HTMLElement, private readonly cb: PaletteCallbacks, customHex = '#ff8a00') {
+  constructor(parent: HTMLElement, private readonly cb: PaletteCallbacks, customHex = '#ff8a00', slot = 0) {
     this.el = document.createElement('div');
     this.el.className = 'cm-palette';
     this.el.setAttribute('role', 'toolbar');
     this.el.setAttribute('aria-label', 'Pigments and actions');
+
+    // drop slots: a strip of positions along the roll, left to right as seen
+    // from the front; the chosen one is where the next tap sets its chunk down
+    const slots = document.createElement('div');
+    slots.className = 'cm-slots';
+    slots.setAttribute('role', 'radiogroup');
+    slots.setAttribute('aria-label', 'Pigment drop position along the roll');
+    slots.title = 'Where the next pigment lands, left to right along the roll ([ and ])';
+    for (let i = 0; i < DROP_SLOTS; i++) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cm-slot';
+      b.dataset.slot = String(i);
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-label', `Drop slot ${i + 1} of ${DROP_SLOTS}`);
+      b.addEventListener('click', () => { this.setSlot(i); this.cb.onSlot(i); b.blur(); });
+      slots.appendChild(b);
+      this.slotButtons.push(b);
+    }
+    this.setSlot(slot);
 
     const swatches = document.createElement('div');
     swatches.className = 'cm-swatches';
@@ -86,8 +112,29 @@ export class Palette {
     this.pauseButton.classList.add('cm-btn-primary');
     this.pauseButton.setAttribute('aria-pressed', 'false');
 
-    this.el.append(swatches, actions);
+    this.el.append(slots, swatches, actions);
     parent.appendChild(this.el);
+  }
+
+  /** Highlight `slot` as the one taps land on (does not fire the callback). */
+  setSlot(slot: number): void {
+    this.slot = Math.min(DROP_SLOTS - 1, Math.max(0, Math.round(slot)));
+    this.slotButtons.forEach((b, i) => {
+      const on = i === this.slot;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-checked', String(on));
+    });
+  }
+
+  /** the drop slot taps currently land on (0-based) */
+  get dropSlot(): number {
+    return this.slot;
+  }
+
+  /** Press animation on the active slot (a pigment just landed there). */
+  flashSlot(): void {
+    const b = this.slotButtons[this.slot];
+    if (b) this.flash(b);
   }
 
   private button(parent: HTMLElement, label: string, key: string | undefined, onClick: () => void): HTMLButtonElement {

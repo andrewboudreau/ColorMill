@@ -15,7 +15,7 @@
 import './styles.css';
 import { BASE_LATENT, findPigment, rgbToLatentAsync } from './color/pigments';
 import {
-  BATCH_LIMITS, DEFAULT_MATERIAL, DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_RADIUS, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, estimateParticleCount, gridDims, materialLitres,
+  BATCH_LIMITS, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_RADIUS, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres,
   type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
@@ -202,13 +202,24 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     onAutoOrbit: (on) => { autoOrbit = on; }
   }, { params: { ...DEFAULT_PARAMS }, preset, batch, autoOrbit, open: wideScreen });
 
-  const injectLatent = (latent: Latent): void => {
+  // where along the roll a tap lands: one of DROP_SLOTS fixed positions, the
+  // operator picks which (strip in the palette, [ and ], ?slot=)
+  const clampSlot = (slot: number, fallback: number): number =>
+    Number.isFinite(slot) ? Math.min(DROP_SLOTS - 1, Math.max(0, Math.round(slot))) : fallback;
+  let dropSlot = clampSlot(parseInt(query.get('slot') ?? '', 10) - 1, Math.floor((DROP_SLOTS - 1) / 2));
+  const setDropSlot = (slot: number): void => {
+    dropSlot = clampSlot(slot, dropSlot);
+    palette.setSlot(dropSlot);
+  };
+
+  const injectLatent = (latent: Latent, slot = dropSlot): void => {
     if (!sim) return;
-    const L = GEOMETRY.length;
-    const x = 0.15 + Math.random() * (L - 0.3);
+    const x = dropSlotX(clampSlot(slot, dropSlot));
     // a dollop on top of whatever material is over the nip at this x (the GPU
-    // finds the surface, so it works after the bank has slumped or drained)
+    // finds the surface, so chunks stack on each other and it works after the
+    // bank has slumped or drained)
     const z = GEOMETRY.nipZ;
+    palette.flashSlot();
     // a chunk of coloured putty set down on the bank; when the reserved pool is
     // used up, tint the material at the surface instead
     const s = sim;
@@ -220,11 +231,11 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     }).catch((e) => reportError('addPigment failed', e));
   };
 
-  const tapPigment = (name: string): void => {
+  const tapPigment = (name: string, slot?: number): void => {
     const p = findPigment(name);
     if (!p) throw new Error(`unknown pigment "${name}"`);
     palette.flashPigment(p.key);
-    injectLatent(p.latent);
+    injectLatent(p.latent, slot);
   };
   const withSim = (what: string, fn: (s: GpuMpmSim) => void): void => {
     if (!sim) return;
@@ -239,6 +250,10 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
 
   const palette = new Palette(root, {
     onPigment: (key) => injectLatent(findPigment(key)?.latent ?? BASE_LATENT),
+    onSlot: (i) => {
+      dropSlot = i;
+      hud.showHint(`Pigment drops at slot ${i + 1} of ${DROP_SLOTS} (left to right along the roll)`, 2500);
+    },
     onCustom: (hex) => {
       hud.setError(null);
       rgbToLatentAsync(hex).then(injectLatent).catch((e) => reportError('Custom colour failed', e));
@@ -247,7 +262,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     onClear: () => withSim('clearPigment failed', (s) => s.clearPigment()),
     onReset: () => withSim('reset failed', (s) => { s.reset(); hud.setError(null); }),
     onTogglePause: togglePause
-  });
+  }, undefined, dropSlot);
 
   const nudge = (key: 'omega' | 'gap', dir: 1 | -1): void => {
     if (!sim) return;
@@ -262,6 +277,10 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     pigment: (i) => { const key = palette.order[i]; if (key) tapPigment(key); },
     speed: (d) => nudge('omega', d),
     gap: (d) => nudge('gap', d),
+    slot: (d) => {
+      setDropSlot(dropSlot + d);
+      hud.showHint(`Pigment drops at slot ${dropSlot + 1} of ${DROP_SLOTS} (left to right along the roll)`, 2500);
+    },
     togglePanel: () => panel.toggle()
   });
 
@@ -480,6 +499,8 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     snapshot(): Promise<ParticleSnapshot> { return (sim as GpuMpmSim).readParticles(); },
     stats(): SimStats { return (sim as GpuMpmSim).stats; },
     tapPigment,
+    setDropSlot,
+    get dropSlot(): number { return dropSlot; },
     setQuality,
     async screenshot() {
       const r = renderer as Renderer;
@@ -508,7 +529,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   overlay.hide();
   ready = true;
   paintStats(true);
-  hud.showHint('Tap a colour to drop pigmented putty on the bank · Cut & roll re-feeds the sheet · drag to orbit');
+  hud.showHint('Tap a colour to drop pigmented putty on the bank (the strip picks where along the roll) · Cut & roll re-feeds the sheet · drag to orbit');
   canvas.focus({ preventScroll: true });
   rafId = requestAnimationFrame(frame);
 

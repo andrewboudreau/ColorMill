@@ -199,6 +199,19 @@ export class Panel {
     }
     ssec.appendChild(dl);
 
+    // --- about --------------------------------------------------------------
+    const asec = this.section('About');
+    const about = document.createElement('p');
+    about.className = 'cm-muted';
+    const how = document.createElement('a');
+    how.href = 'overview.html';
+    how.textContent = 'How it works';
+    const repo = document.createElement('a');
+    repo.href = 'https://github.com/andrewboudreau/ColorMill';
+    repo.textContent = 'Source on GitHub';
+    about.append(how, ' · ', repo);
+    asec.appendChild(about);
+
     this.applyOpen();
   }
 

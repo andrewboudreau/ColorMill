@@ -54,10 +54,10 @@ Node counts are `N = round(domain / h) + 1` per axis; see
 
 | preset | cellsPerUnit | h | cells (x,y,z) | seeded particles (approx) |
 | --- | --- | --- | --- | --- |
-| low | 32 | 0.03125 | 48×72×48 | 85k (+50% pool) |
-| medium | 48 | 0.02083 | 72×108×72 | 285k (+50% pool) |
-| high (default) | 64 | 0.015625 | 96×144×96 | 683k (+50% pool) |
-| ultra | 72 | 0.01389 | 108×162×108 | 972k (+50% pool) |
+| low | 32 | 0.03125 | 48×72×48 | 39k at 1× batch (+50% pool) |
+| medium | 48 | 0.02083 | 72×108×72 | 133k at 1× batch (+50% pool) |
+| high (default) | 64 | 0.015625 | 96×144×96 | 315k at 1× batch (+50% pool) |
+| ultra | 72 | 0.01389 | 108×162×108 | 448k at 1× batch (+50% pool) |
 
 **Batch size.** `MillConfig.batch` is a volume multiplier on the seeded
 material (0.5×–3× from the panel, 0.25×–4× via `?batch=`); the bank top is

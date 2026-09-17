@@ -1,56 +1,106 @@
 # ColorMill
 
-A browser-based **two-roll mill simulator**: a bank of white silicone putty
+A **two-roll mill simulator** in the browser. A bank of clear silicone putty
+sits on two counter-rotating rolls, is dragged through the nip, sheets onto
+the front roll, and is cut off, rolled into a log and fed back in end-first.
+Drop pigment on the bank and watch it streak, fold and disperse through the
+batch, mixed the way real pigments mix: blue and yellow make green, not grey.
 
-![The v2 mill after two seconds at the low preset: a rolling bank on the two rolls, a continuous sheet around the front roll, pigment dollops being drawn into the nip](docs/screenshots/mill-low-2s.png)
-sits on two counter-rotating rollers, gets dragged through the nip, sheets
-onto the front roll, and is cut off, rolled into a log, stood over the nip and fed back
-in end-first. Tap a pigment to drop a chunk of concentrated coloured putty on the bank and
-watch it streak and fold through the batch — blue and yellow fold into real green, not grey.
+![Red, blue and yellow pigment chunks set down on the bank a few seconds ago are being drawn into the nip and wrapped around the front roll as a sheet](docs/screenshots/hero.png)
 
-Version 2 runs the whole thing on the GPU with **WebGPU compute** (MLS-MPM
-with hundreds of thousands of material points) and renders it with a
-ray-marched glossy surface and Mixbox pigment mixing. The v1 CPU proof of
+Everything runs on the GPU through **WebGPU compute**: the putty is hundreds
+of thousands of material points (MLS-MPM), the pigment lives in Mixbox latent
+space, and the picture is a ray-marched glossy surface. A v1 CPU proof of
 concept (C / raylib / Emscripten) is kept as a legacy build for browsers
 without WebGPU.
 
-Live: <https://andrewboudreau.github.io/ColorMill/> ·
-How it works: <https://andrewboudreau.github.io/ColorMill/overview.html> ·
-Design spec: [`docs/design-v2.md`](docs/design-v2.md) ·
-Project notes: [`web/project.html`](web/project.html) ·
-Research log: [`docs/research.md`](docs/research.md)
+**Live:** <https://andrewboudreau.github.io/ColorMill/> ·
+**How it works:** <https://andrewboudreau.github.io/ColorMill/overview.html> ·
+**Project notes:** <https://andrewboudreau.github.io/ColorMill/project.html> ·
+**Design spec:** [`docs/design-v2.md`](docs/design-v2.md) ·
+**Research log:** [`docs/research.md`](docs/research.md)
 
-## The physics, briefly
+## What you see
 
-The material is simulated with the **Material Point Method** (MLS-MPM,
-Hu et al. 2018) with quadratic B-spline transfers and APIC affine velocities.
+- **The bank.** Putty resting in the valley between the rolls, slumping toward
+  the gap under gravity and the pull of the roll surfaces.
+- **The nip.** The rolls squeeze the putty through a narrow gap. The back roll
+  turns faster than the front (the *friction ratio*), so the gap is a shear
+  zone, and it is the only place colours really mix.
+- **The sheet.** The front roll is tackier, so the putty leaves the nip stuck
+  to it as a thin sheet and comes back over the top to rejoin the bank.
+- **Cut & roll.** A mill has no sideways transport of its own. The operator
+  cuts the sheet off, rolls it into a log and feeds it back in end-first.
+  ColorMill scripts that move; a few rounds turn stripes into a blend.
+- **Pigment.** The base is clear silicone. A tap sets a chunk of concentrated
+  masterbatch down on the bank at one of six drop spots along the roll, and
+  chunks stack if you tap the same spot again.
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/cut-and-roll.png" alt="Cut & roll in progress: everything that was on the mill stands over the nip as a log with a spiral cross-section of red, blue, yellow and clear, being fed down end-first"></td>
+    <td><img src="docs/screenshots/after-one-fold.png" alt="After one cut & roll pass the three colours have been folded across the width of the mill and are blending into oranges and greens on the front roll"></td>
+    <td><img src="docs/screenshots/after-two-folds.png" alt="After two passes the sheet is a mottled orange with green and blue streaks, most of the way to a uniform blend"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Cut &amp; roll: the log stands over the nip</sub></td>
+    <td align="center"><sub>After one pass</sub></td>
+    <td align="center"><sub>After two passes</sub></td>
+  </tr>
+</table>
+
+## How it works
+
+The material is simulated with the **Material Point Method** (MLS-MPM, Hu et
+al. 2018) with quadratic B-spline transfers and APIC affine velocities.
 Particles carry position, velocity, an affine velocity matrix, an elastic
-deformation gradient and a 7-float Mixbox pigment latent; a background grid
-(48³ to 120³ cells depending on the preset) is scratch space rebuilt every
-substep: particles scatter mass and momentum to grid nodes (fixed-point
-atomics), the grid integrates gravity and applies the boundaries, and the
-particles gather the new velocities back and advect. The material model is an
-**elastoplastic putty**: fixed-corotated elasticity with a deviatoric-only
-plastic return (the shape part of the deformation gradient is clamped to a
-small yield band each step; the volume part is kept, so the pressure term
-keeps resisting compression and the nip cannot pack material beyond rest
-density). The bank slumps into a rolling bank, yields and flows under the
-nip's shear, and does not spring back.
+deformation gradient, a 7-float Mixbox pigment latent and a pigment load. A
+background grid (49³ to 109³ cells, depending on the preset, taller than it is
+wide to leave room for the log) is scratch space rebuilt every substep:
+particles scatter mass and momentum to grid nodes with fixed-point atomics,
+the grid integrates gravity and applies the boundaries, and the particles
+gather the new velocities back and advect. A fixed number of substeps runs
+per rendered frame, so a run is deterministic whatever the frame rate.
 
-The mill itself is a set of grid boundary conditions. The **front roller** is
-sticky: nodes within a tack band of its surface take the roller's velocity, so
-the sheet is carried around with it. The **back roller** is a separating
-Coulomb-friction contact. The back roller runs faster than the front one
-(the **friction ratio**, 1.0–1.6), so material in the nip is sheared, not just
-squeezed; the domain's end walls act as guide cheeks and the floor is the
-tray. Pigment is tracked as a **Mixbox latent** per particle and mixed only
-where the material is actually sheared: once per frame each particle relaxes
-its latent toward the local node average at a rate proportional to its shear
-rate, so mixing happens at the nip and not in the resting bank. A scripted
-**cut & roll** takes everything off the mill, winds it into a log (bank at
-the core, sheet around it) and feeds the log back in end-first over the nip,
-which is the only axial transport a real mill gets. Full detail, including every constant, is in
-[`docs/design-v2.md`](docs/design-v2.md).
+The material model is an **elastoplastic putty**: fixed-corotated elasticity
+with a deviatoric-only plastic return. Each step the shape part of the
+deformation gradient is clamped to a small yield band while the volume part is
+kept, so the pressure term keeps resisting compression and the nip cannot pack
+material beyond rest density. A short viscoplastic relaxation lets yielded
+material keep flowing under sustained shear instead of locking into a shear
+band. The bank slumps into a rolling bank, yields and flows under the nip's
+shear, and does not spring back.
+
+The mill itself is a set of grid boundary conditions. The **front roll** is
+sticky within a thin band of its surface, so the sheet is carried around with
+it. The **back roll** is a separating Coulomb-friction contact that turns
+faster by the friction ratio (1.0–1.6), so the nip shears as well as squeezes.
+The domain's end walls are the guide cheeks and the floor is the tray.
+
+Pigment is a **Mixbox latent** per particle (three Kubelka–Munk pigment
+weights and a residual), so transport and blending are plain weighted
+averages and blue and yellow fold into green. Mixing is driven by the local
+shear rate: once per frame each particle relaxes toward the latent of its
+neighbourhood in proportion to how hard it is being sheared, so colours stay
+crisp in the resting bank and blend in the nip. The clear base carries no
+pigment at all; a chunk's load spreads out as it is milled and the colour
+gets deeper where the load is higher.
+
+**Cut & roll** takes everything on the mill, winds it into a
+volume-preserving log standing over the nip (bank kneaded into the core,
+sheet wrapped around it), and feeds the log down onto the pile the rolls are
+eating. Material from every position along the roll ends up in the log's
+cross-section and is spread back across the width as the nip flattens it.
+Nothing is lost or invented.
+
+The rendering is a single fullscreen ray-march through 3D textures of density
+and pigment: it finds the putty's surface, shades it as glossy silicone with
+a colour that deepens with pigment load, and composites the brushed-metal
+rolls and the tray analytically so they stay crisp at any grid resolution.
+
+Full detail, including every constant and the alternatives that were tried
+and rejected, is in [`docs/design-v2.md`](docs/design-v2.md) and
+[`docs/research.md`](docs/research.md).
 
 ## Controls
 
@@ -60,36 +110,35 @@ which is the only axial transport a real mill gets. Full detail, including every
 | Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack) |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
 | **Cut & roll** / `F` | Run the operator's cut-roll-and-feed move |
-| **Clear pigment** | Reset every particle to white silicone |
+| **Clear pigment** | Reset every particle to clear silicone |
 | **Reset** / `R` | Re-seed the bank |
 | **Pause** / `Space` | Pause / resume |
 | `1`–`8` | Inject palette pigments 1–8 |
 | `↑` / `↓`, `←` / `→` | Roller speed, nip gap |
 | `[` / `]` | Move the pigment drop slot left / right |
 | Drag / wheel / pinch | Orbit / zoom the camera; double-tap resets to the front view |
-| Right drawer | Roller speed (rpm), friction ratio, nip gap, dispersion, gravity, quality, auto-orbit, stats |
+| Right drawer (`P`) | Roller speed (rpm), friction ratio, nip gap, dispersion, gravity, back-roll friction, batch size, quality, auto-orbit, stats |
 
 ## Quality presets
 
-| Preset | Cells / unit | Grid (cells) | Particles (approx.) | Substep `dt` | Substeps / frame | Target |
+| Preset | Cells / unit | Grid (cells) | Particles at 1× batch | Substep `dt` | Substeps / frame | Target |
 | --- | --- | --- | --- | --- | --- | --- |
-| low | 32 | 48 × 72 × 48 | 85k | 1.6e-3 | 8 | integrated / mobile GPU |
-| medium | 48 | 72 × 108 × 72 | 285k | 1.1e-3 | 12 | laptop GPU |
-| high (default) | 64 | 96 × 144 × 96 | 683k | 8e-4 | 16 | desktop GPU |
-| ultra | 72 | 108 × 162 × 108 | 972k | 7.1e-4 | 18 | discrete GPU |
+| low | 32 | 49 × 73 × 49 | 39k | 1.6e-3 | 8 | integrated / mobile GPU |
+| medium | 48 | 73 × 109 × 73 | 133k | 1.1e-3 | 12 | laptop GPU |
+| high (default) | 64 | 97 × 145 × 97 | 315k | 8e-4 | 16 | desktop GPU |
+| ultra | 72 | 109 × 163 × 109 | 448k | 7.1e-4 | 18 | discrete GPU |
 
-A batch-size control (0.5×–3×, default about 1.2 L) rebuilds the bank with more or less material,
-and the HUD reports the material on the mill in litres and kg so conservation
-is visible. The base putty renders as clear silicone that pigment makes opaque.
-
-The app steps the preset down automatically when frames stay above 45 ms
-(unless a preset was chosen explicitly), so a slow GPU lands on the largest
-preset it can run.
+The default batch is about 1.2 L of putty; the batch-size control (0.5×–3×,
+or `?batch=1.5`) rebuilds the bank with more or less material and scales the
+particle count with it. The HUD reports the material on the mill in litres and
+kg, so conservation is visible.
 
 The app picks `medium` on non-discrete adapters (`low` on mobile user agents)
 and `high` otherwise; override with the quality select or `?preset=low` in the
-URL. Simulated time per rendered frame is `dt × substeps` (≈13 ms at `high`),
-so at 60 fps the mill runs at about 0.8× real time; the HUD shows the ratio.
+URL. It also steps the preset down when frames stay above 45 ms, unless a
+preset was chosen explicitly. Simulated time per rendered frame is
+`dt × substeps` (about 13 ms), so at 60 fps the mill runs at about 0.8× real
+time; the HUD shows the ratio.
 
 ## Run, test, build
 
@@ -111,7 +160,11 @@ screenshot to `tests/e2e/out/app.png`. They need a Chromium — run
 `npx playwright install --with-deps chromium` once, or point
 `COLORMILL_CHROMIUM` at one. `E2E_MODE=preview npm run test:e2e` tests the
 production bundle instead of the dev server (this is what CI does).
-`npm run test:e2e app` runs only the specs whose file name contains `app`.
+`npm run test:e2e app` runs only the specs whose file name contains `app`,
+and `E2E_SOLVER_FOLD=1` makes the solver spec exercise cut & roll too.
+
+The screenshots in this README were rendered the same way, headless through
+the debug API at the `low` preset.
 
 Native C:
 
@@ -131,7 +184,7 @@ root:
 dist/
   index.html, assets/        the v2 WebGPU app
   overview.html              how it works (the short, high-level page)
-  project.html               project notes
+  project.html               project notes (the guided tour)
   resources.html             references and vocabulary
   pigment.html               Mixbox WebGL demo
   vendor/mixbox/             mixbox.js + mixbox.glsl (see license below)
@@ -140,7 +193,7 @@ dist/
 
 `web/` is the source of truth for the docs pages (`web/shell.html` is the
 Emscripten shell for the legacy build and is not copied). The Vite dev server
-serves the same files, so `/ColorMill/project.html` works under `npm run dev`
+serves the same files, so `/ColorMill/overview.html` works under `npm run dev`
 too.
 
 ## Deployment and CI
@@ -181,7 +234,7 @@ src/main.c, src/sim/*.c        v1 CPU app (legacy build)
 tests/*.test.ts                vitest
 tests/e2e/                     Playwright specs (lib.mjs, run.mjs, *.spec.mjs)
 web/                           docs pages + Emscripten shell + vendored Mixbox
-docs/                          design-v2.md, research.md
+docs/                          design-v2.md, research.md, screenshots/
 ```
 
 ## License notes

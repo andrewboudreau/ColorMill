@@ -65,7 +65,7 @@
       <div class="grid">
         <div class="card">
           <h3>Material points on the GPU</h3>
-          <p>The putty is hundreds of thousands of particles (85k to 970k, depending on the quality preset) simulated with the Material Point Method in its MLS-MPM form. Each substep the particles scatter mass and momentum to a background grid, the grid applies gravity and the rolls, and the particles read the result back. Every stage is a WebGPU compute shader. A fixed number of substeps runs per frame, so a run is deterministic whatever the frame rate.</p>
+          <p>The putty is tens to hundreds of thousands of particles (about 40k to 450k for the default batch, depending on the quality preset) simulated with the Material Point Method in its MLS-MPM form. Each substep the particles scatter mass and momentum to a background grid, the grid applies gravity and the rolls, and the particles read the result back. Every stage is a WebGPU compute shader. A fixed number of substeps runs per frame, so a run is deterministic whatever the frame rate.</p>
         </div>
         <div class="card">
           <h3>A putty, not a fluid</h3>
@@ -94,7 +94,7 @@
         <tr><th>Thing</th><th>Value</th></tr>
         <tr><td>One simulation unit</td><td>about 0.2 m, so the rolls are roughly 64 mm across and 300 mm long</td></tr>
         <tr><td>Default batch</td><td>about 1.2 L of putty (the drawer offers 0.5&times; to 3&times;)</td></tr>
-        <tr><td>Grid</td><td>48 to 108 cells per side, rebuilt every substep</td></tr>
+        <tr><td>Grid</td><td>49 to 109 cells across, 73 to 163 tall, rebuilt every substep</td></tr>
         <tr><td>Sim speed</td><td>about 0.8&times; real time at 60 fps on the default preset; the HUD shows the actual ratio</td></tr>
         <tr><td>Pigment drop spots</td><td>6 fixed positions along the roll; the strip in the bottom bar picks which</td></tr>
       </table>

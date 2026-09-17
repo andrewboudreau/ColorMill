@@ -58,6 +58,10 @@ export const FOLD_DURATION = FOLD_ROLL_SECONDS + (0.5 * GEOMETRY.length + 0.6) /
 /** Cut & fold (flop one half of the top of the mill over onto the other; fold.wgsl): the page turn takes FLOP_SECONDS. */
 export const FLOP_SECONDS = 0.8;
 export const FLOP_DURATION = FLOP_SECONDS + 0.02;
+/** The knife stroke before the flop: the blade is drawn along the crown from the roll end to
+ * the middle over this long (sim seconds); the flap is cut and lifted when it arrives. The cut
+ * itself is geometric (fold.wgsl), the stroke is the wait and the blade you see. */
+export const FLOP_CUT_SECONDS = 1.0;
 /** Operator-move modes carried in P.fold.x: 1 = cut & roll (log), 2 / 3 = cut & fold lifting the x < L/2 / x >= L/2 half. */
 export type FoldMode = 0 | 1 | 2 | 3;
 /** Arc length along the front roll -> z on the bank (the unrolled sheet is compressed by this factor). */
@@ -114,6 +118,8 @@ interface MutableStats {
   lastStepGpuMs: number;
   rollerAngleFront: number;
   rollerAngleBack: number;
+  /** the operator's knife during a cut & fold stroke (null when not shown) */
+  blade: { x: number; y: number; z: number } | null;
 }
 
 export class GpuMpm implements GpuMpmSim {
@@ -182,6 +188,8 @@ export class GpuMpm implements GpuMpmSim {
   private foldActive = false;
   private foldTime = 0;
   private foldMode: FoldMode = 0;
+  /** sim seconds left of the knife stroke that precedes a flop (0 = none running) */
+  private cutLeft = 0;
 
   private readbackStaging: GPUBuffer | null = null;
   private destroyed = false;
@@ -249,6 +257,7 @@ export class GpuMpm implements GpuMpmSim {
       simTime: 0,
       simSecondsPerFrame: config.quality.dt * config.quality.substepsPerFrame,
       lastStepGpuMs: NaN,
+      blade: null,
       rollerAngleFront: 0,
       rollerAngleBack: 0
     };
@@ -510,6 +519,20 @@ export class GpuMpm implements GpuMpmSim {
     const frameSlot = q.substepsPerFrame;
     const { back, front } = rollerPoses(this.params);
 
+    // the knife stroke: the blade sweeps along the crown; when it reaches the middle the flap is cut and lifted
+    if (this.cutLeft > 0) {
+      this.cutLeft -= q.dt * substeps;
+      const L = GEOMETRY.length;
+      const done = 1 - Math.max(this.cutLeft, 0) / FLOP_CUT_SECONDS;
+      const x = this.foldMode === 2 ? 0.5 * L * done : L - 0.5 * L * done;
+      this.statsData.blade = { x, y: front.axisY + GEOMETRY.radius + this.params.gap, z: front.axisZ };
+      if (this.cutLeft <= 0) {
+        this.cutLeft = 0;
+        this.statsData.blade = null;
+        this.foldPending = true;
+      }
+    }
+
     // uniform ring: one slot per substep (fold script state differs per substep)
     let foldActive = this.foldActive || this.foldPending;
     let foldT = this.foldPending ? 0 : this.foldTime;
@@ -604,6 +627,8 @@ export class GpuMpm implements GpuMpmSim {
     this.foldPending = false;
     this.foldActive = false;
     this.foldTime = 0;
+    this.cutLeft = 0;
+    this.statsData.blade = null;
     this.statsData.simTime = 0;
     this.statsData.rollerAngleFront = 0;
     this.statsData.rollerAngleBack = 0;
@@ -744,19 +769,19 @@ export class GpuMpm implements GpuMpmSim {
   }
 
   cutAndFold(): void {
-    if (this.destroyed || this.foldActive || this.foldPending) return;
+    if (this.destroyed || this.operatorBusy) return;
     this.foldMode = 1;
     this.foldPending = true;
   }
 
   cutAndFlop(side: 'left' | 'right'): void {
-    if (this.destroyed || this.foldActive || this.foldPending) return;
+    if (this.destroyed || this.operatorBusy) return;
     this.foldMode = side === 'left' ? 2 : 3;
-    this.foldPending = true;
+    this.cutLeft = FLOP_CUT_SECONDS;
   }
 
   get operatorBusy(): boolean {
-    return this.foldActive || this.foldPending;
+    return this.foldActive || this.foldPending || this.cutLeft > 0;
   }
 
   async readParticles(): Promise<ParticleSnapshot> {

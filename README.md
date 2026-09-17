@@ -30,9 +30,10 @@ without WebGPU.
 - **The sheet.** The front roll is tackier, so the putty leaves the nip stuck
   to it as a thin sheet and comes back over the top to rejoin the bank.
 - **Cut & fold, cut & roll.** A mill has no sideways transport of its own;
-  the operator supplies it. Cut & fold cuts the sheet across at the middle and
-  flops one half of what is on top of the mill over onto the other, like
-  turning a page, alternating sides. Cut & roll takes everything off, rolls it
+  the operator supplies it. Cut & fold draws a knife along the front roll from
+  the end to the middle while the sheet passes, which frees a triangular flap,
+  and flops it over onto the other half like turning a page, alternating
+  sides. Cut & roll takes everything off, rolls it
   into a log and feeds it back in end-first. ColorMill scripts both moves; a
   few rounds turn stripes into a blend.
 - **Pigment.** The base is clear silicone. A tap sets a chunk of concentrated
@@ -89,10 +90,12 @@ crisp in the resting bank and blend in the nip. The clear base carries no
 pigment at all; a chunk's load spreads out as it is milled and the colour
 gets deeper where the load is higher.
 
-**Cut & fold** lifts what is on top of the mill on one side of the cut, the
-bank in the pocket and the sheet over the front roll's crown, and turns it
-about the cut line like a page, so it lands mirrored on the other half with
-its former top resting on that half's top surface. **Cut & roll** takes
+**Cut & fold** draws a knife along the front roll's crown from the roll end
+to the middle while the sheet passes under it, so the cut is a diagonal on the
+sheet and the freed flap is a triangle, wide at the crown and pointed at the
+far edge of the bank. The flap, sheet and bank beneath, turns about the middle
+line like a page and lands mirrored on the other half with its former top
+resting on that half's top surface. **Cut & roll** takes
 everything on the mill, winds it into a
 volume-preserving log standing over the nip (bank kneaded into the core,
 sheet wrapped around it), and feeds the log down onto the pile the rolls are
@@ -116,7 +119,7 @@ and rejected, is in [`docs/design-v2.md`](docs/design-v2.md) and
 | Drop-slot strip (bottom bar) | Pick which of the 6 spots along the roll the next tap lands on (also `[` / `]`, or `?slot=3`) |
 | Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack) |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
-| **Cut & fold** / `C` | Cut the sheet at the middle and flop one half over onto the other (sides alternate) |
+| **Cut & fold** / `C` | Draw the knife from the roll end to the middle and flop the triangular flap over onto the other half (sides alternate) |
 | **Cut & roll** / `F` | Run the operator's cut-roll-and-feed move |
 | **Clear pigment** | Reset every particle to clear silicone |
 | **Reset** / `R` | Re-seed the bank |

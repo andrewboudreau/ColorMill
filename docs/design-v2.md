@@ -422,20 +422,32 @@ Nothing is placed inside existing material and no material is left behind. Expos
 
 ### 6b. Cut & fold (the flop)
 
-The other move an operator makes, and the one most milling actually uses: cut
-the sheet across at the middle of the roll, lift what is on top of the mill on
-one side and flop it over onto the other half, like turning a page hinged on
-the cut. Sides alternate. Same kernels, mode `P.fold.x` = 2 (the x < L/2 half
-is lifted) or 3 (the x ≥ L/2 half); `GpuMpmSim.cutAndFlop(side)`, UI button
-"Cut & fold" (C), which alternates the side.
+The other move an operator makes, and the one most milling actually uses: hold
+a knife against the sheet on the front roll's crown, draw it from the roll end
+to the middle while the sheet passes underneath, then pull the freed flap
+across and flop it over onto the other half, like turning a page hinged on
+the middle line. Because the sheet moves during the stroke the cut is a
+diagonal on the sheet, from the roll end at the bank side to the middle at
+the knife line, and the flap is a **triangle**: wide at the crown, tapering
+to a point at the far edge of the bank. Sides alternate. Same kernels, mode
+`P.fold.x` = 2 (cut from the x = 0 end) or 3 (from the x = L end);
+`GpuMpmSim.cutAndFlop(side)`, UI button "Cut & fold" (C), which alternates.
 
-1. **Select** what is on top of the mill: material above the axes and above
-   the mill surface (roll crowns or channel floor), between the rolls' 50°
-   lines (`FLOP_CAP_SIN` = sin 50°): the bank in the pocket, and the sheet
-   over the front crown. The sheet down the front face and the channel are
-   left; they keep the lifted side's nip fed until the sheet comes round.
-   Both halves are binned by z (`NB` bins over the domain depth) and y (`NS`
-   slices over one unit above the axes); only the lifted half is flagged.
+0. **Stroke** (`FLOP_CUT_SECONDS` = 1 s, host side): the blade is shown
+   sweeping along the crown from the roll end to the middle (`SimStats.blade`,
+   drawn by the renderer as a small knife). Nothing moves yet. The stroke is
+   fixed rather than tied to the roll speed: an operator paces the stroke to
+   the mill, and at the default speed the two agree anyway (the sheet advances
+   about the depth of the top of the mill in a second).
+1. **Select** the flap: material on top of the mill (above the axes and the
+   mill surface, between the rolls' 50° lines, `FLOP_CAP_SIN` = sin 50°) on
+   the cut side of the diagonal `x_cut(z)`, which runs from 0 at the back edge
+   of the bank to L/2 at the knife line (the front axis z); material in front
+   of the knife line has not reached the knife and stays. The sheet down the
+   front face and the channel are left too; they keep that side's nip fed
+   until the sheet comes round. The flap is binned by z (`NB` bins over the
+   domain depth) and y (`NS` slices over one unit above the axes) and flagged;
+   the receiving half is binned whole.
 2. **Tables**: per (half, z bin) the top of the column, the 97th percentile
    of its particles (a few strays above do not count), or the mill surface
    where the column is empty.
@@ -451,9 +463,11 @@ is lifted) or 3 (the x ≥ L/2 half); `GpuMpmSim.cutAndFlop(side)`, UI button
    from there: the doubled side feeds the nip, the emptied side refills from
    its own lower sheet.
 
-Every flop interleaves the two halves of the width once; alternating sides
-walks material back and forth across the roll, which is where a real mill's
-lateral mixing comes from.
+Every flop lays a wedge of one half across the other; alternating sides
+crosses the wedges, which is where a real mill's lateral mixing comes from.
+The diagonal interface is more interface per move than a straight cut, and
+moving a wedge rather than a half keeps the sheet from sloshing from side to
+side.
 
 ---
 

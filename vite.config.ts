@@ -12,7 +12,7 @@ import { defineConfig, type Plugin } from 'vitest/config';
  * legacy `dist/legacy/` copy made by `make web DIST_DIR=dist/legacy`.
  */
 const WEB_DIR = 'web';
-const DOC_PAGES = ['project.html', 'resources.html', 'pigment.html'];
+const DOC_PAGES = ['overview.html', 'project.html', 'resources.html', 'pigment.html'];
 const DOC_DIRS = ['vendor'];
 
 const MIME: Record<string, string> = {

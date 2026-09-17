@@ -496,16 +496,21 @@ so the renderer can be tested with a procedural volume without the sim.
 
 ## 9. UI (touch-first)
 
-- Bottom bar: pigment palette (large round swatches; tap = inject a blob of
-  radius 0.09 at a random x along the bank top), a colour picker swatch,
-  "Cut & fold", "Clear pigment", "Reset", Pause.
+- Bottom bar: a drop-slot strip (`DROP_SLOTS` = 6 fixed x positions along
+  the roll, evenly spaced between margins that keep a whole chunk clear of
+  the end guides; the operator picks one, `?slot=` presets it), the pigment
+  palette (large round swatches; tap = a masterbatch chunk of radius
+  `PIGMENT_CHUNK_RADIUS` set down on top of whatever is over the nip at the
+  chosen slot, so repeated taps stack), a colour picker swatch, "Cut & roll",
+  "Clear pigment", "Reset", Pause.
 - Right drawer (collapsible; hidden by default on narrow screens): sliders
   for roller speed (rpm shown), friction ratio, nip gap, dispersion, gravity;
   quality select; camera auto-orbit toggle; stats (particles, grid, fps,
   ms/frame, sim speed).
 - Drag in the viewport orbits; wheel/pinch zooms; double-tap resets the
   camera to the front view.
-- Keyboard: Space pause, R reset, F cut&fold, 1–8 pigments, arrows speed/gap.
+- Keyboard: Space pause, R reset, F cut&roll, 1–8 pigments, arrows speed/gap,
+  `[` / `]` drop slot, P drawer.
 
 ---
 

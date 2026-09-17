@@ -295,6 +295,12 @@ body {
   line-height: 1.5;
 }
 
+.cm-muted a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .cm-stats {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -386,6 +392,46 @@ body {
   0% { transform: scale(0.85); }
   60% { transform: scale(1.08); }
   100% { transform: scale(1); }
+}
+
+/* drop slots: a strip standing in for the roll, one dot per landing spot */
+.cm-slots {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(11, 18, 32, 0.9);
+}
+
+.cm-slot {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.cm-slot:hover,
+.cm-slot:focus-visible {
+  border-color: #fff;
+  outline: 0;
+}
+
+.cm-slot.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12);
+}
+
+.cm-slot.is-flash {
+  animation: cm-pop 0.28s ease;
 }
 
 .cm-swatch-key {

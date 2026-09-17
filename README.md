@@ -15,6 +15,7 @@ concept (C / raylib / Emscripten) is kept as a legacy build for browsers
 without WebGPU.
 
 Live: <https://andrewboudreau.github.io/ColorMill/> ·
+How it works: <https://andrewboudreau.github.io/ColorMill/overview.html> ·
 Design spec: [`docs/design-v2.md`](docs/design-v2.md) ·
 Project notes: [`web/project.html`](web/project.html) ·
 Research log: [`docs/research.md`](docs/research.md)
@@ -55,7 +56,8 @@ which is the only axial transport a real mill gets. Full detail, including every
 
 | Input | Action |
 | --- | --- |
-| Tap a swatch (bottom bar) | Inject a blob of that pigment at a random spot on the bank |
+| Drop-slot strip (bottom bar) | Pick which of the 6 spots along the roll the next tap lands on (also `[` / `]`, or `?slot=3`) |
+| Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack) |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
 | **Cut & roll** / `F` | Run the operator's cut-roll-and-feed move |
 | **Clear pigment** | Reset every particle to white silicone |
@@ -63,6 +65,7 @@ which is the only axial transport a real mill gets. Full detail, including every
 | **Pause** / `Space` | Pause / resume |
 | `1`–`8` | Inject palette pigments 1–8 |
 | `↑` / `↓`, `←` / `→` | Roller speed, nip gap |
+| `[` / `]` | Move the pigment drop slot left / right |
 | Drag / wheel / pinch | Orbit / zoom the camera; double-tap resets to the front view |
 | Right drawer | Roller speed (rpm), friction ratio, nip gap, dispersion, gravity, quality, auto-orbit, stats |
 
@@ -127,6 +130,7 @@ root:
 ```
 dist/
   index.html, assets/        the v2 WebGPU app
+  overview.html              how it works (the short, high-level page)
   project.html               project notes
   resources.html             references and vocabulary
   pigment.html               Mixbox WebGL demo

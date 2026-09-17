@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="How ColorMill works: a WebGPU two-roll mill simulator, in one page.">
+    <title>How ColorMill works</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2711%27 cy=%2716%27 r=%279%27 fill=%27%230d9488%27/%3E%3Ccircle cx=%2721%27 cy=%2716%27 r=%279%27 fill=%27%23e11d48%27 fill-opacity=%27.85%27/%3E%3C/svg%3E">
+    <style>
+      :root { color-scheme: dark; --bg:#0f172a; --panel:#111827; --ink:#e5e7eb; --muted:#94a3b8; --accent:#a855f7; --line:#334155; }
+      body { margin:0; background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,Segoe UI,sans-serif; line-height:1.55; }
+      main { max-width:960px; margin:0 auto; padding:32px 20px 64px; }
+      nav { display:flex; flex-wrap:wrap; gap:12px; margin:0 0 28px; }
+      .pill { display:inline-block; margin:0 0 8px; font-size:.9rem; }
+      nav a, .pill { color:var(--ink); text-decoration:none; border:1px solid var(--line); border-radius:999px; padding:8px 12px; background:#0b1220; }
+      nav a[aria-current] { border-color:var(--accent); }
+      h1 { font-size:clamp(2rem,5vw,3.6rem); line-height:1.05; margin:0 0 12px; }
+      h2 { margin-top:40px; border-top:1px solid var(--line); padding-top:24px; }
+      h3 { margin:0 0 6px; color:#c4b5fd; font-size:1.05rem; }
+      p, li { color:#d1d5db; }
+      a.inline { color:#c4b5fd; }
+      .lead { color:#cbd5e1; font-size:1.15rem; max-width:760px; }
+      .cta { display:inline-block; margin:8px 0 0; padding:10px 18px; border-radius:999px; background:var(--accent); color:#0b1220; font-weight:600; text-decoration:none; }
+      .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; }
+      .card { background:linear-gradient(180deg,#111827,#0b1220); border:1px solid var(--line); border-radius:18px; padding:18px; }
+      .card p { margin:0; }
+      .flow { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; counter-reset:step; padding:0; margin:16px 0; list-style:none; }
+      .flow li { background:#0b1220; border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
+      .flow li::before { counter-increment:step; content:counter(step); display:inline-block; width:24px; height:24px; margin-right:8px; border-radius:50%; background:var(--accent); color:#0b1220; font-weight:700; text-align:center; line-height:24px; }
+      .flow strong { color:var(--ink); }
+      code { background:#020617; color:#e2e8f0; border-radius:6px; padding:2px 5px; }
+      table { width:100%; border-collapse:collapse; margin:12px 0 8px; }
+      th, td { text-align:left; vertical-align:top; border-bottom:1px solid var(--line); padding:9px 10px; }
+      th { color:#c4b5fd; }
+      .muted { color:var(--muted); font-size:.92rem; }
+      .links li { margin:6px 0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav>
+        <a href="index.html">Simulator</a>
+        <a href="overview.html" aria-current="page">How it works</a>
+        <a href="project.html">Project notes</a>
+        <a href="resources.html">Resources</a>
+        <a href="pigment.html">Pigment demo</a>
+        <a href="https://github.com/andrewboudreau/ColorMill">GitHub repo</a>
+      </nav>
+
+      <p class="pill">Overview</p>
+      <h1>How ColorMill works</h1>
+      <p class="lead">ColorMill is a two-roll mill in your browser. A bank of clear silicone putty sits on two counter-rotating rolls, gets dragged through the gap between them, and sheets onto the front roll. Drop pigment on the bank, cut and roll the sheet back in, and watch the colour disperse the way it does on a real mill. Everything, physics and picture, runs on your GPU through WebGPU.</p>
+      <a class="cta" href="index.html">Open the simulator</a>
+      <p class="muted">Needs a WebGPU browser: Chrome or Edge 113+, Safari 26+, Firefox 141+. A <a class="inline" href="legacy/index.html">CPU fallback</a> exists for everything else.</p>
+
+      <h2>What happens on the mill</h2>
+      <ol class="flow">
+        <li><strong>The bank.</strong> Putty rests in the valley between the rolls. Gravity and the rolls' surfaces keep pulling it toward the gap.</li>
+        <li><strong>The nip.</strong> The rolls squeeze the putty through a narrow gap. The back roll turns faster than the front, so the gap is a shear zone. This is the only place colours really mix.</li>
+        <li><strong>The sheet.</strong> The front roll is tackier, so the putty leaves the nip stuck to it as a thin sheet and comes round the top to rejoin the bank.</li>
+        <li><strong>Cut &amp; roll.</strong> A mill only moves material front to back. To mix across the width, the operator cuts the sheet off, rolls it into a log and feeds it back in end-first. ColorMill scripts that move.</li>
+      </ol>
+
+      <h2>The tech, in six pieces</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Material points on the GPU</h3>
+          <p>The putty is hundreds of thousands of particles (85k to 970k, depending on the quality preset) simulated with the Material Point Method in its MLS-MPM form. Each substep the particles scatter mass and momentum to a background grid, the grid applies gravity and the rolls, and the particles read the result back. Every stage is a WebGPU compute shader. A fixed number of substeps runs per frame, so a run is deterministic whatever the frame rate.</p>
+        </div>
+        <div class="card">
+          <h3>A putty, not a fluid</h3>
+          <p>Uncured silicone holds its shape under gravity, yields under the nip and does not spring back. The material model is an elastic solid with a small yield band and a short relaxation time, so it keeps a bank on top of the rolls, flows through the gap, and forms a continuous sheet instead of a puddle or a lace.</p>
+        </div>
+        <div class="card">
+          <h3>Rolls as boundary conditions</h3>
+          <p>The rolls are analytic cylinders applied to the grid. The front roll is sticky within a thin band, so the sheet follows it. The back roll turns faster and lets material separate from it with Coulomb friction. That asymmetry is why the sheet ends up on the front roll, exactly as on a real mill, and the speed ratio is a slider.</p>
+        </div>
+        <div class="card">
+          <h3>Pigment in Mixbox space</h3>
+          <p>Every particle carries a Mixbox latent, a small vector describing the pigments it holds, plus a pigment load. The base is clear, so a tap drops a chunk of concentrated masterbatch. Mixing is driven by the local shear rate: colours stay crisp in the resting bank and blend in the nip. Because it happens in pigment space, blue and yellow make green, not grey.</p>
+        </div>
+        <div class="card">
+          <h3>The operator's move</h3>
+          <p>Cut &amp; roll takes everything on the mill, winds it into a volume-preserving log standing over the nip, and feeds it down onto the pile the rolls are eating. Material from every position along the roll ends up in the log's cross-section and is spread back across the width as the nip flattens it. Nothing is lost or invented.</p>
+        </div>
+        <div class="card">
+          <h3>Ray-marched rendering</h3>
+          <p>The particles are packed into 3D textures of density and pigment. A single fullscreen pass marches rays through them, finds the putty's surface, lights it as a glossy silicone with a colour that gets deeper where the pigment load is higher, and composites the brushed-metal rolls and tray analytically so they stay crisp at any grid resolution.</p>
+        </div>
+      </div>
+
+      <h2>Numbers that give it scale</h2>
+      <table>
+        <tr><th>Thing</th><th>Value</th></tr>
+        <tr><td>One simulation unit</td><td>about 0.2 m, so the rolls are roughly 64 mm across and 300 mm long</td></tr>
+        <tr><td>Default batch</td><td>about 1.2 L of putty (the drawer offers 0.5&times; to 3&times;)</td></tr>
+        <tr><td>Grid</td><td>48 to 108 cells per side, rebuilt every substep</td></tr>
+        <tr><td>Sim speed</td><td>about 0.8&times; real time at 60 fps on the default preset; the HUD shows the actual ratio</td></tr>
+        <tr><td>Pigment drop spots</td><td>6 fixed positions along the roll; the strip in the bottom bar picks which</td></tr>
+      </table>
+
+      <h2>Using it</h2>
+      <ul>
+        <li><strong>Tap a colour</strong> to set a chunk of pigmented putty down on the bank. The strip of dots picks where along the roll it lands, and chunks stack on whatever is already there.</li>
+        <li><strong>Cut &amp; roll</strong> (F) rolls the sheet up and feeds it back in end-first. Do it a few times and stripes become a blend.</li>
+        <li><strong>The drawer</strong> (P) has roll speed, speed ratio, nip gap, dispersion, gravity, batch size and quality preset, plus live stats.</li>
+        <li><strong>Drag</strong> to orbit, wheel or pinch to zoom, double-tap for the front view. Space pauses, R resets.</li>
+      </ul>
+
+      <h2>Dig deeper</h2>
+      <p>This page is the short version. The detailed pages hang off it and will grow over time:</p>
+      <ul class="links">
+        <li><a class="inline" href="project.html">Project notes</a>: the guided tour, with the mill diagram, the physics pipeline stage by stage, presets and how v2 differs from v1.</li>
+        <li><a class="inline" href="https://github.com/andrewboudreau/ColorMill/blob/main/docs/design-v2.md">Design spec</a>: the normative description of the solver, material model, boundaries, pigment and operator move, with the reasoning behind each choice.</li>
+        <li><a class="inline" href="https://github.com/andrewboudreau/ColorMill/blob/main/docs/research.md">Research log</a>: what was tried, what was measured, what was rejected.</li>
+        <li><a class="inline" href="resources.html">Resources</a>: references, vocabulary and the papers the solver is built on.</li>
+        <li><a class="inline" href="pigment.html">Pigment demo</a>: Mixbox mixing next to naive RGB, side by side.</li>
+        <li><a class="inline" href="https://github.com/andrewboudreau/ColorMill">Source</a>: TypeScript and WGSL, MIT licensed except for the vendored Mixbox library.</li>
+      </ul>
+    </main>
+  </body>
+</html>

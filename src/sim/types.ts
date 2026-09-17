@@ -120,7 +120,11 @@ export interface DebugApi {
   /** Last frame's stats */
   stats(): SimStats;
   /** Inject a named pigment (key of PIGMENTS) at a random bank spot, as a UI tap would. */
-  tapPigment(name: string): void;
+  tapPigment(name: string, slot?: number): void;
+  /** Choose the drop slot (0-based, left to right) that taps land on. */
+  setDropSlot(slot: number): void;
+  /** the drop slot taps currently land on */
+  readonly dropSlot: number;
   /** Switch preset (rebuilds the sim), resolves when ready */
   setQuality(preset: 'low' | 'medium' | 'high' | 'ultra'): Promise<void>;
   /** Render the current frame offscreen and return RGBA8 pixels (works where canvas presentation does not). */

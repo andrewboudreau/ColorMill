@@ -420,6 +420,41 @@ roll axis. Modelled as a scripted kinematic move:
 Nothing is placed inside existing material and no material is left behind. Exposed as
 `GpuMpmSim.cutAndFold()`; the UI button is "Cut & roll" (F).
 
+### 6b. Cut & fold (the flop)
+
+The other move an operator makes, and the one most milling actually uses: cut
+the sheet across at the middle of the roll, lift what is on top of the mill on
+one side and flop it over onto the other half, like turning a page hinged on
+the cut. Sides alternate. Same kernels, mode `P.fold.x` = 2 (the x < L/2 half
+is lifted) or 3 (the x ≥ L/2 half); `GpuMpmSim.cutAndFlop(side)`, UI button
+"Cut & fold" (C), which alternates the side.
+
+1. **Select** what is on top of the mill: material above the axes and above
+   the mill surface (roll crowns or channel floor), between the rolls' 50°
+   lines (`FLOP_CAP_SIN` = sin 50°): the bank in the pocket, and the sheet
+   over the front crown. The sheet down the front face and the channel are
+   left; they keep the lifted side's nip fed until the sheet comes round.
+   Both halves are binned by z (`NB` bins over the domain depth) and y (`NS`
+   slices over one unit above the axes); only the lifted half is flagged.
+2. **Tables**: per (half, z bin) the top of the column, the 97th percentile
+   of its particles (a few strays above do not count), or the mill surface
+   where the column is empty.
+3. **Flop** (`FLOP_SECONDS` = 0.8 s): each lifted particle turns about the
+   hinge line x = L/2, y = (topLift + topRecv)/2 of its own z column, through
+   π (smoothstep), in the plane of its z. It lands mirrored in x with the
+   flap's former top resting on the receiving half's top (half a cell of
+   clearance) and its former underside on the outside, so a flap of any
+   thickness profile stacks exactly on whatever is there: the bank on the
+   bank, the crown sheet on the crown sheet. Highest point of the swing is
+   half the roll length above the hinge, inside the domain's headroom.
+4. **Release** at rest, `F = I`, `C = 0`, as for the log. The rolls take it
+   from there: the doubled side feeds the nip, the emptied side refills from
+   its own lower sheet.
+
+Every flop interleaves the two halves of the width once; alternating sides
+walks material back and forth across the roll, which is where a real mill's
+lateral mixing comes from.
+
 ---
 
 ## 7. Time stepping and presets
@@ -502,14 +537,14 @@ so the renderer can be tested with a procedural volume without the sim.
   palette (large round swatches; tap = a masterbatch chunk of radius
   `PIGMENT_CHUNK_RADIUS` set down on top of whatever is over the nip at the
   chosen slot, so repeated taps stack), a colour picker swatch, "Cut & roll",
-  "Clear pigment", "Reset", Pause.
+  "Cut & fold" (alternating sides), "Clear pigment", "Reset", Pause.
 - Right drawer (collapsible; hidden by default on narrow screens): sliders
   for roller speed (rpm shown), friction ratio, nip gap, dispersion, gravity;
   quality select; camera auto-orbit toggle; stats (particles, grid, fps,
   ms/frame, sim speed).
 - Drag in the viewport orbits; wheel/pinch zooms; double-tap resets the
   camera to the front view.
-- Keyboard: Space pause, R reset, F cut&roll, 1–8 pigments, arrows speed/gap,
+- Keyboard: Space pause, R reset, F cut&roll, C cut&fold, 1–8 pigments, arrows speed/gap,
   `[` / `]` drop slot, P drawer.
 
 ---

@@ -57,6 +57,24 @@
 const NB : u32 = 128u;          // arc bins
 const NS : u32 = 32u;           // depth slices per bin, square-root spaced (fine near the roll, coarse deep in the bank)
 const DMAX : f32 = 0.5;         // depth covered by the slices (sim units); deeper material lands in the last slice
+
+// Second operator move, "cut & fold" (P.fold.x = 2: the x < L/2 half is lifted, 3: the
+// x >= L/2 half): the operator cuts the sheet across at the middle of the roll,
+// peels what is on top of the mill on one side (the bank between the rolls and
+// the sheet over the front roll's crown, out to FLOP_CAP_SIN of the radius) and
+// flops it over onto the other half like turning a page, hinged on the cut. In
+// the flop the bins run along z (NB over the domain depth) and the slices up y
+// (NS over FLOP_YSPAN above the axes); the tables hold, per bin, the top of
+// each half's material (a high percentile of its column, or the mill surface
+// where the column is empty). A particle at (x, y) turns about the hinge line
+// x = L/2, y = (topLift + topRecv)/2 of its column through FLOP_SECONDS, so it
+// lands mirrored in x with the flap's former top resting on the receiving
+// half's top and its former underside on the outside. Nothing else moves; the
+// flap is released at rest and the rolls take it from there.
+const FLOP_SECONDS : f32 = 0.8;
+const FLOP_CAP_SIN : f32 = 0.766;   // sin 50 deg: how far down the crown the flap reaches
+const FLOP_YSPAN : f32 = 1.0;       // height above the axes covered by the y slices
+const FLOP_TOP_Q : f32 = 0.97;      // column top = this quantile of its particles
 const INFO_COUNT : u32 = 8u;
 const INFO_DEPTH : u32 = 8u + 2u * NB;
 const HDR : u32 = NB * 8u;
@@ -66,6 +84,37 @@ fn arcTotal() -> f32 { return 2.0 * PI * P.front.w; }
 /** Fractional depth slice of a radial depth dr: slice j spans DMAX * (j/NS)^2 .. DMAX * ((j+1)/NS)^2. */
 fn depthSlice(dr : f32) -> f32 { return f32(NS) * sqrt(max(dr, 0.0) / DMAX); }
 fn binWidth() -> f32 { return arcTotal() / f32(NB); }
+
+fn isFlop() -> bool { return P.fold.x > 1.5; }
+/** Which half of the width the flop lifts (0: x < L/2, 1: x >= L/2). */
+fn flopSide() -> u32 { return select(0u, 1u, P.fold.x > 2.5); }
+fn flopBinWidth() -> f32 { return P.domain.z / f32(NB); }
+fn flopSliceHeight() -> f32 { return FLOP_YSPAN / f32(NS); }
+
+/** Height of the mill's top surface at depth z: the roll crowns, or the channel floor between them. */
+fn millTop(z : f32) -> f32 {
+  let R = P.front.w;
+  var top = P.front.x + 0.06;
+  let dzf = z - P.front.y;
+  if (abs(dzf) < R) { top = max(top, P.front.x + sqrt(R * R - dzf * dzf)); }
+  let dzb = z - P.back.y;
+  if (abs(dzb) < R) { top = max(top, P.back.x + sqrt(R * R - dzb * dzb)); }
+  return top;
+}
+
+/** Material the flop can take: on top of the mill, between the crowns' 50-degree lines. */
+fn inFlopRegion(x : vec3<f32>) -> bool {
+  let reach = FLOP_CAP_SIN * P.front.w;
+  return x.y > P.front.x + 0.06 && x.z >= P.back.y - reach && x.z <= P.front.y + reach
+      && x.y > millTop(x.z) - 0.5 * P.hdt.x;
+}
+
+/** Top of half k's material at depth z (linear between bins). */
+fn flopTop(k : u32, z : f32) -> f32 {
+  let fb = clamp(z / flopBinWidth() - 0.5, 0.0, f32(NB) - 1.0001);
+  let b = u32(fb);
+  return mix(tables[b * 8u + k], tables[(b + 1u) * 8u + k], fb - f32(b));
+}
 
 /** Top of what the nip is currently eating under the log (or the roll tops). */
 fn pileTop() -> f32 {
@@ -142,6 +191,21 @@ fn select_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgrou
   let p = particleIndex(gid, nwg);
   if (p >= P.grid.w) { return; }
   let x = pos[p].xyz;
+  if (isFlop()) {
+    // bin what is on top of the mill by (half, z bin, y slice); flag the lifted half
+    if (!inFlopRegion(x)) { return; }
+    let k = select(0u, 1u, x.x >= 0.5 * P.fold2.y);
+    let b = min(u32(x.z / flopBinWidth()), NB - 1u);
+    let j = min(u32(max(x.y - P.front.x, 0.0) / flopSliceHeight()), NS - 1u);
+    atomicAdd(&info[INFO_COUNT + k * NB + b], 1u);
+    atomicAdd(&info[INFO_DEPTH + (k * NB + b) * NS + j], 1u);
+    if (k == flopSide()) {
+      flags[p] = flags[p] | 1u;
+      fold0[p] = vec4<f32>(x, 0.0);
+      atomicAdd(&info[3], 1u);
+    }
+    return;
+  }
   let R = P.front.w;
   let dy = x.y - P.front.x;
   let dz = x.z - P.front.y;
@@ -173,6 +237,33 @@ var<workgroup> wRho : array<f32, NB>;
 @compute @workgroup_size(128)
 fn tables_(@builtin(local_invocation_id) lid : vec3<u32>) {
   let b = lid.x;
+  if (isFlop()) {
+    // per (half, z bin): the top of the column, FLOP_TOP_Q of the way up its particles
+    // (a few strays above do not count), or the mill surface where it is empty
+    let z = (f32(b) + 0.5) * flopBinWidth();
+    for (var k = 0u; k < 2u; k++) {
+      let n = atomicLoad(&info[INFO_COUNT + k * NB + b]);
+      var top = millTop(z);
+      if (n > 0u) {
+        let want = FLOP_TOP_Q * f32(n);
+        var acc = 0.0;
+        var j = 0u;
+        for (; j < NS; j++) {
+          let nj = f32(atomicLoad(&info[INFO_DEPTH + (k * NB + b) * NS + j]));
+          if (acc + nj >= want) {
+            top = P.front.x + (f32(j) + (want - acc) / max(nj, 1.0)) * flopSliceHeight();
+            break;
+          }
+          acc += nj;
+        }
+        if (j == NS) { top = P.front.x + FLOP_YSPAN; }
+        top = max(top, millTop(z));
+      }
+      tables[b * 8u + k] = top;
+    }
+    if (b == 0u) { tables[HDR + 3u] = f32(atomicLoad(&info[3])); }
+    return;
+  }
   let h = P.hdt.x;
   let L = P.fold2.y;
   let R = P.front.w;
@@ -284,8 +375,37 @@ fn move_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
   if ((flags[p] & 1u) == 0u) { return; }
   let f0 = fold0[p];
   let p0 = f0.xyz;
-  let pLog = foldTarget(p0, f0.w);
   let t = P.fold.y;
+  if (isFlop()) {
+    // turn the page: rotate (x, y) about the hinge line at the cut, in the plane of
+    // the particle's own z, from lying on its half to lying mirrored on the other
+    let L = P.fold2.y;
+    let kLift = flopSide();
+    let topLift = flopTop(kLift, p0.z);
+    let topRecv = flopTop(1u - kLift, p0.z) + 0.5 * P.hdt.x;   // half a cell of clearance
+    let yHinge = 0.5 * (topLift + topRecv);
+    let dirX = select(-1.0, 1.0, kLift == 0u);   // the lifted half is at x = L/2 + dirX * u, u <= 0
+    let u = -abs(p0.x - 0.5 * L);
+    let w = p0.y - yHinge;
+    let tau = clamp(t / FLOP_SECONDS, 0.0, 1.0);
+    let sm = tau * tau * (3.0 - 2.0 * tau);
+    let phi = PI * sm;
+    let dphi = PI * 6.0 * tau * (1.0 - tau) / FLOP_SECONDS;
+    let u1 = u * cos(phi) + w * sin(phi);
+    let w1 = -u * sin(phi) + w * cos(phi);
+    let lo = vec3<f32>(1.5 * P.hdt.x);
+    let hi = vec3<f32>(P.domain.x, P.fold3.w, P.domain.z) - lo;
+    let x = clamp(vec3<f32>(0.5 * L + dirX * u1, yHinge + w1, p0.z), lo, hi);
+    let v = vec3<f32>(dirX * w1 * dphi, -u1 * dphi, 0.0);
+    pos[p] = vec4<f32>(x, pos[p].w);
+    if (t >= FLOP_SECONDS) {
+      release(p, vec3<f32>(0.0));
+    } else {
+      vel[p] = vec4<f32>(v, 0.0);
+    }
+    return;
+  }
+  let pLog = foldTarget(p0, f0.w);
   let tRoll = P.fold.z;
   let feed = P.fold.w;
   let a = logAxis();
@@ -320,5 +440,6 @@ fn finish_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgrou
   let p = particleIndex(gid, nwg);
   if (p >= P.grid.w) { return; }
   if ((flags[p] & 1u) == 0u) { return; }
+  if (isFlop()) { release(p, vec3<f32>(0.0)); return; }
   release(p, -logAxis() * P.fold.w);
 }

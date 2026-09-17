@@ -1,5 +1,5 @@
 /**
- * Keyboard shortcuts (design §9): Space pause, R reset, F cut & roll,
+ * Keyboard shortcuts (design §9): Space pause, R reset, F cut & roll, C cut & fold,
  * 1–8 pigments, arrows speed (up/down) and nip gap (left/right), [ and ]
  * move the pigment drop slot, P toggles the settings drawer. Keys are ignored while a form control has focus.
  */
@@ -8,6 +8,8 @@ export interface KeyActions {
   togglePause(): void;
   reset(): void;
   cutFold(): void;
+  /** cut & fold: flop one half of the top of the mill over onto the other */
+  cutFlop(): void;
   /** zero-based palette index */
   pigment(index: number): void;
   /** +1 / -1 notches */
@@ -35,6 +37,7 @@ export function installKeyboard(target: Window | HTMLElement, a: KeyActions): ()
       case ' ': a.togglePause(); break;
       case 'r': case 'R': a.reset(); break;
       case 'f': case 'F': a.cutFold(); break;
+      case 'c': case 'C': a.cutFlop(); break;
       case 'p': case 'P': a.togglePanel(); break;
       case 'ArrowUp': a.speed(1); break;
       case 'ArrowDown': a.speed(-1); break;

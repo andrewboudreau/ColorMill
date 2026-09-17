@@ -1,8 +1,8 @@
 /**
  * Bottom bar: the drop-slot strip (where along the roll the next tap lands),
  * large round pigment swatches (tap = inject), a custom colour swatch backed
- * by <input type="color">, and the action buttons (Cut & roll, Clear pigment,
- * Reset, Pause/Play).
+ * by <input type="color">, and the action buttons (Cut & roll, Cut & fold,
+ * Clear pigment, Reset, Pause/Play).
  */
 import { PALETTE_ORDER, PIGMENTS } from '../color/pigments';
 import { DROP_SLOTS } from '../config/mill';
@@ -14,6 +14,8 @@ export interface PaletteCallbacks {
   /** the picker closed on a new colour ('#rrggbb') */
   onCustom(hex: string): void;
   onCutFold(): void;
+  /** cut the sheet at the middle and flop one half over onto the other (sides alternate) */
+  onCutFlop(): void;
   onClear(): void;
   onReset(): void;
   onTogglePause(): void;
@@ -24,6 +26,7 @@ export class Palette {
   readonly customInput: HTMLInputElement;
   private readonly pauseButton: HTMLButtonElement;
   private readonly foldButton: HTMLButtonElement;
+  private readonly flopButton: HTMLButtonElement;
   private readonly swatches = new Map<string, HTMLButtonElement>();
   private readonly slotButtons: HTMLButtonElement[] = [];
   private slot = 0;
@@ -106,6 +109,7 @@ export class Palette {
     const actions = document.createElement('div');
     actions.className = 'cm-actions';
     this.foldButton = this.button(actions, 'Cut & roll', 'F', () => this.cb.onCutFold());
+    this.flopButton = this.button(actions, 'Cut & fold', 'C', () => this.cb.onCutFlop());
     this.button(actions, 'Clear pigment', undefined, () => this.cb.onClear());
     this.button(actions, 'Reset', 'R', () => this.cb.onReset());
     this.pauseButton = this.button(actions, 'Pause', 'Space', () => this.cb.onTogglePause());
@@ -169,6 +173,7 @@ export class Palette {
 
   setFoldBusy(busy: boolean): void {
     this.foldButton.disabled = busy;
+    this.flopButton.disabled = busy;
   }
 
   /** Pigment keys in on-screen order (for the 1–8 shortcuts). */

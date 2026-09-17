@@ -98,6 +98,12 @@ export interface GpuMpmSim {
   clearPigment(): void;
   /** Start the scripted operator move: cut the sheet off the front roll, roll it into a log, turn it and set it on the bank (design §6). No-op if one is running. */
   cutAndFold(): void;
+  /** Start the other operator move: cut the sheet across at the middle of the roll and flop what is on
+   *  top of the mill on `side` (the x < L/2 half for 'left') over onto the other half, like turning a
+   *  page (design §6). No-op if a move is running. */
+  cutAndFlop(side: 'left' | 'right'): void;
+  /** true while an operator move (cut & roll or cut & fold) is running */
+  readonly operatorBusy: boolean;
   /** Read particle state back to the CPU (slow; tests and diagnostics only). */
   readParticles(): Promise<ParticleSnapshot>;
   /** Read the packed density volume (volA red channel) back as float32, node-major (i fastest). */

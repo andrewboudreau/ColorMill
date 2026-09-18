@@ -212,7 +212,7 @@ export default async function run() {
     }), EVAL_TIMEOUT_MS, 'read sim config');
     console.log(`  preset ${cfg.preset}, grid ${cfg.dims.nx}x${cfg.dims.ny}x${cfg.dims.nz} (h=${cfg.dims.h}), ${cfg.particleCount} particles`);
     assert(cfg.preset === 'low', `?preset=low selected the low preset (got ${cfg.preset})`);
-    assert(cfg.dims.nx === 49 && cfg.dims.ny === 73 && cfg.dims.nz === 49, `low preset grid is 49x73x49 nodes (got ${cfg.dims.nx}x${cfg.dims.ny}x${cfg.dims.nz})`);
+    assert(cfg.dims.nx === 49 && cfg.dims.ny === 73 && cfg.dims.nz === 65, `low preset grid is 49x73x65 nodes (got ${cfg.dims.nx}x${cfg.dims.ny}x${cfg.dims.nz})`);
     assert(cfg.particleCount > 10_000, `low preset seeds a bank (particleCount ${cfg.particleCount})`);
 
     // --- 2. run and check the particle state ---------------------------------------

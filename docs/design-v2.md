@@ -26,7 +26,7 @@ gap — we exaggerate the gap so it is resolvable on the grid).
 | Symbol | Value | Meaning |
 | --- | --- | --- |
 | `L` | 1.5 | Roller (and domain) length along x |
-| `domain` | (1.5, 2.25, 1.5) | Domain size (x, y, z); origin at (0,0,0); the headroom holds the operator's standing log and dropped pigment chunks |
+| `domain` | (1.5, 2.25, 2.0) | Domain size (x, y, z); origin at (0,0,0); the headroom holds the operator's standing log and dropped pigment chunks, the depth in front of the front roll the cut & fold flap's swing |
 | `R` | 0.32 | Roller radius |
 | `yc` | 0.55 | Height of both roller axes |
 | `zNip` | 0.75 | z of the nip centre (mid-plane between rollers) |
@@ -54,10 +54,10 @@ Node counts are `N = round(domain / h) + 1` per axis; see
 
 | preset | cellsPerUnit | h | cells (x,y,z) | seeded particles (approx) |
 | --- | --- | --- | --- | --- |
-| low | 32 | 0.03125 | 48×72×48 | 39k at 1× batch (+50% pool) |
-| medium | 48 | 0.02083 | 72×108×72 | 133k at 1× batch (+50% pool) |
-| high (default) | 64 | 0.015625 | 96×144×96 | 315k at 1× batch (+50% pool) |
-| ultra | 72 | 0.01389 | 108×162×108 | 448k at 1× batch (+50% pool) |
+| low | 32 | 0.03125 | 48×72×64 | 39k at 1× batch (+50% pool) |
+| medium | 48 | 0.02083 | 72×108×96 | 133k at 1× batch (+50% pool) |
+| high (default) | 64 | 0.015625 | 96×144×128 | 315k at 1× batch (+50% pool) |
+| ultra | 72 | 0.01389 | 108×162×144 | 448k at 1× batch (+50% pool) |
 
 **Batch size.** `MillConfig.batch` is a volume multiplier on the seeded
 material (0.5×–3× from the panel, 0.25×–4× via `?batch=`); the bank top is
@@ -457,11 +457,14 @@ is pressed.
    past the crown. A particle lands at its image, outside the sheet there by
    the flap's thickness less its own depth (roll side up), or, where the image
    falls behind the crown, on the bank top there at z = crown + R·θ'. It gets
-   there as a page turning on the cut: straight toward its image, lifted up by
-   `FLOP_LIFT` = 0.35 times its distance from the hinge (relative to the
-   corner's), so halfway the flap stands on the cut line with the corner at
-   the top. Nothing goes further forward than the front face; the corner rises
-   about half a roll radius above it.
+   there as a page turning on the cut: a rigid rotation of the whole flap
+   through π about the cut line in space (the chord from the top corner at the
+   roll end to the middle at the bottom), out from the roll and over, so the
+   flap keeps its shape and the corner swings furthest, about 0.46 units out
+   in front of the front face (the domain is 2.0 deep to give it that room);
+   the chord runs inside the roll, so the swing is held outside the roll
+   surface and the flap settles from the rigid image onto its landing spot
+   over the last stretch.
 4. **Release** at rest, `F = I`, `C = 0`, as for the log. The roll carries the
    doubled sheet up into the nip; the bare patch on the cut side is covered
    again by the sheet coming up from the nip within half a turn.

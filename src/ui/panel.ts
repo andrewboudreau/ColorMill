@@ -15,6 +15,8 @@ export interface PanelCallbacks {
   /** batch size multiplier (rebuilds the bank) */
   onBatch(batch: number): void;
   onAutoOrbit(on: boolean): void;
+  /** "Copy start link": a URL that reproduces this session's pigment drops */
+  onCopyStartLink(): void;
 }
 
 export interface PanelStats {
@@ -211,6 +213,16 @@ export class Panel {
     repo.textContent = 'Source on GitHub';
     about.append(how, ' · ', repo);
     asec.appendChild(about);
+    const link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'cm-btn';
+    link.name = 'copyStartLink';
+    link.textContent = 'Copy start link';
+    link.title = 'Copy a link that starts the mill with the pigment chunks dropped so far';
+    link.style.minHeight = '32px';
+    link.style.marginTop = '8px';
+    link.addEventListener('click', () => this.cb.onCopyStartLink());
+    asec.appendChild(link);
 
     this.applyOpen();
   }

@@ -91,7 +91,6 @@ const FLOP_YSPAN : f32 = 1.0;       // height above the axes covered by the rece
 const FLOP_TOP_Q : f32 = 0.97;      // column top / flap thickness = this quantile of its particles
 const FLAP_TH_MIN : f32 = 0.08;     // flap starts just in front of the crown line (rad down from the crown)
 const FLAP_TH_MAX : f32 = 1.92;     // and reaches a little below the axis level, where the sheet comes up from the nip
-const FLOP_LIFT : f32 = 0.35;       // how high the far corner rises above the straight path mid-fold
 const INFO_COUNT : u32 = 8u;
 const INFO_DEPTH : u32 = 8u + 2u * NB;
 const HDR : u32 = NB * 8u;
@@ -457,8 +456,6 @@ fn move_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
     let q = vec2<f32>(select(L - p0.x, p0.x, left), R * (th - FLAP_TH_MIN));
     let d = normalize(vec2<f32>(0.5 * L, S));
     let q1 = 2.0 * dot(q, d) * d - q;             // mirror image across the cut
-    let dist = abs(q.x * d.y - q.y * d.x);        // distance from the hinge
-    let distMax = S * 0.5 * L / length(vec2<f32>(0.5 * L, S));
     let x1 = clamp(select(L - q1.x, q1.x, left), 1.5 * h, L - 1.5 * h);
     let th1 = FLAP_TH_MIN + q1.y / R;
     let thick = flapThick(th);
@@ -472,25 +469,41 @@ fn move_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
       let z1 = P.front.y + R * th1;
       p1 = vec3<f32>(x1, flopTop(z1) + 0.5 * h + max(thick - dr, 0.0), z1);
     }
-    // the turn: straight to the mirror image, lifted up by the distance from the hinge,
-    // so halfway the flap stands on the cut line with the corner at the top
+    // the turn: the flap swings up as a page on its hinge, the cut line in space (from
+    // the top corner at the roll end to the middle at the bottom), the whole flap
+    // through the same angle so it keeps its shape, out from the roll and over onto
+    // its mirror image; it settles onto the landing spot over the last stretch (the
+    // hinge is a chord inside the roll, so the rigid image sits a little under the
+    // surface and the swing is held outside the roll)
+    let g = P.fold2.z;
+    let xEnd = select(L, 0.0, left);
+    let a3 = vec3<f32>(xEnd, P.front.x + (R + g) * cos(FLAP_TH_MIN), P.front.y + (R + g) * sin(FLAP_TH_MIN));
+    let c3 = vec3<f32>(0.5 * L, P.front.x + (R + g) * cos(FLAP_TH_MAX), P.front.y + (R + g) * sin(FLAP_TH_MAX));
+    let e = normalize(c3 - a3);
+    // sense of the turn: the corner comes off the roll outward
+    let qb = vec3<f32>(xEnd, c3.y, c3.z) - a3;
+    let qbp = qb - e * dot(e, qb);
+    let sgn = sign(dot(cross(e, qbp), vec3<f32>(0.0, cos(FLAP_TH_MAX), sin(FLAP_TH_MAX))));
+    let q3 = p0 - a3;
+    let qpar = e * dot(e, q3);
+    let qperp = q3 - qpar;
     let tau = clamp(t / FLOP_SECONDS, 0.0, 1.0);
     let u = tau * tau * (3.0 - 2.0 * tau);
     let dudt = 6.0 * tau * (1.0 - tau) / FLOP_SECONDS;
-    let lift = FLOP_LIFT * (dist / distMax);
-    // interpolated around the front axis (a straight chord would dip under the surface)
-    let rho0 = R + dr;
-    let a0 = th;
-    let rho1 = sqrt((p1.y - P.front.x) * (p1.y - P.front.x) + (p1.z - P.front.y) * (p1.z - P.front.y));
-    let a1 = atan2(p1.z - P.front.y, p1.y - P.front.x);
-    let a = mix(a0, a1, u);
-    let rho = mix(rho0, rho1, u);
+    let phi = sgn * PI * u;
+    var rigid = a3 + qpar + qperp * cos(phi) + cross(e, qperp) * sin(phi);
+    var drigid = (cross(e, qperp) * cos(phi) - qperp * sin(phi)) * (sgn * PI);
+    let rel = rigid.yz - vec2<f32>(P.front.x, P.front.y);
+    let dRoll = length(rel);
+    let rMin = R + dr + 0.5 * h;
+    if (dRoll < rMin) { rigid = vec3<f32>(rigid.x, vec2<f32>(P.front.x, P.front.y) + rel * (rMin / max(dRoll, 1e-4))); }
+    let sw = clamp((u - 0.7) / 0.3, 0.0, 1.0);
+    let w = sw * sw * (3.0 - 2.0 * sw);
+    let dwdu = 6.0 * sw * (1.0 - sw) / 0.3;
     let lo = vec3<f32>(1.5 * h);
     let hi = vec3<f32>(P.domain.x, P.fold3.w, P.domain.z) - lo;
-    let x = clamp(vec3<f32>(mix(p0.x, x1, u), P.front.x + rho * cos(a) + lift * sin(PI * u), P.front.y + rho * sin(a)), lo, hi);
-    let v = vec3<f32>(x1 - p0.x,
-                      (rho1 - rho0) * cos(a) - rho * sin(a) * (a1 - a0) + lift * PI * cos(PI * u),
-                      (rho1 - rho0) * sin(a) + rho * cos(a) * (a1 - a0)) * dudt;
+    let x = clamp(mix(rigid, p1, w), lo, hi);
+    let v = ((1.0 - w) * drigid + (p1 - rigid) * dwdu) * dudt;
     pos[p] = vec4<f32>(x, pos[p].w);
     if (t >= FLOP_SECONDS) {
       release(p, vec3<f32>(0.0));

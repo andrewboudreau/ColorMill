@@ -55,8 +55,8 @@ export const FOLD_SLICES = 32;
 /** Total script length: roll, then feed the log (the material folded in half: L/2 long,
  * plus the tilted end face of a log up to ~0.7 units across) through the nip. */
 export const FOLD_DURATION = FOLD_ROLL_SECONDS + (0.5 * GEOMETRY.length + 0.6) / FOLD_FEED_SPEED + 0.3;
-/** Cut & fold (peel the cut flap off the front roll and swing it over onto the other half; fold.wgsl): the swing takes FLOP_SECONDS. */
-export const FLOP_SECONDS = 1.0;
+/** Cut & fold (fold the cut flap over the cut onto the sheet beside it; fold.wgsl): the fold takes FLOP_SECONDS. */
+export const FLOP_SECONDS = 0.8;
 export const FLOP_DURATION = FLOP_SECONDS + 0.02;
 /** Operator-move modes carried in P.fold.x: 1 = cut & roll (log), 2 / 3 = cut & fold lifting the x < L/2 / x >= L/2 half. */
 export type FoldMode = 0 | 1 | 2 | 3;

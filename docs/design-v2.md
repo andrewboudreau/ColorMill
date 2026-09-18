@@ -429,13 +429,13 @@ the roll end toward the middle while the sheet comes up past it. Because the
 sheet moves during the stroke the cut is a diagonal on the sheet (the end was
 cut first and has moved up since), and the freed flap is a **triangle**: a
 point at the top near the roll end, wide at the bottom where the sheet leaves
-the nip. The operator takes the bottom corner, peels the flap off the roll,
-swings it up over the crown and across, and lays it on the bank on the other
-half, roll side up, where the nip takes it in again. Sides alternate. Same
+the nip. The operator takes the bottom corner and folds the flap over the cut
+onto the sheet beside it, toward the middle, so what was against the roll is
+now on top and the doubled sheet rides up into the nip. Ends alternate. Same
 kernels as the log, mode `P.fold.x` = 2 (cut from the x = 0 end) or 3 (from
 the x = L end); `GpuMpmSim.cutAndFlop(side)`, UI button "Cut & fold" (C),
-which alternates. No knife is drawn: the flap simply starts to peel when the
-button is pressed.
+which alternates. No knife is drawn: the flap starts to fold when the button
+is pressed.
 
 1. **Select** the flap: the sheet on the front face (radial depth off the
    front roll below `flapDepth()` = 3 gap + h, angle `FLAP_TH_MIN`..
@@ -443,31 +443,35 @@ button is pressed.
    of the crown line to a little below the axis level) on the cut side of the
    diagonal `cutX(θ)`, which runs from 0 at the top to L/2 at the bottom. It
    is binned by arc (`NB` bins) and depth (`NS` linear slices) and flagged.
-   The receiving half's top-of-mill material (above the axes and the mill
+   The rest of that half's top-of-mill material (above the axes and the mill
    surface, between the crowns' 50° lines) is binned by z (`NB` bins over the
-   domain depth) and height (`NS` slices over one unit above the axes).
+   domain depth) and height (`NS` slices over one unit above the axes), for
+   the part of the fold that reaches back over the crown.
 2. **Tables**: per arc bin the flap's thickness (the 97th percentile of its
-   depth, at least a cell); per z bin the receiving half's top (the same
-   percentile of its column, or the mill surface where it is empty).
-3. **Swing** (`FLOP_SECONDS` = 1 s): a particle at angle θ down the front
-   face lands mirrored in x, at z = crown − R·(θ − θmin) (the flap unrolled
-   flat back over the crown and bank, length kept) and y = topRecv(z) + h/2 +
-   (thickness − depth), so what was against the roll is now on top. It gets
-   there by swinging about the crown line: its polar angle around the hinge
-   (axis height + R + 2 gap + h, at the crown's z) goes from where it hangs
-   in front, up through vertical, to where it lies behind, its distance from
-   the hinge bulging out by `FLOP_BULGE` = 0.25 mid-swing (the corner pulled
-   out and thrown over), while x slides across. Highest point stays inside
-   the domain's headroom.
-4. **Release** at rest, `F = I`, `C = 0`, as for the log. The nip takes the
-   flap in on the other side; the bare front face on the cut side is covered
+   depth, at least a cell); per z bin the top of the material behind the
+   crown (the same percentile of its column, or the mill surface where empty).
+3. **Fold** (`FLOP_SECONDS` = 0.8 s): in the sheet's own coordinates (u along
+   the roll from the cut end, s down the front face from the crown) the flap
+   is mirrored across the cut line from (0, 0) to (L/2, S). Its image lies on
+   the sheet beside the cut, toward the middle, with a corner reaching just
+   past the crown. A particle lands at its image, outside the sheet there by
+   the flap's thickness less its own depth (roll side up), or, where the image
+   falls behind the crown, on the bank top there at z = crown + R·θ'. It gets
+   there as a page turning on the cut: straight toward its image, lifted up by
+   `FLOP_LIFT` = 0.35 times its distance from the hinge (relative to the
+   corner's), so halfway the flap stands on the cut line with the corner at
+   the top. Nothing goes further forward than the front face; the corner rises
+   about half a roll radius above it.
+4. **Release** at rest, `F = I`, `C = 0`, as for the log. The roll carries the
+   doubled sheet up into the nip; the bare patch on the cut side is covered
    again by the sheet coming up from the nip within half a turn.
 
-Every flop lays a wedge of one side's sheet onto the other side's bank;
-alternating sides crosses the wedges, which is where a real mill's lateral
+Every fold doubles a wedge of the sheet toward the middle; alternating ends
+walks material in from both sides, which is where a real mill's lateral
 mixing comes from. The diagonal cut is more interface per move than a
 straight one, and moving a wedge of sheet rather than half the mill keeps the
-batch from sloshing from side to side.
+batch from sloshing from side to side. Cut & roll remains the move that
+reaches from one end of the roll to the other.
 
 ---
 

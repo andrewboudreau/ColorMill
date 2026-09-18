@@ -10,10 +10,13 @@
  *
  * Query parameters: ?preset=low|medium|high|ultra overrides the auto-select,
  * ?paused=1 starts paused (deterministic driving via __colormill.stepFrames),
- * ?orbit=1 starts with auto-orbit on.
+ * ?orbit=1 starts with auto-orbit on, ?drops=pigment@slot.size,... starts with
+ * those pigment chunks already set down (src/drops.ts; "Copy start link" in
+ * the drawer produces such a link from the session's drop log).
  */
 import './styles.css';
 import { BASE_LATENT, findPigment, rgbToLatentAsync } from './color/pigments';
+import { formatDrops, parseDrops, type Drop } from './drops';
 import {
   BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres,
   type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
@@ -157,8 +160,14 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   // Automated browsers (Playwright) on software WebGPU cannot present to the
   // canvas; render offscreen there and let the debug API read pixels back.
   const offscreen = navigator.webdriver || query.get('offscreen') === '1';
+  // pigment chunks to set down once the first frame is up (?drops=)
+  const initialDrops = parseDrops(query.get('drops'));
+  // the preset goes into the start link when it was chosen on purpose (URL or panel), not auto-selected
+  let presetPinned = chosen.reason === 'query parameter';
 
   // --- state ------------------------------------------------------------------
+  /** every pigment chunk set down this session (taps, ?drops=, the debug API), for the start link */
+  const dropLog: Drop[] = [];
   let sim: GpuMpmSim | undefined;
   let renderer: Renderer | undefined;
   let orbit: OrbitControls | undefined;
@@ -197,9 +206,10 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     onParam: (key, value) => {
       if (sim) sim.params[key] = value;
     },
-    onQuality: (p) => { adaptive = false; void rebuildSim(p, batch); },
+    onQuality: (p) => { adaptive = false; presetPinned = true; void rebuildSim(p, batch); },
     onBatch: (b) => { void rebuildSim(preset, b); },
-    onAutoOrbit: (on) => { autoOrbit = on; }
+    onAutoOrbit: (on) => { autoOrbit = on; },
+    onCopyStartLink: () => copyStartLink()
   }, { params: { ...DEFAULT_PARAMS }, preset, batch, autoOrbit, open: wideScreen });
 
   // where along the roll a tap lands: one of DROP_SLOTS fixed positions, the
@@ -215,39 +225,93 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   const clampSize = (size: number, fallback: number): number =>
     Number.isFinite(size) ? Math.min(PIGMENT_CHUNK_SIZES.length - 1, Math.max(0, Math.round(size))) : fallback;
   const chunkQuery = query.get('chunk') ?? '';
-  let chunkSize = clampSize(PIGMENT_CHUNK_SIZES.findIndex((s) => s.key === chunkQuery), clampSize(parseInt(chunkQuery, 10) - 1, DEFAULT_CHUNK_SIZE));
-  if (chunkSize < 0) chunkSize = DEFAULT_CHUNK_SIZE;
+  const chunkByKey = PIGMENT_CHUNK_SIZES.findIndex((s) => s.key === chunkQuery);
+  let chunkSize = chunkByKey >= 0 ? chunkByKey : clampSize(parseInt(chunkQuery, 10) - 1, DEFAULT_CHUNK_SIZE);
   const chunkHint = (): void => hud.showHint(`${PIGMENT_CHUNK_SIZES[chunkSize].label} pigment chunks`, 2000);
   const setChunkSize = (size: number): void => {
     chunkSize = clampSize(size, chunkSize);
     palette.setChunkSize(chunkSize);
   };
 
-  const injectLatent = (latent: Latent, slot = dropSlot, size = chunkSize): void => {
-    if (!sim) return;
-    const x = dropSlotX(clampSlot(slot, dropSlot));
-    const radius = PIGMENT_CHUNK_SIZES[clampSize(size, chunkSize)].radius;
+  /**
+   * Set a chunk of pigmented putty down at a drop slot (0-based; default the
+   * operator's current one) at a chunk size (index into PIGMENT_CHUNK_SIZES;
+   * default the current one). `pigment` names it in the drop log: a PIGMENTS
+   * key, or '#rrggbb' for a custom colour. Resolves with the number of
+   * particles added once the chunk is in the sim (so a caller can await it
+   * before the next chunk and have them stack); errors are reported in the
+   * HUD and the promise resolves with 0.
+   */
+  const injectLatent = (latent: Latent, slot = dropSlot, size = chunkSize, pigment = 'titaniumWhite'): Promise<number> => {
+    if (!sim) return Promise.resolve(0);
+    const slotIndex = clampSlot(slot, dropSlot);
+    const sizeIndex = clampSize(size, chunkSize);
+    const x = dropSlotX(slotIndex);
+    const radius = PIGMENT_CHUNK_SIZES[sizeIndex].radius;
     // a dollop on top of whatever material is over the nip at this x (the GPU
     // finds the surface, so chunks stack on each other and it works after the
     // bank has slumped or drained)
     const z = GEOMETRY.nipZ;
     palette.flashSlot();
+    dropLog.push({ pigment, slot: slotIndex + 1, size: PIGMENT_CHUNK_SIZES[sizeIndex].key });
     // a chunk of coloured putty set down on the bank; when the reserved pool is
     // used up, tint the material at the surface instead
     const s = sim;
-    s.addPigmentChunk(x, z, radius, latent).then((added) => {
+    return s.addPigmentChunk(x, z, radius, latent).then((added) => {
       if (added === 0 && sim === s) {
         s.addPigmentOnSurface(x, z, radius, latent);
         hud.showHint('Pigment pool used up: tinting the bank instead (Reset to refill)', 4000);
       }
-    }).catch((e) => reportError('addPigment failed', e));
+      return added;
+    }).catch((e) => { reportError('addPigment failed', e); return 0; });
   };
 
   const tapPigment = (name: string, slot?: number, size?: number): void => {
     const p = findPigment(name);
     if (!p) throw new Error(`unknown pigment "${name}"`);
     palette.flashPigment(p.key);
-    injectLatent(p.latent, slot, size);
+    void injectLatent(p.latent, slot, size, p.key);
+  };
+
+  /** A drop's latent: a palette pigment, or a custom '#rrggbb' through mixbox.js. */
+  const dropLatent = async (pigment: string): Promise<{ latent: Latent; key: string }> => {
+    const p = findPigment(pigment);
+    if (p) return { latent: p.latent, key: p.key };
+    return { latent: await rgbToLatentAsync(pigment), key: pigment.toLowerCase() };
+  };
+
+  /**
+   * Set the drops down one after another (each awaited so the next stacks on
+   * it), leaving the operator's slot/size selection alone. Used for ?drops= at
+   * boot and exposed on the debug API. Stops at the first failure.
+   */
+  const applyDrops = async (drops: readonly Drop[]): Promise<void> => {
+    for (const d of drops) {
+      if (destroyed || !sim) return;
+      const { latent, key } = await dropLatent(d.pigment);
+      const size = PIGMENT_CHUNK_SIZES.findIndex((s) => s.key === d.size);
+      await injectLatent(latent, d.slot - 1, size < 0 ? DEFAULT_CHUNK_SIZE : size, key);
+    }
+  };
+
+  /** index.html URL that reproduces this session's start: the drop log, plus batch/preset when set. */
+  const startLink = (): string => {
+    // built by hand: ',', '@' and '.' are legal in a query string and read better than percent-escapes
+    const parts: string[] = [];
+    if (dropLog.length) parts.push(`drops=${formatDrops(dropLog)}`);
+    if (batch !== 1) parts.push(`batch=${batch}`);
+    if (presetPinned) parts.push(`preset=${preset}`);
+    return `${location.origin}${location.pathname}${parts.length ? `?${parts.join('&')}` : ''}`;
+  };
+
+  const copyStartLink = (): void => {
+    const link = startLink();
+    const n = dropLog.length;
+    const what = n ? `starts with ${n} pigment chunk${n === 1 ? '' : 's'}` : 'no pigments dropped yet';
+    const fallback = (): void => hud.showHint(`Start link (${what}): ${link}`, 12000);
+    const write = navigator.clipboard?.writeText(link);
+    if (write) write.then(() => hud.showHint(`Link copied: ${what}`, 4000)).catch(fallback);
+    else fallback();
   };
   const withSim = (what: string, fn: (s: GpuMpmSim) => void): void => {
     if (!sim) return;
@@ -270,7 +334,10 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   });
 
   const palette = new Palette(root, {
-    onPigment: (key) => injectLatent(findPigment(key)?.latent ?? BASE_LATENT),
+    onPigment: (key) => {
+      const p = findPigment(key);
+      void injectLatent(p?.latent ?? BASE_LATENT, undefined, undefined, p?.key);
+    },
     onCutFlop: cutFlop,
     onSlot: (i) => {
       dropSlot = i;
@@ -279,11 +346,11 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     onChunkSize: (i) => { chunkSize = i; chunkHint(); },
     onCustom: (hex) => {
       hud.setError(null);
-      rgbToLatentAsync(hex).then(injectLatent).catch((e) => reportError('Custom colour failed', e));
+      rgbToLatentAsync(hex).then((latent) => injectLatent(latent, undefined, undefined, hex.toLowerCase())).catch((e) => reportError('Custom colour failed', e));
     },
     onCutFold: () => withSim('cutAndFold failed', (s) => s.cutAndFold()),
     onClear: () => withSim('clearPigment failed', (s) => s.clearPigment()),
-    onReset: () => withSim('reset failed', (s) => { s.reset(); hud.setError(null); }),
+    onReset: () => withSim('reset failed', (s) => { s.reset(); dropLog.length = 0; hud.setError(null); }),
     onTogglePause: togglePause
   }, undefined, dropSlot, chunkSize);
 
@@ -295,7 +362,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   };
   const removeKeys = installKeyboard(window, {
     togglePause,
-    reset: () => withSim('reset failed', (s) => s.reset()),
+    reset: () => withSim('reset failed', (s) => { s.reset(); dropLog.length = 0; }),
     cutFold: () => withSim('cutAndFold failed', (s) => s.cutAndFold()),
     cutFlop,
     pigment: (i) => { const key = palette.order[i]; if (key) tapPigment(key); },
@@ -451,6 +518,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       preset = p;
       batch = b;
       old.destroy();
+      dropLog.length = 0; // the new bank starts clean
       frameTimes.length = 0;
       frameTimeSum = 0;
       hud.setError(null);
@@ -528,6 +596,9 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     get dropSlot(): number { return dropSlot; },
     setChunkSize,
     get chunkSize(): number { return chunkSize; },
+    get dropLog(): readonly Drop[] { return dropLog; },
+    startLink,
+    applyDrops,
     setQuality,
     async screenshot() {
       const r = renderer as Renderer;
@@ -559,6 +630,14 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   hud.showHint('Tap a colour to drop pigmented putty on the bank (the strip picks where along the roll) · Cut & fold / Cut & roll mix across the width · drag to orbit');
   canvas.focus({ preventScroll: true });
   rafId = requestAnimationFrame(frame);
+
+  // ?drops=: set the linked chunks down now that the bank is up (each awaited so they stack)
+  if (initialDrops.length) {
+    const n = initialDrops.length;
+    applyDrops(initialDrops)
+      .then(() => hud.showHint(`Started with ${n} pigment chunk${n === 1 ? '' : 's'} from the link`, 5000))
+      .catch((e) => reportError('Could not apply the linked pigment drops', e));
+  }
 
   const handle: AppHandle = {
     get sim() { return sim as GpuMpmSim; },

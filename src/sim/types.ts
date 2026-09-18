@@ -3,6 +3,7 @@
  * See docs/design-v2.md. Keep this file free of GPU code.
  */
 import type { GridDims, MillConfig, MillParams, QualitySettings } from '../config/mill';
+import type { Drop } from '../drops';
 
 /** A 7-float Mixbox latent. */
 export type Latent = readonly [number, number, number, number, number, number, number];
@@ -134,6 +135,12 @@ export interface DebugApi {
   /** Choose the chunk size (index into PIGMENT_CHUNK_SIZES) taps use. */
   setChunkSize(size: number): void;
   readonly chunkSize: number;
+  /** Every pigment chunk set down this session (taps, ?drops=, applyDrops), in order; cleared by Reset and by a rebuild. */
+  readonly dropLog: readonly Drop[];
+  /** URL of index.html that reproduces this session's start: ?drops= from dropLog, plus batch/preset when set. */
+  startLink(): string;
+  /** Set the chunks down in sequence (each awaited so they stack), as the ?drops= parameter does at boot. Does not change the current slot/size selection. */
+  applyDrops(drops: readonly Drop[]): Promise<void>;
   /** Switch preset (rebuilds the sim), resolves when ready */
   setQuality(preset: 'low' | 'medium' | 'high' | 'ultra'): Promise<void>;
   /** Render the current frame offscreen and return RGBA8 pixels (works where canvas presentation does not). */

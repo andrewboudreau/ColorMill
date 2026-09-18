@@ -60,8 +60,10 @@ The material is simulated with the **Material Point Method** (MLS-MPM, Hu et
 al. 2018) with quadratic B-spline transfers and APIC affine velocities.
 Particles carry position, velocity, an affine velocity matrix, an elastic
 deformation gradient, a 7-float Mixbox pigment latent and a pigment load. A
-background grid (49³ to 109³ cells, depending on the preset, taller than it is
-wide to leave room for the log) is scratch space rebuilt every substep:
+background grid (49×73×65 to 109×163×145 nodes, depending on the preset,
+taller than it is wide to leave room for the log and deeper than the mill to
+leave room in front for the operator's hands) is scratch space rebuilt every
+substep:
 particles scatter mass and momentum to grid nodes with fixed-point atomics,
 the grid integrates gravity and applies the boundaries, and the particles
 gather the new velocities back and advect. A fixed number of substeps runs
@@ -94,9 +96,9 @@ gets deeper where the load is higher.
 **Cut & fold** cuts the sheet on the front face of the front roll from the
 roll end toward the middle while the sheet comes up past the knife, so the
 cut is a diagonal and the freed flap is a triangle, pointed at the top near
-the roll end and wide at the bottom. The flap is folded over the cut by its
-bottom corner onto the sheet beside it, roll-side up, and the doubled sheet
-rides up into the nip. **Cut & roll** takes
+the roll end and wide at the bottom. The flap turns up on the cut like a page,
+out in front of the roll and over onto the sheet beside the cut, roll-side
+up, and the doubled sheet rides up into the nip. **Cut & roll** takes
 everything on the mill, winds it into a
 volume-preserving log standing over the nip (bank kneaded into the core,
 sheet wrapped around it), and feeds the log down onto the pile the rolls are
@@ -121,7 +123,9 @@ ladder and some starter recipes. It uses the same pigment latents and the
 same mass-weighted latent mixing as the simulation, so its swatch is the
 colour the mill will converge to once the bank is homogeneous; the naive RGB
 average is shown beside it for contrast. A recipe can be shared and restored
-with a link such as `?mix=cadmiumYellow:3,cobaltBlue:1`.
+with a link such as `?mix=cadmiumYellow:3,cobaltBlue:1`. **Open in the mill**
+hands the recipe to the simulator as a `?drops=` link (one medium chunk per
+part, halves as small chunks, spread along the roll).
 
 ## Controls
 
@@ -142,15 +146,16 @@ with a link such as `?mix=cadmiumYellow:3,cobaltBlue:1`.
 | `-` / `=` | Smaller / larger pigment chunks |
 | Drag / wheel / pinch | Orbit / zoom the camera; double-tap resets to the front view |
 | Right drawer (`P`) | Roller speed (rpm), friction ratio, nip gap, dispersion, gravity, back-roll friction, batch size, quality, auto-orbit, stats |
+| `?drops=cadmiumYellow@3.m,cobaltBlue@5.l` | Start with those pigment chunks already dropped (pigment@slot.size; size s, m or l; a custom colour as six hex digits); the drawer's **Copy start link** writes the current session's drops as such a link |
 
 ## Quality presets
 
 | Preset | Cells / unit | Grid (cells) | Particles at 1× batch | Substep `dt` | Substeps / frame | Target |
 | --- | --- | --- | --- | --- | --- | --- |
-| low | 32 | 49 × 73 × 49 | 39k | 1.6e-3 | 8 | integrated / mobile GPU |
-| medium | 48 | 73 × 109 × 73 | 133k | 1.1e-3 | 12 | laptop GPU |
-| high (default) | 64 | 97 × 145 × 97 | 315k | 8e-4 | 16 | desktop GPU |
-| ultra | 72 | 109 × 163 × 109 | 448k | 7.1e-4 | 18 | discrete GPU |
+| low | 32 | 49 × 73 × 65 | 39k | 1.6e-3 | 8 | integrated / mobile GPU |
+| medium | 48 | 73 × 109 × 97 | 133k | 1.1e-3 | 12 | laptop GPU |
+| high (default) | 64 | 97 × 145 × 129 | 315k | 8e-4 | 16 | desktop GPU |
+| ultra | 72 | 109 × 163 × 145 | 448k | 7.1e-4 | 18 | discrete GPU |
 
 The default batch is about 1.2 L of putty; the batch-size control (0.5×–3×,
 or `?batch=1.5`) rebuilds the bank with more or less material and scales the

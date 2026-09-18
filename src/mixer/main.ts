@@ -11,6 +11,7 @@
  */
 import './styles.css';
 import { PALETTE_ORDER, PIGMENTS, hexToRgb, rgbToLatentAsync, type Latent } from '../color/pigments';
+import { formatDrops, recipeToDrops } from '../drops';
 import {
   CUSTOM_KEY, MAX_PARTS, STARTER_RECIPES, describeRecipe, formatMix, ladder, mixRecipe, parseMix,
   type CustomPigment, type MixResult, type RecipeEntry
@@ -172,7 +173,13 @@ function boot(): void {
   const clear = el('button', 'mx-btn', 'Clear');
   clear.type = 'button';
   clear.addEventListener('click', () => reset());
-  actions.append(share, copy, clear);
+  // hand the recipe to the simulator: one medium chunk per part (halves as small
+  // chunks), spread along the roll, via the mill's ?drops= parameter
+  const openMill = el('a', 'mx-btn', 'Open in the mill');
+  openMill.id = 'open-mill';
+  openMill.href = 'index.html';
+  openMill.title = 'Start the simulator with these pigments already dropped on the bank';
+  actions.append(share, copy, clear, openMill);
   right.appendChild(actions);
 
   const startersTitle = el('h2', undefined, 'Starters');
@@ -230,6 +237,8 @@ function boot(): void {
     const href = `${window.location.origin}${window.location.pathname}${q ? `?mix=${q}` : ''}`;
     share.href = href;
     history.replaceState(null, '', href);
+    const drops = formatDrops(recipeToDrops(r, custom?.hex));
+    openMill.href = drops ? `index.html?drops=${drops}` : 'index.html';
   }
 
   function setParts(key: string, p: number): void {

@@ -49,6 +49,7 @@ async function readState(page) {
       ladderCells: document.querySelectorAll('.ladder .ladder-cell').length,
       starters: document.querySelectorAll('.starter').length,
       recipe: window.__mixer.getRecipe(),
+      openMillHref: document.querySelector('#open-mill')?.getAttribute('href') || '',
       parts
     };
   });
@@ -84,6 +85,8 @@ export default async function run() {
     assert(s1.shareHref.includes('mix=') && s1.shareHref.includes('cadmiumYellow:3') && s1.shareHref.includes('cobaltBlue:1'),
       `#share-link href encodes the recipe (${s1.shareHref})`);
     assert(s1.ladderCells >= 2, `ladder has at least 2 cells (got ${s1.ladderCells})`);
+    assert(s1.openMillHref.includes('drops=') && s1.openMillHref.includes('cadmiumYellow@') && s1.openMillHref.includes('cobaltBlue@'),
+      `#open-mill href hands the recipe to the mill as ?drops= (${s1.openMillHref})`);
 
     // --- 3. reset -> empty recipe, white ---------------------------------------------------
     await page.evaluate(() => window.__mixer.reset());

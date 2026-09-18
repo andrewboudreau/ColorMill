@@ -39,6 +39,7 @@
         <a href="project.html">Project notes</a>
         <a href="resources.html">Resources</a>
         <a href="pigment.html">Pigment demo</a>
+        <a href="mixer.html">Colour mixer</a>
         <a href="legacy/index.html">Legacy CPU build</a>
         <a href="https://github.com/andrewboudreau/ColorMill">GitHub repo</a>
       </nav>
@@ -180,6 +181,7 @@ URL          ?preset=low|medium|high|ultra forces a quality preset  ?batch=1.5 s
 
       <h2>Repository map</h2>
       <pre>index.html, src/main.ts        app entry and frame loop
+mixer.html, src/mixer/         the colour mixer page (a second Vite entry)
 src/config/mill.ts             geometry, presets, material constants (pure, unit-tested)
 src/sim/                       GpuMpmSim + WGSL kernels; types.ts is the shared contract
 src/render/                    ray-march renderer, camera, mixbox.wgsl

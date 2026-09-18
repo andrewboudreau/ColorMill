@@ -72,6 +72,7 @@ jobs:
       - name: Check site layout
         run: |
           test -f dist/index.html
+          test -f dist/mixer.html
           test -f dist/project.html
           test -f dist/resources.html
           test -f dist/pigment.html

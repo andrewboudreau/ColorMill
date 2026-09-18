@@ -64,33 +64,34 @@ const DMAX : f32 = 0.5;         // depth covered by the slices (sim units); deep
 // while the sheet comes up past it, so the cut runs diagonally on the sheet (the
 // end was cut first and has moved up) and the freed flap is a triangle: a point
 // at the top near the roll end, wide at the bottom where the sheet leaves the
-// nip. The operator takes the bottom corner, peels the flap off the roll and
-// swings it up over the crown, across to the other half, and lays it down on
-// the bank there face up (what was against the roll is now on top), where the
-// nip takes it in again. Kinematic script:
+// nip. The operator takes the bottom corner and folds the flap over the cut
+// onto the sheet beside it, toward the middle: what was against the roll is now
+// on top, and the doubled sheet rides up into the nip. Kinematic script:
 //   select: the flap = sheet on the front face (radial depth < flapDepth(),
 //           FLAP_TH_MIN..FLAP_TH_MAX down from the crown) on the cut side of the
 //           diagonal cutX(theta); binned by arc (NB bins, slot 1) and depth
-//           (NS slices) and flagged. The receiving half's top-of-mill material is
-//           binned by z (NB bins, slot 0) and height (NS slices).
+//           (NS slices) and flagged. The rest of that half's top-of-mill material
+//           is binned by z (NB bins, slot 0) and height (NS slices), for the part
+//           of the fold that reaches back over the crown.
 //   tables: per arc bin the flap's thickness (a high quantile of its depth); per
-//           z bin the receiving half's top (a high quantile, or the mill surface).
-//   move:   a particle at arc theta from the crown lands mirrored in x, at
-//           z = crown - R * theta (the flap unrolled flat over the crown and
-//           bank, length kept) and y = topRecv(z) + (thickness - depth) (former
-//           roll side up). It gets there as a page turning about the line
-//           x = L/2 just above the crown: the whole flap rotates through pi in
-//           the (x, y) plane, so it keeps its shape (the bottom corner is pulled
-//           up, over the middle and down on the other side), while it drifts
-//           back from the front face to over the bank, then settles from the
-//           air onto its landing spot over the last stretch. Released at rest
-//           with F = I.
-const FLOP_SECONDS : f32 = 1.0;
+//           z bin the top of the material behind the crown (a high quantile, or
+//           the mill surface).
+//   move:   in the sheet's own coordinates (u along the roll from the cut end, s
+//           down the front face from the crown) the flap is mirrored across the
+//           cut line, so it lands on the sheet beside the cut, outside it by its
+//           own thickness with the roll side up; the part of the mirror image
+//           that falls behind the crown lands on the bank top there. It gets
+//           there as a page turning on the cut: straight toward its mirror
+//           image, lifted up in proportion to its distance from the hinge, so
+//           halfway it stands on the cut line and the corner is at the top.
+//           Released at rest with F = I.
+const FLOP_SECONDS : f32 = 0.8;
 const FLOP_CAP_SIN : f32 = 0.766;   // sin 50 deg: how far down the back crown the receiving region reaches
 const FLOP_YSPAN : f32 = 1.0;       // height above the axes covered by the receiving y slices
 const FLOP_TOP_Q : f32 = 0.97;      // column top / flap thickness = this quantile of its particles
 const FLAP_TH_MIN : f32 = 0.08;     // flap starts just in front of the crown line (rad down from the crown)
 const FLAP_TH_MAX : f32 = 1.92;     // and reaches a little below the axis level, where the sheet comes up from the nip
+const FLOP_LIFT : f32 = 0.35;       // how high the far corner rises above the straight path mid-fold
 const INFO_COUNT : u32 = 8u;
 const INFO_DEPTH : u32 = 8u + 2u * NB;
 const HDR : u32 = NB * 8u;
@@ -121,7 +122,7 @@ fn millTop(z : f32) -> f32 {
   return top;
 }
 
-/** Material the flap can land on: on top of the mill, between the crowns' 50-degree lines. */
+/** Material behind the crown the fold can reach: on top of the mill, between the crowns' 50-degree lines. */
 fn inFlopRegion(x : vec3<f32>) -> bool {
   let reach = FLOP_CAP_SIN * P.front.w;
   return x.y > P.front.x + 0.06 && x.z >= P.back.y - reach && x.z <= P.front.y + reach
@@ -135,7 +136,7 @@ fn cutX(theta : f32) -> f32 {
   return 0.5 * P.fold2.y * f;
 }
 
-/** Top of the receiving half's material at depth z (linear between bins). */
+/** Top of the material on top of the mill at depth z (linear between bins). */
 fn flopTop(z : f32) -> f32 {
   let fb = clamp(z / flopBinWidth() - 0.5, 0.0, f32(NB) - 1.0001);
   let b = u32(fb);
@@ -227,16 +228,15 @@ fn select_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgrou
     let L = P.fold2.y;
     let k = flopSide();
     let R = P.front.w;
-    if (select(x.x >= 0.5 * L, x.x < 0.5 * L, k == 0u)) {
-      // the cut side: the flap is the sheet on the front face inside the triangle
-      let dy = x.y - P.front.x;
-      let dz = x.z - P.front.y;
-      let dr = sqrt(dy * dy + dz * dz) - R;
-      if (dr < 0.0 || dr > flapDepth()) { return; }
-      let th = atan2(dz, dy);   // 0 at the crown, pi/2 at the axis level in front
-      if (th < FLAP_TH_MIN || th > FLAP_TH_MAX) { return; }
-      let xc = cutX(th);
-      if (!select(x.x > L - xc, x.x < xc, k == 0u)) { return; }
+    // only the cut side's half takes part
+    if (!select(x.x >= 0.5 * L, x.x < 0.5 * L, k == 0u)) { return; }
+    // the flap: the sheet on the front face inside the triangle
+    let dy = x.y - P.front.x;
+    let dz = x.z - P.front.y;
+    let dr = sqrt(dy * dy + dz * dz) - R;
+    let th = atan2(dz, dy);   // 0 at the crown, pi/2 at the axis level in front
+    let xc = cutX(th);
+    if (dr >= 0.0 && dr <= flapDepth() && th >= FLAP_TH_MIN && th <= FLAP_TH_MAX && select(x.x > L - xc, x.x < xc, k == 0u)) {
       let b = min(u32((th - FLAP_TH_MIN) / flapBinWidth()), NB - 1u);
       let j = min(u32(dr / flapDepth() * f32(NS)), NS - 1u);
       atomicAdd(&info[INFO_COUNT + NB + b], 1u);
@@ -244,14 +244,14 @@ fn select_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgrou
       flags[p] = flags[p] | 1u;
       fold0[p] = vec4<f32>(x, th);
       atomicAdd(&info[3], 1u);
-    } else {
-      // the receiving side: everything on top of the mill, by z column and height
-      if (!inFlopRegion(x)) { return; }
-      let b = min(u32(x.z / flopBinWidth()), NB - 1u);
-      let j = min(u32(max(x.y - P.front.x, 0.0) / flopSliceHeight()), NS - 1u);
-      atomicAdd(&info[INFO_COUNT + b], 1u);
-      atomicAdd(&info[INFO_DEPTH + b * NS + j], 1u);
+      return;
     }
+    // everything else on top of the mill on this half, by z column and height
+    if (!inFlopRegion(x)) { return; }
+    let b = min(u32(x.z / flopBinWidth()), NB - 1u);
+    let j = min(u32(max(x.y - P.front.x, 0.0) / flopSliceHeight()), NS - 1u);
+    atomicAdd(&info[INFO_COUNT + b], 1u);
+    atomicAdd(&info[INFO_DEPTH + b * NS + j], 1u);
     return;
   }
   let R = P.front.w;
@@ -286,7 +286,7 @@ var<workgroup> wRho : array<f32, NB>;
 fn tables_(@builtin(local_invocation_id) lid : vec3<u32>) {
   let b = lid.x;
   if (isFlop()) {
-    // slot 0, per z bin: the receiving half's top, FLOP_TOP_Q of the way up its column
+    // slot 0, per z bin: the top of the material behind the crown, FLOP_TOP_Q of the way up its column
     // (a few strays above do not count), or the mill surface where it is empty
     let z = (f32(b) + 0.5) * flopBinWidth();
     var top = millTop(z);
@@ -442,7 +442,7 @@ fn move_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
   let p0 = f0.xyz;
   let t = P.fold.y;
   if (isFlop()) {
-    // peel the flap off the front face and swing it up over the crown onto the other half
+    // fold the flap over the cut onto the sheet beside it
     let L = P.fold2.y;
     let R = P.front.w;
     let h = P.hdt.x;
@@ -450,45 +450,47 @@ fn move_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
     let dy0 = p0.y - P.front.x;
     let dz0 = p0.z - P.front.y;
     let dr = max(sqrt(dy0 * dy0 + dz0 * dz0) - R, 0.0);
-    // where it lands: mirrored in x, unrolled flat back over the crown, roll side up
-    let x1 = L - p0.x;
-    let z1 = P.front.y - R * (th - FLAP_TH_MIN);
-    let y1 = flopTop(z1) + 0.5 * h + max(flapThick(th) - dr, 0.0);
-    // the swing: the flap turns like a page about the line x = L/2 just above the crown
-    // (the bottom corner rises, passes over the middle and comes down mirrored on the
-    // other side) while it drifts back from the front face to over the bank; over the
-    // last stretch it settles from the air onto its landing spot. Nothing reaches
-    // further forward than the front face itself, and the top of the swing is L/2
-    // above the hinge.
-    let yc = P.front.x + R + 2.0 * P.fold2.z + h;
-    let dirX = select(-1.0, 1.0, flopSide() == 0u);   // the flap is at x = L/2 + dirX * ux, ux <= 0
-    let ux = -abs(p0.x - 0.5 * L);
-    let wy = p0.y - yc;
+    let left = flopSide() == 0u;
+    // the sheet's own coordinates: u along the roll from the cut end, s down from the crown;
+    // the cut runs from (0, 0) to (L/2, S)
+    let S = R * (FLAP_TH_MAX - FLAP_TH_MIN);
+    let q = vec2<f32>(select(L - p0.x, p0.x, left), R * (th - FLAP_TH_MIN));
+    let d = normalize(vec2<f32>(0.5 * L, S));
+    let q1 = 2.0 * dot(q, d) * d - q;             // mirror image across the cut
+    let dist = abs(q.x * d.y - q.y * d.x);        // distance from the hinge
+    let distMax = S * 0.5 * L / length(vec2<f32>(0.5 * L, S));
+    let x1 = clamp(select(L - q1.x, q1.x, left), 1.5 * h, L - 1.5 * h);
+    let th1 = FLAP_TH_MIN + q1.y / R;
+    let thick = flapThick(th);
+    var p1 : vec3<f32>;
+    if (th1 > 0.0) {
+      // on the front face beside the cut: outside the sheet there, roll side up
+      let rho = R + flapThick(clamp(th1, FLAP_TH_MIN, FLAP_TH_MAX)) + 0.5 * h + max(thick - dr, 0.0);
+      p1 = vec3<f32>(x1, P.front.x + rho * cos(th1), P.front.y + rho * sin(th1));
+    } else {
+      // the part of the image that reaches back over the crown lands on the bank top there
+      let z1 = P.front.y + R * th1;
+      p1 = vec3<f32>(x1, flopTop(z1) + 0.5 * h + max(thick - dr, 0.0), z1);
+    }
+    // the turn: straight to the mirror image, lifted up by the distance from the hinge,
+    // so halfway the flap stands on the cut line with the corner at the top
     let tau = clamp(t / FLOP_SECONDS, 0.0, 1.0);
     let u = tau * tau * (3.0 - 2.0 * tau);
     let dudt = 6.0 * tau * (1.0 - tau) / FLOP_SECONDS;
-    // x sweeps straight through the middle (a hanging page would first swing outward
-    // into the end guide); y follows the turn, so mid-swing the flap stands upright
-    // on the middle line, its bottom corner at the top
-    let phi = PI * u;
-    let tx = dr * cos(th);                      // the sheet's thickness, which the turn lays across x
-    let ux1 = ux * cos(phi) + tx * sin(phi);
-    let wy1 = -ux * sin(phi) + wy * cos(phi);
-    // the drift back starts once the flap has risen clear of the crown (until then
-    // the part near the cut, which rises last, would pass through the roll)
-    let sz = clamp((u - 0.4) / 0.55, 0.0, 1.0);
-    let fz = sz * sz * (3.0 - 2.0 * sz);
-    let dfzdu = 6.0 * sz * (1.0 - sz) / 0.55;
-    let rigid = vec3<f32>(0.5 * L + dirX * ux1, yc + wy1, mix(p0.z, z1, fz));
-    let drigid = vec3<f32>(dirX * PI * (-ux * sin(phi) + tx * cos(phi)), PI * (-ux * cos(phi) - wy * sin(phi)), (z1 - p0.z) * dfzdu);
-    let sw = clamp((u - 0.7) / 0.3, 0.0, 1.0);
-    let w = sw * sw * (3.0 - 2.0 * sw);
-    let dwdu = 6.0 * sw * (1.0 - sw) / 0.3;
-    let land = vec3<f32>(x1, y1, z1);
+    let lift = FLOP_LIFT * (dist / distMax);
+    // interpolated around the front axis (a straight chord would dip under the surface)
+    let rho0 = R + dr;
+    let a0 = th;
+    let rho1 = sqrt((p1.y - P.front.x) * (p1.y - P.front.x) + (p1.z - P.front.y) * (p1.z - P.front.y));
+    let a1 = atan2(p1.z - P.front.y, p1.y - P.front.x);
+    let a = mix(a0, a1, u);
+    let rho = mix(rho0, rho1, u);
     let lo = vec3<f32>(1.5 * h);
     let hi = vec3<f32>(P.domain.x, P.fold3.w, P.domain.z) - lo;
-    let x = clamp(mix(rigid, land, w), lo, hi);
-    let v = ((1.0 - w) * drigid + (land - rigid) * dwdu) * dudt;
+    let x = clamp(vec3<f32>(mix(p0.x, x1, u), P.front.x + rho * cos(a) + lift * sin(PI * u), P.front.y + rho * sin(a)), lo, hi);
+    let v = vec3<f32>(x1 - p0.x,
+                      (rho1 - rho0) * cos(a) - rho * sin(a) * (a1 - a0) + lift * PI * cos(PI * u),
+                      (rho1 - rho0) * sin(a) + rho * cos(a) * (a1 - a0)) * dudt;
     pos[p] = vec4<f32>(x, pos[p].w);
     if (t >= FLOP_SECONDS) {
       release(p, vec3<f32>(0.0));

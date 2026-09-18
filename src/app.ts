@@ -248,12 +248,12 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     paintStats(true);
   };
 
-  // cut & fold alternates sides, as an operator does: left half over, then right half over
+  // cut & fold alternates ends, as an operator does: cut from the left, then from the right
   let flopSide: 'left' | 'right' = 'left';
   const cutFlop = (): void => withSim('cutAndFlop failed', (s) => {
     if (s.operatorBusy) return;
     s.cutAndFlop(flopSide);
-    hud.showHint(`Cut & fold: the sheet is cut from the ${flopSide} end, peeled off the front roll and swung over onto the ${flopSide === 'left' ? 'right' : 'left'}`, 3000);
+    hud.showHint(`Cut & fold: the sheet is cut from the ${flopSide} end and the flap folds over the cut toward the middle`, 3000);
     flopSide = flopSide === 'left' ? 'right' : 'left';
   });
 

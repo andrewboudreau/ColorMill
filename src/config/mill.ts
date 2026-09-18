@@ -319,8 +319,17 @@ export function seedBankPositions(q: QualitySettings, params: MillParams, seed =
 /** Extra particle capacity, as a fraction of the seeded bank, reserved for pigment chunks. */
 export const PIGMENT_POOL_FRACTION = 0.5;
 
-/** Radius of one pigment chunk (a dollop of coloured putty dropped on the bank). */
+/** Radius of one pigment chunk (a dollop of coloured putty dropped on the bank): the medium size. */
 export const PIGMENT_CHUNK_RADIUS = 0.1;
+
+/** Chunk sizes the operator can pick (radius in sim units; the medium one is PIGMENT_CHUNK_RADIUS).
+    A large chunk holds about 2.7x the particles of a medium one, a small one about a fifth. */
+export const PIGMENT_CHUNK_SIZES = [
+  { key: 's', label: 'Small', radius: 0.06 },
+  { key: 'm', label: 'Medium', radius: PIGMENT_CHUNK_RADIUS },
+  { key: 'l', label: 'Large', radius: 0.14 }
+] as const;
+export const DEFAULT_CHUNK_SIZE = 1;
 
 /** Number of fixed pigment drop positions along the roll. A tap sets its chunk
     down over the nip at the chosen slot (left to right as the viewer sees the

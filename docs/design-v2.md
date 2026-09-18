@@ -551,10 +551,12 @@ so the renderer can be tested with a procedural volume without the sim.
 
 - Bottom bar: a drop-slot strip (`DROP_SLOTS` = 6 fixed x positions along
   the roll, evenly spaced between margins that keep a whole chunk clear of
-  the end guides; the operator picks one, `?slot=` presets it), the pigment
-  palette (large round swatches; tap = a masterbatch chunk of radius
-  `PIGMENT_CHUNK_RADIUS` set down on top of whatever is over the nip at the
-  chosen slot, so repeated taps stack), a colour picker swatch, "Cut & roll",
+  the end guides; the operator picks one, `?slot=` presets it), a chunk-size
+  picker (`PIGMENT_CHUNK_SIZES`: small / medium / large, radius 0.06 / 0.1 /
+  0.14; `?chunk=s|m|l`), the pigment palette (large round swatches; tap = a
+  masterbatch chunk of the chosen radius set down on top of whatever is over
+  the nip at the chosen slot, so repeated taps stack), a colour picker swatch,
+  "Cut & roll",
   "Cut & fold" (alternating sides), "Clear pigment", "Reset", Pause.
 - Right drawer (collapsible; hidden by default on narrow screens): sliders
   for roller speed (rpm shown), friction ratio, nip gap, dispersion, gravity;
@@ -563,7 +565,10 @@ so the renderer can be tested with a procedural volume without the sim.
 - Drag in the viewport orbits; wheel/pinch zooms; double-tap resets the
   camera to the front view.
 - Keyboard: Space pause, R reset, F cut&roll, C cut&fold, 1–8 pigments, arrows speed/gap,
-  `[` / `]` drop slot, P drawer.
+  `[` / `]` drop slot, `-` / `=` chunk size, P drawer.
+- A separate page, mixer.html, samples pigment recipes outside the mill with
+  the same latents and mixing rule (parts-weighted latent average), showing
+  the Mixbox result beside the naive RGB average.
 
 ---
 
@@ -572,6 +577,8 @@ so the renderer can be tested with a procedural volume without the sim.
 ```
 index.html                      Vite entry (the v2 app)
 src/main.ts                     glue and frame loop
+mixer.html, src/mixer/main.ts, src/mixer/mixer.ts
+                                the colour mixer page (shares src/color/pigments.ts)
 src/gpu/device.ts               WebGPU init + capability report + fallback message
 src/config/mill.ts              MillConfig, presets, geometry helpers (pure, tested)
 src/sim/types.ts                shared interfaces (GpuMpmSim API, snapshots, stats)

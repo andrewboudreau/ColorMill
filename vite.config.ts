@@ -1,5 +1,8 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { defineConfig, type Plugin } from 'vitest/config';
 
 /**
@@ -79,7 +82,11 @@ export default defineConfig({
   server: process.env.E2E_NO_HMR ? { hmr: false, watch: null } : undefined,
   plugins: [docsPagesPlugin()],
   build: {
-    target: 'es2022'
+    target: 'es2022',
+    rollupOptions: {
+      // two pages: the simulator and the colour mixer
+      input: { main: path.resolve(__dirname, 'index.html'), mixer: path.resolve(__dirname, 'mixer.html') }
+    }
   },
   test: {
     globals: true,

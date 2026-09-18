@@ -15,7 +15,7 @@
 import './styles.css';
 import { BASE_LATENT, findPigment, rgbToLatentAsync } from './color/pigments';
 import {
-  BATCH_LIMITS, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_RADIUS, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres,
+  BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres,
   type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
@@ -211,10 +211,22 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     dropSlot = clampSlot(slot, dropSlot);
     palette.setSlot(dropSlot);
   };
+  // how big a chunk a tap drops: small / medium / large (buttons in the palette, - and =, ?chunk=s|m|l)
+  const clampSize = (size: number, fallback: number): number =>
+    Number.isFinite(size) ? Math.min(PIGMENT_CHUNK_SIZES.length - 1, Math.max(0, Math.round(size))) : fallback;
+  const chunkQuery = query.get('chunk') ?? '';
+  let chunkSize = clampSize(PIGMENT_CHUNK_SIZES.findIndex((s) => s.key === chunkQuery), clampSize(parseInt(chunkQuery, 10) - 1, DEFAULT_CHUNK_SIZE));
+  if (chunkSize < 0) chunkSize = DEFAULT_CHUNK_SIZE;
+  const chunkHint = (): void => hud.showHint(`${PIGMENT_CHUNK_SIZES[chunkSize].label} pigment chunks`, 2000);
+  const setChunkSize = (size: number): void => {
+    chunkSize = clampSize(size, chunkSize);
+    palette.setChunkSize(chunkSize);
+  };
 
-  const injectLatent = (latent: Latent, slot = dropSlot): void => {
+  const injectLatent = (latent: Latent, slot = dropSlot, size = chunkSize): void => {
     if (!sim) return;
     const x = dropSlotX(clampSlot(slot, dropSlot));
+    const radius = PIGMENT_CHUNK_SIZES[clampSize(size, chunkSize)].radius;
     // a dollop on top of whatever material is over the nip at this x (the GPU
     // finds the surface, so chunks stack on each other and it works after the
     // bank has slumped or drained)
@@ -223,19 +235,19 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     // a chunk of coloured putty set down on the bank; when the reserved pool is
     // used up, tint the material at the surface instead
     const s = sim;
-    s.addPigmentChunk(x, z, PIGMENT_CHUNK_RADIUS, latent).then((added) => {
+    s.addPigmentChunk(x, z, radius, latent).then((added) => {
       if (added === 0 && sim === s) {
-        s.addPigmentOnSurface(x, z, PIGMENT_CHUNK_RADIUS, latent);
+        s.addPigmentOnSurface(x, z, radius, latent);
         hud.showHint('Pigment pool used up: tinting the bank instead (Reset to refill)', 4000);
       }
     }).catch((e) => reportError('addPigment failed', e));
   };
 
-  const tapPigment = (name: string, slot?: number): void => {
+  const tapPigment = (name: string, slot?: number, size?: number): void => {
     const p = findPigment(name);
     if (!p) throw new Error(`unknown pigment "${name}"`);
     palette.flashPigment(p.key);
-    injectLatent(p.latent, slot);
+    injectLatent(p.latent, slot, size);
   };
   const withSim = (what: string, fn: (s: GpuMpmSim) => void): void => {
     if (!sim) return;
@@ -264,6 +276,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       dropSlot = i;
       hud.showHint(`Pigment drops at slot ${i + 1} of ${DROP_SLOTS} (left to right along the roll)`, 2500);
     },
+    onChunkSize: (i) => { chunkSize = i; chunkHint(); },
     onCustom: (hex) => {
       hud.setError(null);
       rgbToLatentAsync(hex).then(injectLatent).catch((e) => reportError('Custom colour failed', e));
@@ -272,7 +285,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     onClear: () => withSim('clearPigment failed', (s) => s.clearPigment()),
     onReset: () => withSim('reset failed', (s) => { s.reset(); hud.setError(null); }),
     onTogglePause: togglePause
-  }, undefined, dropSlot);
+  }, undefined, dropSlot, chunkSize);
 
   const nudge = (key: 'omega' | 'gap', dir: 1 | -1): void => {
     if (!sim) return;
@@ -292,6 +305,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       setDropSlot(dropSlot + d);
       hud.showHint(`Pigment drops at slot ${dropSlot + 1} of ${DROP_SLOTS} (left to right along the roll)`, 2500);
     },
+    chunkSize: (d) => { setChunkSize(chunkSize + d); chunkHint(); },
     togglePanel: () => panel.toggle()
   });
 
@@ -512,6 +526,8 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     tapPigment,
     setDropSlot,
     get dropSlot(): number { return dropSlot; },
+    setChunkSize,
+    get chunkSize(): number { return chunkSize; },
     setQuality,
     async screenshot() {
       const r = renderer as Renderer;

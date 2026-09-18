@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PIGMENT_CHUNK_RADIUS, QUALITY_PRESETS, bankTopY, bankVolumeBelow, dropSlotX, gridDims,
+  DEFAULT_CHUNK_SIZE, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PIGMENT_CHUNK_RADIUS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, bankTopY, bankVolumeBelow, dropSlotX, gridDims,
   lameParameters, millTopSurfaceY, rollerAxisDistance, rollerPoses, rollerSurfaceVelocity, seedBankPositions
 } from '../src/config/mill';
 
@@ -99,5 +99,16 @@ describe('pigment drop slots', () => {
   it('clamps out-of-range slots to the ends', () => {
     expect(dropSlotX(-3)).toBe(dropSlotX(0));
     expect(dropSlotX(99)).toBe(dropSlotX(DROP_SLOTS - 1));
+  });
+});
+
+describe('pigment chunk sizes', () => {
+  it('offers ascending sizes with the medium one as the default radius, all clear of the end guides', () => {
+    const r = PIGMENT_CHUNK_SIZES.map((s) => s.radius);
+    for (let i = 1; i < r.length; i++) expect(r[i]).toBeGreaterThan(r[i - 1]);
+    expect(PIGMENT_CHUNK_SIZES[DEFAULT_CHUNK_SIZE].radius).toBe(PIGMENT_CHUNK_RADIUS);
+    const rMax = r[r.length - 1];
+    expect(dropSlotX(0) - rMax).toBeGreaterThan(0);
+    expect(dropSlotX(DROP_SLOTS - 1) + rMax).toBeLessThan(GEOMETRY.length);
   });
 });

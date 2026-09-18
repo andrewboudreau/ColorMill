@@ -5,12 +5,14 @@
  * Clear pigment, Reset, Pause/Play).
  */
 import { PALETTE_ORDER, PIGMENTS } from '../color/pigments';
-import { DROP_SLOTS } from '../config/mill';
+import { DROP_SLOTS, PIGMENT_CHUNK_SIZES } from '../config/mill';
 
 export interface PaletteCallbacks {
   onPigment(key: string): void;
   /** the operator picked a drop slot (0-based, left to right along the roll) */
   onSlot(slot: number): void;
+  /** the operator picked a chunk size (index into PIGMENT_CHUNK_SIZES) */
+  onChunkSize(size: number): void;
   /** the picker closed on a new colour ('#rrggbb') */
   onCustom(hex: string): void;
   onCutFold(): void;
@@ -29,9 +31,11 @@ export class Palette {
   private readonly flopButton: HTMLButtonElement;
   private readonly swatches = new Map<string, HTMLButtonElement>();
   private readonly slotButtons: HTMLButtonElement[] = [];
+  private readonly sizeButtons: HTMLButtonElement[] = [];
   private slot = 0;
+  private size = 1;
 
-  constructor(parent: HTMLElement, private readonly cb: PaletteCallbacks, customHex = '#ff8a00', slot = 0) {
+  constructor(parent: HTMLElement, private readonly cb: PaletteCallbacks, customHex = '#ff8a00', slot = 0, size = 1) {
     this.el = document.createElement('div');
     this.el.className = 'cm-palette';
     this.el.setAttribute('role', 'toolbar');
@@ -56,6 +60,25 @@ export class Palette {
       this.slotButtons.push(b);
     }
     this.setSlot(slot);
+
+    // chunk sizes: small, medium, large dollops
+    const sizes = document.createElement('div');
+    sizes.className = 'cm-sizes';
+    sizes.setAttribute('role', 'radiogroup');
+    sizes.setAttribute('aria-label', 'Pigment chunk size');
+    sizes.title = 'How big a chunk the next tap drops (- and =)';
+    PIGMENT_CHUNK_SIZES.forEach((sz, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `cm-size cm-size-${sz.key}`;
+      b.dataset.size = String(i);
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-label', `${sz.label} chunk`);
+      b.addEventListener('click', () => { this.setChunkSize(i); this.cb.onChunkSize(i); b.blur(); });
+      sizes.appendChild(b);
+      this.sizeButtons.push(b);
+    });
+    this.setChunkSize(size);
 
     const swatches = document.createElement('div');
     swatches.className = 'cm-swatches';
@@ -116,7 +139,7 @@ export class Palette {
     this.pauseButton.classList.add('cm-btn-primary');
     this.pauseButton.setAttribute('aria-pressed', 'false');
 
-    this.el.append(slots, swatches, actions);
+    this.el.append(slots, sizes, swatches, actions);
     parent.appendChild(this.el);
   }
 
@@ -133,6 +156,20 @@ export class Palette {
   /** the drop slot taps currently land on (0-based) */
   get dropSlot(): number {
     return this.slot;
+  }
+
+  /** Highlight chunk size `size` (index into PIGMENT_CHUNK_SIZES) without firing the callback. */
+  setChunkSize(size: number): void {
+    this.size = Math.min(PIGMENT_CHUNK_SIZES.length - 1, Math.max(0, Math.round(size)));
+    this.sizeButtons.forEach((b, i) => {
+      const on = i === this.size;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-checked', String(on));
+    });
+  }
+
+  get chunkSize(): number {
+    return this.size;
   }
 
   /** Press animation on the active slot (a pigment just landed there). */

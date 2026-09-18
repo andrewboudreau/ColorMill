@@ -1,7 +1,7 @@
 /**
  * Keyboard shortcuts (design §9): Space pause, R reset, F cut & roll, C cut & fold,
  * 1–8 pigments, arrows speed (up/down) and nip gap (left/right), [ and ]
- * move the pigment drop slot, P toggles the settings drawer. Keys are ignored while a form control has focus.
+ * move the pigment drop slot, - and = step the chunk size, P toggles the settings drawer. Keys are ignored while a form control has focus.
  */
 
 export interface KeyActions {
@@ -17,6 +17,8 @@ export interface KeyActions {
   gap(direction: 1 | -1): void;
   /** move the pigment drop slot one step left (-1) or right (+1) */
   slot(direction: 1 | -1): void;
+  /** step the pigment chunk size down (-1) or up (+1) */
+  chunkSize(direction: 1 | -1): void;
   togglePanel(): void;
 }
 
@@ -45,6 +47,8 @@ export function installKeyboard(target: Window | HTMLElement, a: KeyActions): ()
       case 'ArrowLeft': a.gap(-1); break;
       case '[': a.slot(-1); break;
       case ']': a.slot(1); break;
+      case '-': case '_': a.chunkSize(-1); break;
+      case '=': case '+': a.chunkSize(1); break;
       default:
         if (e.key >= '1' && e.key <= '8' && e.key.length === 1) a.pigment(e.key.charCodeAt(0) - '1'.charCodeAt(0));
         else handled = false;

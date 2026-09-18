@@ -16,6 +16,7 @@ without WebGPU.
 
 **Live:** <https://andrewboudreau.github.io/ColorMill/> ·
 **How it works:** <https://andrewboudreau.github.io/ColorMill/overview.html> ·
+**Colour mixer:** <https://andrewboudreau.github.io/ColorMill/mixer.html> ·
 **Project notes:** <https://andrewboudreau.github.io/ColorMill/project.html> ·
 **Design spec:** [`docs/design-v2.md`](docs/design-v2.md) ·
 **Research log:** [`docs/research.md`](docs/research.md)
@@ -37,8 +38,8 @@ without WebGPU.
   into a log and feeds it back in end-first. ColorMill scripts both moves; a
   few rounds turn stripes into a blend.
 - **Pigment.** The base is clear silicone. A tap sets a chunk of concentrated
-  masterbatch down on the bank at one of six drop spots along the roll, and
-  chunks stack if you tap the same spot again.
+  masterbatch down on the bank at one of six drop spots along the roll, in one
+  of three sizes, and chunks stack if you tap the same spot again.
 
 <table>
   <tr>
@@ -112,11 +113,22 @@ Full detail, including every constant and the alternatives that were tried
 and rejected, is in [`docs/design-v2.md`](docs/design-v2.md) and
 [`docs/research.md`](docs/research.md).
 
+## Colour mixer
+
+`mixer.html` is a standalone page for trying pigment recipes before dropping
+them on the bank: pick pigments in parts and see the Mixbox result, a blend
+ladder and some starter recipes. It uses the same pigment latents and the
+same mass-weighted latent mixing as the simulation, so its swatch is the
+colour the mill will converge to once the bank is homogeneous; the naive RGB
+average is shown beside it for contrast. A recipe can be shared and restored
+with a link such as `?mix=cadmiumYellow:3,cobaltBlue:1`.
+
 ## Controls
 
 | Input | Action |
 | --- | --- |
 | Drop-slot strip (bottom bar) | Pick which of the 6 spots along the roll the next tap lands on (also `[` / `]`, or `?slot=3`) |
+| Chunk-size dots (bottom bar) | Small, medium or large chunk for the next tap (also `-` / `=`, or `?chunk=s`, `m`, `l`) |
 | Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack) |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
 | **Cut & fold** / `C` | Cut the sheet on the front roll from the end and fold the triangular flap over the cut toward the middle (ends alternate) |
@@ -127,6 +139,7 @@ and rejected, is in [`docs/design-v2.md`](docs/design-v2.md) and
 | `1`–`8` | Inject palette pigments 1–8 |
 | `↑` / `↓`, `←` / `→` | Roller speed, nip gap |
 | `[` / `]` | Move the pigment drop slot left / right |
+| `-` / `=` | Smaller / larger pigment chunks |
 | Drag / wheel / pinch | Orbit / zoom the camera; double-tap resets to the front view |
 | Right drawer (`P`) | Roller speed (rpm), friction ratio, nip gap, dispersion, gravity, back-roll friction, batch size, quality, auto-orbit, stats |
 
@@ -194,6 +207,7 @@ root:
 ```
 dist/
   index.html, assets/        the v2 WebGPU app
+  mixer.html                 the colour mixer (second Vite entry; src/mixer/)
   overview.html              how it works (the short, high-level page)
   project.html               project notes (the guided tour)
   resources.html             references and vocabulary
@@ -235,6 +249,7 @@ resolution.
 
 ```
 index.html, src/main.ts        v2 app entry and frame loop
+mixer.html, src/mixer/         the colour mixer page (pure mixing logic in mixer.ts, tested)
 src/config/mill.ts             geometry, presets, material constants (pure, tested)
 src/sim/                       GpuMpmSim + WGSL compute shaders; types.ts is the shared contract
 src/render/                    ray-march renderer, camera, mixbox.wgsl

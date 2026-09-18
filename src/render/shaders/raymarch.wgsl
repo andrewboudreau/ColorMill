@@ -27,7 +27,6 @@ struct Uniforms {
   misc: vec4f,        // resolution.xy, exposure, flags (bit0 = volumes bound, bit1 = target is sRGB-encoded already)
   mip: vec4f,         // coarse max-density mip dims (cx, cy, cz), w = block edge in texels
   guides: vec4f,      // end-guide plates: bank top y, bank half depth (z), plate thickness, enabled
-  blade: vec4f,       // the operator's knife during a cut & fold stroke: blade edge xyz, w = shown
 };
 
 @group(0) @binding(0) var<uniform> U: Uniforms;
@@ -645,40 +644,6 @@ fn compositeGuide(col: vec3f, ro: vec3f, rd: vec3f, tHit: f32, x0: f32, outward:
   return mix(col, haze + refl + spec, alpha) + spec * 0.3;
 }
 
-// ---------------------------------------------------------------- the operator's knife
-
-// A small straight knife standing on the sheet during the cut & fold stroke: a thin
-// steel blade (edge on the sheet, running along z so it cuts across the roll) with a
-// short dark handle above it. Opaque; drawn where it is nearer than the scene hit.
-fn compositeBlade(col: vec3f, ro: vec3f, rd: vec3f, tHit: f32) -> vec3f {
-  if (U.blade.w < 0.5) { return col; }
-  let e = U.blade.xyz;
-  let v = -rd;
-  // blade: 0.14 long along z, 0.05 tall, a hair thick; the edge sits a little into the sheet
-  let bl = hitAabb(ro, rd, e + vec3f(-0.004, -0.012, -0.07), e + vec3f(0.004, 0.05, 0.07));
-  // handle: above the back half of the blade
-  let hl = hitAabb(ro, rd, e + vec3f(-0.011, 0.05, -0.065), e + vec3f(0.011, 0.13, -0.005));
-  var out = col;
-  var tBest = tHit;
-  if (bl.t < tBest) {
-    tBest = bl.t;
-    let n = bl.n;
-    let nv = saturate(dot(n, v));
-    let f = fresnelSchlick(nv, 0.6);
-    let base = vec3f(0.55, 0.57, 0.6) * (0.25 + 0.75 * lightDiffuse(n, 1.0, 0.5));
-    let refl = envReflection(reflect(rd, n)) * (0.35 + 0.65 * f);
-    let spec = blinnLobe(n, v, U.keyDir.xyz, 140.0) * U.keyColor.rgb * U.keyDir.w * 0.8;
-    out = base * 0.5 + refl * 0.6 + spec;
-  }
-  if (hl.t < tBest) {
-    let n = hl.n;
-    let base = vec3f(0.08, 0.07, 0.065) * (0.3 + 0.7 * lightDiffuse(n, 1.0, 0.5));
-    let spec = blinnLobe(n, v, U.keyDir.xyz, 30.0) * U.keyColor.rgb * U.keyDir.w * 0.12;
-    out = base + spec;
-  }
-  return out;
-}
-
 // ACES-fitted tone curve (Narkowicz), input linear, output linear 0..1
 fn tonemap(x: vec3f) -> vec3f {
   let a = 2.51;
@@ -809,8 +774,6 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     col = compositeGuide(col, ro, rd, tHit, farX, select(-1.0, 1.0, farX > 0.0));
     col = compositeGuide(col, ro, rd, tHit, nearX, select(-1.0, 1.0, nearX > 0.0));
   }
-
-  col = compositeBlade(col, ro, rd, tHit);
 
   // distance haze into the backdrop
   if (tHit < INF) {

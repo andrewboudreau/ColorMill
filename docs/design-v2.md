@@ -422,52 +422,52 @@ Nothing is placed inside existing material and no material is left behind. Expos
 
 ### 6b. Cut & fold (the flop)
 
-The other move an operator makes, and the one most milling actually uses: hold
-a knife against the sheet on the front roll's crown, draw it from the roll end
-to the middle while the sheet passes underneath, then pull the freed flap
-across and flop it over onto the other half, like turning a page hinged on
-the middle line. Because the sheet moves during the stroke the cut is a
-diagonal on the sheet, from the roll end at the bank side to the middle at
-the knife line, and the flap is a **triangle**: wide at the crown, tapering
-to a point at the far edge of the bank. Sides alternate. Same kernels, mode
-`P.fold.x` = 2 (cut from the x = 0 end) or 3 (from the x = L end);
-`GpuMpmSim.cutAndFlop(side)`, UI button "Cut & fold" (C), which alternates.
+The other move an operator makes, and the one most milling actually uses
+(reference footage: silicone colour mixing on a lab mill): hold a knife
+against the sheet on the **front face** of the front roll and draw it from
+the roll end toward the middle while the sheet comes up past it. Because the
+sheet moves during the stroke the cut is a diagonal on the sheet (the end was
+cut first and has moved up since), and the freed flap is a **triangle**: a
+point at the top near the roll end, wide at the bottom where the sheet leaves
+the nip. The operator takes the bottom corner, peels the flap off the roll,
+swings it up over the crown and across, and lays it on the bank on the other
+half, roll side up, where the nip takes it in again. Sides alternate. Same
+kernels as the log, mode `P.fold.x` = 2 (cut from the x = 0 end) or 3 (from
+the x = L end); `GpuMpmSim.cutAndFlop(side)`, UI button "Cut & fold" (C),
+which alternates. No knife is drawn: the flap simply starts to peel when the
+button is pressed.
 
-0. **Stroke** (`FLOP_CUT_SECONDS` = 1 s, host side): the blade is shown
-   sweeping along the crown from the roll end to the middle (`SimStats.blade`,
-   drawn by the renderer as a small knife). Nothing moves yet. The stroke is
-   fixed rather than tied to the roll speed: an operator paces the stroke to
-   the mill, and at the default speed the two agree anyway (the sheet advances
-   about the depth of the top of the mill in a second).
-1. **Select** the flap: material on top of the mill (above the axes and the
-   mill surface, between the rolls' 50° lines, `FLOP_CAP_SIN` = sin 50°) on
-   the cut side of the diagonal `x_cut(z)`, which runs from 0 at the back edge
-   of the bank to L/2 at the knife line (the front axis z); material in front
-   of the knife line has not reached the knife and stays. The sheet down the
-   front face and the channel are left too; they keep that side's nip fed
-   until the sheet comes round. The flap is binned by z (`NB` bins over the
-   domain depth) and y (`NS` slices over one unit above the axes) and flagged;
-   the receiving half is binned whole.
-2. **Tables**: per (half, z bin) the top of the column, the 97th percentile
-   of its particles (a few strays above do not count), or the mill surface
-   where the column is empty.
-3. **Flop** (`FLOP_SECONDS` = 0.8 s): each lifted particle turns about the
-   hinge line x = L/2, y = (topLift + topRecv)/2 of its own z column, through
-   π (smoothstep), in the plane of its z. It lands mirrored in x with the
-   flap's former top resting on the receiving half's top (half a cell of
-   clearance) and its former underside on the outside, so a flap of any
-   thickness profile stacks exactly on whatever is there: the bank on the
-   bank, the crown sheet on the crown sheet. Highest point of the swing is
-   half the roll length above the hinge, inside the domain's headroom.
-4. **Release** at rest, `F = I`, `C = 0`, as for the log. The rolls take it
-   from there: the doubled side feeds the nip, the emptied side refills from
-   its own lower sheet.
+1. **Select** the flap: the sheet on the front face (radial depth off the
+   front roll below `flapDepth()` = 3 gap + h, angle `FLAP_TH_MIN`..
+   `FLAP_TH_MAX` = 0.08..1.92 rad down from the crown, so from just in front
+   of the crown line to a little below the axis level) on the cut side of the
+   diagonal `cutX(θ)`, which runs from 0 at the top to L/2 at the bottom. It
+   is binned by arc (`NB` bins) and depth (`NS` linear slices) and flagged.
+   The receiving half's top-of-mill material (above the axes and the mill
+   surface, between the crowns' 50° lines) is binned by z (`NB` bins over the
+   domain depth) and height (`NS` slices over one unit above the axes).
+2. **Tables**: per arc bin the flap's thickness (the 97th percentile of its
+   depth, at least a cell); per z bin the receiving half's top (the same
+   percentile of its column, or the mill surface where it is empty).
+3. **Swing** (`FLOP_SECONDS` = 1 s): a particle at angle θ down the front
+   face lands mirrored in x, at z = crown − R·(θ − θmin) (the flap unrolled
+   flat back over the crown and bank, length kept) and y = topRecv(z) + h/2 +
+   (thickness − depth), so what was against the roll is now on top. It gets
+   there by swinging about the crown line: its polar angle around the hinge
+   (axis height + R + 2 gap + h, at the crown's z) goes from where it hangs
+   in front, up through vertical, to where it lies behind, its distance from
+   the hinge bulging out by `FLOP_BULGE` = 0.25 mid-swing (the corner pulled
+   out and thrown over), while x slides across. Highest point stays inside
+   the domain's headroom.
+4. **Release** at rest, `F = I`, `C = 0`, as for the log. The nip takes the
+   flap in on the other side; the bare front face on the cut side is covered
+   again by the sheet coming up from the nip within half a turn.
 
-Every flop lays a wedge of one half across the other; alternating sides
-crosses the wedges, which is where a real mill's lateral mixing comes from.
-The diagonal interface is more interface per move than a straight cut, and
-moving a wedge rather than a half keeps the sheet from sloshing from side to
-side.
+Every flop lays a wedge of one side's sheet onto the other side's bank;
+alternating sides crosses the wedges, which is where a real mill's lateral
+mixing comes from. The diagonal cut is more interface per move than a
+straight one, and moving a wedge of sheet rather than half the mill keeps the
+batch from sloshing from side to side.
 
 ---
 

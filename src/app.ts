@@ -253,7 +253,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   const cutFlop = (): void => withSim('cutAndFlop failed', (s) => {
     if (s.operatorBusy) return;
     s.cutAndFlop(flopSide);
-    hud.showHint(`Cut & fold: knife from the ${flopSide} end to the middle, the flap flops over onto the ${flopSide === 'left' ? 'right' : 'left'}`, 3000);
+    hud.showHint(`Cut & fold: the sheet is cut from the ${flopSide} end, peeled off the front roll and swung over onto the ${flopSide === 'left' ? 'right' : 'left'}`, 3000);
     flopSide = flopSide === 'left' ? 'right' : 'left';
   });
 
@@ -352,8 +352,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
         params: sim.params,
         rollerAngleFront: st.rollerAngleFront,
         rollerAngleBack: st.rollerAngleBack,
-        timeSeconds: (performance.now() - startTime) / 1000,
-        blade: st.blade
+        timeSeconds: (performance.now() - startTime) / 1000
       });
     } catch (e) {
       reportError('Render failed', e);
@@ -522,8 +521,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
         params: (sim as GpuMpmSim).params,
         rollerAngleFront: st.rollerAngleFront,
         rollerAngleBack: st.rollerAngleBack,
-        timeSeconds: (performance.now() - startTime) / 1000,
-        blade: st.blade
+        timeSeconds: (performance.now() - startTime) / 1000
       });
     },
     get ready(): boolean { return ready; }

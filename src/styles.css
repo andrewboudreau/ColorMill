@@ -434,6 +434,44 @@ body {
   animation: cm-pop 0.28s ease;
 }
 
+/* chunk sizes: three dollops, small to large */
+.cm-sizes {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(11, 18, 32, 0.9);
+}
+
+.cm-size {
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.cm-size-s { width: 12px; height: 12px; }
+.cm-size-m { width: 18px; height: 18px; }
+.cm-size-l { width: 26px; height: 26px; }
+
+.cm-size:hover,
+.cm-size:focus-visible {
+  border-color: #fff;
+  outline: 0;
+}
+
+.cm-size.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12);
+}
+
 .cm-swatch-key {
   position: absolute;
   right: -4px;

@@ -37,8 +37,8 @@ without WebGPU.
   into a log and feeds it back in end-first. ColorMill scripts both moves; a
   few rounds turn stripes into a blend.
 - **Pigment.** The base is clear silicone. A tap sets a chunk of concentrated
-  masterbatch down on the bank at one of six drop spots along the roll, and
-  chunks stack if you tap the same spot again.
+  masterbatch down on the bank at one of six drop spots along the roll, in one
+  of three sizes, and chunks stack if you tap the same spot again.
 
 <table>
   <tr>
@@ -117,6 +117,7 @@ and rejected, is in [`docs/design-v2.md`](docs/design-v2.md) and
 | Input | Action |
 | --- | --- |
 | Drop-slot strip (bottom bar) | Pick which of the 6 spots along the roll the next tap lands on (also `[` / `]`, or `?slot=3`) |
+| Chunk-size dots (bottom bar) | Small, medium or large chunk for the next tap (also `-` / `=`, or `?chunk=s`, `m`, `l`) |
 | Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack) |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
 | **Cut & fold** / `C` | Cut the sheet on the front roll from the end and fold the triangular flap over the cut toward the middle (ends alternate) |
@@ -127,6 +128,7 @@ and rejected, is in [`docs/design-v2.md`](docs/design-v2.md) and
 | `1`–`8` | Inject palette pigments 1–8 |
 | `↑` / `↓`, `←` / `→` | Roller speed, nip gap |
 | `[` / `]` | Move the pigment drop slot left / right |
+| `-` / `=` | Smaller / larger pigment chunks |
 | Drag / wheel / pinch | Orbit / zoom the camera; double-tap resets to the front view |
 | Right drawer (`P`) | Roller speed (rpm), friction ratio, nip gap, dispersion, gravity, back-roll friction, batch size, quality, auto-orbit, stats |
 

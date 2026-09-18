@@ -51,7 +51,7 @@ export function defaultLightRig(): LightRig {
   };
 }
 
-const UNIFORM_FLOATS = 18 * 4; // 18 vec4f, see Uniforms in raymarch.wgsl
+const UNIFORM_FLOATS = 17 * 4; // 17 vec4f, see Uniforms in raymarch.wgsl
 
 /** Edge length (in texels) of the blocks of the coarse max-density mip used for empty-space skipping. */
 export const MIP_BLOCK = 4;
@@ -278,9 +278,6 @@ export class RayMarchRenderer implements Renderer {
     // end-guide plates: plate top (a little above the settled bank), half depth in z, thickness, enabled
     const guideTop = bankTopY(1) + 0.15;
     set4(16, guideTop, GEOMETRY.bankHalfDepth, 0.012, this.endGuides ? 1 : 0);
-    // the operator's knife (cut & fold stroke): blade edge at xyz, w = shown
-    const b = info.blade;
-    set4(17, b ? b.x : 0, b ? b.y : 0, b ? b.z : 0, b ? 1 : 0);
     this.device.queue.writeBuffer(this.uniformBuffer, 0, u);
   }
 

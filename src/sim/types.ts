@@ -23,8 +23,6 @@ export interface SimStats {
   /** front roller angle (rad) accumulated for rendering the rotation */
   readonly rollerAngleFront: number;
   readonly rollerAngleBack: number;
-  /** the operator's knife during a cut & fold stroke (blade edge on the sheet), null when not shown */
-  readonly blade: { readonly x: number; readonly y: number; readonly z: number } | null;
 }
 
 /** CPU readback of particle state (for tests / diagnostics). */
@@ -100,11 +98,11 @@ export interface GpuMpmSim {
   clearPigment(): void;
   /** Start the scripted operator move: cut the sheet off the front roll, roll it into a log, turn it and set it on the bank (design §6). No-op if one is running. */
   cutAndFold(): void;
-  /** Start the other operator move: cut the sheet across at the middle of the roll and flop what is on
-   *  top of the mill on `side` (the x < L/2 half for 'left') over onto the other half, like turning a
-   *  page (design §6). No-op if a move is running. */
+  /** Start the other operator move: cut the sheet on the front roll from the `side` end (x = 0 for 'left')
+   *  toward the middle, peel the freed triangular flap off the roll and swing it over onto the other half
+   *  (design §6b). No-op if a move is running. */
   cutAndFlop(side: 'left' | 'right'): void;
-  /** true while an operator move (cut & roll, or cut & fold including its knife stroke) is running */
+  /** true while an operator move (cut & roll or cut & fold) is running */
   readonly operatorBusy: boolean;
   /** Read particle state back to the CPU (slow; tests and diagnostics only). */
   readParticles(): Promise<ParticleSnapshot>;

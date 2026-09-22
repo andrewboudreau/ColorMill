@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BASE_LATENT, PIGMENTS, hexToRgb, latentToHex, mixLatents } from '../src/color/pigments';
 import {
-  CUSTOM_KEY, MAX_PARTS, STARTER_RECIPES, describeRecipe, formatMix, ladder, mixRecipe, parseMix,
+  CUSTOM_KEY, MAX_PARTS, REFERENCE_TERRACOTTA_HEX, STARTER_RECIPES, describeRecipe, formatMix, ladder, mixRecipe, parseMix,
   type CustomPigment, type RecipeEntry
 } from '../src/mixer/mixer';
 
@@ -159,7 +159,7 @@ describe('ladder', () => {
 describe('STARTER_RECIPES', () => {
   it('only uses palette keys with positive parts', () => {
     const names = STARTER_RECIPES.map((s) => s.name);
-    for (const want of ['Green', 'Purple', 'Skin', 'Grey', 'Olive']) expect(names).toContain(want);
+    for (const want of ['Green', 'Purple', 'Skin', 'Grey', 'Olive', 'Terracotta']) expect(names).toContain(want);
     for (const s of STARTER_RECIPES) {
       expect(s.recipe.length).toBeGreaterThan(0);
       for (const e of s.recipe) {
@@ -168,5 +168,27 @@ describe('STARTER_RECIPES', () => {
         expect(e.parts).toBeLessThanOrEqual(MAX_PARTS);
       }
     }
+  });
+});
+
+describe('reference check', () => {
+  it('mixes the Terracotta starter to the brown a real mill made from red, yellow and teal bands', () => {
+    const starter = STARTER_RECIPES.find((s) => s.name === 'Terracotta');
+    expect(starter).toBeDefined();
+    const mix = hexToRgb(mixRecipe(starter!.recipe).hex);
+    const ref = hexToRgb(REFERENCE_TERRACOTTA_HEX);
+    // a warm brown: red over green over blue, and within ~0.1 per channel of the sampled result
+    expect(mix[0]).toBeGreaterThan(mix[1]);
+    expect(mix[1]).toBeGreaterThan(mix[2]);
+    for (let i = 0; i < 3; i++) expect(Math.abs(mix[i] - ref[i])).toBeLessThan(0.11);
+  });
+
+  it('mixes the three sampled band colours in equal parts to a sienna close to the reference', () => {
+    expect(PIGMENTS.cobaltTeal.hex).toBe('#20a4a4');
+    const res = mixRecipe([{ key: 'cadmiumRed', parts: 1 }, { key: 'cadmiumYellow', parts: 1 }, { key: 'cobaltTeal', parts: 1 }]);
+    const [r, g, b] = hexToRgb(res.hex);
+    // equal parts of the stronger palette yellow lands on an ochre, still red over green over blue
+    expect(r).toBeGreaterThan(g);
+    expect(g).toBeGreaterThan(b);
   });
 });

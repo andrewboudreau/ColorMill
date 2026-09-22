@@ -339,8 +339,9 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   (generated once with the official `web/vendor/mixbox/mixbox.js`
   `rgbToLatent`, stored as constants in `src/color/pigments.ts`):
   Cadmium Red, Cadmium Yellow, Cobalt Blue, Phthalo Green, Ultramarine,
-  Burnt Sienna, Ivory Black, Titanium White, plus "custom" from a colour
-  picker (converted with mixbox.js at runtime).
+  Burnt Sienna, Ivory Black, Titanium White, the rest of the Mixbox set and
+  a Cobalt Teal (`#20a4a4`, the turquoise the reference mill footage uses),
+  plus "custom" from a colour picker (converted with mixbox.js at runtime).
 - **Inject** kernel: `addPigment(center, radius, latent, strength)` blends
   particle latents inside the sphere: `z = mix(z, zPigment, strength·t)`,
   `t = 1 − |d|/radius`.
@@ -364,6 +365,19 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   particle picking up pigment takes the neighbourhood's colour outright.
   Mixing therefore happens where the material is sheared — at the nip — and
   not in the resting bank.
+
+**Reference check.** Footage of a real two-roll mill (silicone, three bands
+of about equal width across the front roll: red, yellow, teal) milled to a
+terracotta. Sampling the frames gives the bands as `#d60720`, `#e8ef10`,
+`#24a2a2` and the result as `#a4634b`; Mixbox mixes those three in equal
+parts to `#a27242`, a few points yellower and within 0.1 per channel, while
+the plain sRGB average is `#a18846`, a desaturated olive. The same
+proportions with the palette pigments give an ochre (`#a5882f`): Cadmium
+Yellow is a far stronger tint than the pale yellow in the footage, so the
+closest palette recipe is 2 red : ½ yellow : 1½ teal (`#a26531`, the
+mixer's Terracotta starter). A second clip (a violet, a white, a black and
+an orange chunk on a clear slab, ending sky blue) does not add up under any
+subtractive model and is not used.
 
 ---
 

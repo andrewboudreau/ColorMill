@@ -82,6 +82,10 @@ export interface MillParams {
   backFriction: number;
   /** front-roll adhesion layer thickness in cells (0 = auto: gap/h + 1) */
   tackCells: number;
+  /** cut & roll: how the log goes back on the mill. 0 = let go of the whole log at once
+   *  (dropped onto the nip); > 0 = lowered in end-first at this speed (sim units / s along
+   *  the log axis), released only where it touches the pile the nip is eating. */
+  logFeed: number;
 }
 
 export const DEFAULT_PARAMS: Readonly<MillParams> = {
@@ -94,7 +98,10 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
      milling; at 0 it stays black and streaks around the roll) */
   dispersion: 0.02,
   backFriction: 0.4,
-  tackCells: 0
+  tackCells: 0,
+  /* drop: lowering the log in released it a thin slice at a time, and the nip spread and
+     tore each slice before the rest arrived; the whole log set down at once holds together */
+  logFeed: 0
 };
 
 export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max: number; step: number }>> = {
@@ -104,7 +111,8 @@ export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max:
   gravity: { min: 0, max: 6, step: 0.1 },
   dispersion: { min: 0, max: 0.5, step: 0.005 },
   backFriction: { min: 0, max: 1, step: 0.02 },
-  tackCells: { min: 0, max: 6, step: 0.1 }
+  tackCells: { min: 0, max: 6, step: 0.1 },
+  logFeed: { min: 0, max: 0.6, step: 0.05 }
 };
 
 /** Fixed geometry (sim units). */

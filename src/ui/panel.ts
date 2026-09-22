@@ -52,7 +52,8 @@ const SLIDERS: readonly SliderSpec[] = [
   { key: 'gap', label: 'Nip gap', format: (v) => v.toFixed(3) },
   { key: 'dispersion', label: 'Dispersion', format: (v) => v.toFixed(2) },
   { key: 'gravity', label: 'Gravity', format: (v) => v.toFixed(1) },
-  { key: 'backFriction', label: 'Back-roll friction', format: (v) => v.toFixed(2) }
+  { key: 'backFriction', label: 'Back-roll friction', format: (v) => v.toFixed(2) },
+  { key: 'logFeed', label: 'Log feed', format: (v) => (v > 0 ? `lower in ${v.toFixed(2)}/s` : 'drop') }
 ];
 
 const PRESETS: readonly QualityPreset[] = ['low', 'medium', 'high', 'ultra'];

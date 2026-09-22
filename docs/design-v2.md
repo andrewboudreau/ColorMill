@@ -418,18 +418,25 @@ roll axis. Modelled as a scripted kinematic move:
    was to its place in the standing log (smoothstep). The log stands tilted
    `FOLD_TILT` (0.42 rad) from vertical toward the viewer, axis
    `a = (0, cos, sin)`, over the nip at `x = L/2`.
-4. **Feed** (`FOLD_FEED_SPEED` = 0.15 units/s along the axis): the held log
-   descends along `−a`; a particle that reaches the release plane is released:
-   flag cleared, `C = 0`, `F` kept, `v` = feed velocity, P2G affine rebuilt.
+4. **Put it back** (`params.logFeed`, the "Log feed" slider, 0 to 0.6 units/s;
+   captured when the move starts). **Drop** (`logFeed` = 0, the default): the
+   substep after the roll ends, every held particle is released where it
+   stands (`v = 0`, `C = 0`, `F = I`); the log stands on the nip and gravity
+   and the rolls take it from there, so it goes in as one body. Lowering it
+   in (below) released it a thin slice at a time, and the nip spread and tore
+   each slice before the rest arrived. **Lower in** (`logFeed` > 0, the
+   design's original move at `FOLD_FEED_SPEED` = 0.15): the held log
+   descends along `−a` at that speed; a particle that reaches the release plane is released:
+   flag cleared, `C = 0`, `F = I`, `v` = feed velocity, P2G affine rebuilt.
    The release plane is one cell above the **live pile** the nip is eating:
    g2p reduces, every substep, the top of the settled material under the
    log's footprint (node mass ≥ 2 particles; material released less than
    0.5 s ago does not count, otherwise the log would let go of itself in a
    cascade), falling back to the roll tops + 3h. So nothing is let go in
    mid-air and the log is never pushed into a pile the nip has not taken.
-   The move ends when the log is used up (`FOLD_DURATION` ≈ 10.5 s: roll, then the
-   half-length log plus its tilted end face at the feed speed); `finish`
-   releases anything still held.
+   The move ends when the log is used up (`foldDuration(feed)`: roll, then the
+   half-length log plus its tilted end face at the feed speed, ≈ 10.5 s at
+   0.15; roll + 0.02 s for the drop); `finish` releases anything still held.
 
 Nothing is placed inside existing material and no material is left behind. Exposed as
 `GpuMpmSim.cutAndFold()`; the UI button is "Cut & roll" (F).
@@ -576,7 +583,8 @@ so the renderer can be tested with a procedural volume without the sim.
   "Cut & roll",
   "Cut & fold" (alternating sides), "Clear pigment", "Reset", Pause.
 - Right drawer (collapsible; hidden by default on narrow screens): sliders
-  for roller speed (rpm shown), friction ratio, nip gap, dispersion, gravity;
+  for roller speed (rpm shown), friction ratio, nip gap, dispersion, gravity,
+  back-roll friction, log feed (drop, or lower in at a speed; §6);
   quality select; camera auto-orbit toggle; stats (particles, grid, fps,
   ms/frame, sim speed).
 - Drag in the viewport orbits; wheel/pinch zooms; double-tap resets the

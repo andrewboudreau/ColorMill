@@ -101,8 +101,9 @@ out in front of the roll and over onto the sheet beside the cut, roll-side
 up, and the doubled sheet rides up into the nip. **Cut & roll** takes
 everything on the mill, winds it into a
 volume-preserving log standing over the nip (bank kneaded into the core,
-sheet wrapped around it), and feeds the log down onto the pile the rolls are
-eating. Material from every position along the roll ends up in the log's
+sheet wrapped around it), and sets the log down on the nip for the rolls to
+pull in (the **Log feed** slider lowers it in end-first instead, released only
+onto the pile the rolls are eating). Material from every position along the roll ends up in the log's
 cross-section and is spread back across the width as the nip flattens it.
 Nothing is lost or invented.
 
@@ -143,7 +144,7 @@ lays the same three bands on the bank.
 | Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack) |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
 | **Cut & fold** / `C` | Cut the sheet on the front roll from the end and fold the triangular flap over the cut toward the middle (ends alternate) |
-| **Cut & roll** / `F` | Run the operator's cut-roll-and-feed move |
+| **Cut & roll** / `F` | Cut everything off, roll it into a log and drop it back on the nip (or lower it in: **Log feed** slider) |
 | **Clear pigment** | Reset every particle to clear silicone |
 | **Reset** / `R` | Re-seed the bank |
 | **Pause** / `Space` | Pause / resume |

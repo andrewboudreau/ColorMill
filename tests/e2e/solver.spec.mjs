@@ -9,7 +9,8 @@
  *
  *   E2E_SOLVER_FRAMES=<n>      frames for the stability/sheet run (234 = 3 s)
  *   E2E_SOLVER_MIX_FRAMES=<n>  frames after injecting pigment (469 = 6 s)
- *   E2E_SOLVER_FOLD=1          also exercise cutAndFold() (adds ~1.8 s of sim; cutAndFlop() always runs): the
+ *   E2E_SOLVER_FOLD=1          also exercise cutAndFold() both ways (adds ~4 s of sim; cutAndFlop() always runs): the
+ *                              dropped log (default) is let go whole and settles, then the lowered-in log: the
  *                              folded sheet must land as a slab (max node density
  *                              <= 6, >= 20 distinct z cells) and be released cleanly
  */
@@ -242,9 +243,38 @@ export default async function run() {
     assert(flop.kin === 0, `everything is released once the flop is over (${flop.kin} still held)`);
     assert(aFlop.bad === 0 && aFlop.outside === 0 && aFlop.inRoller === 0 && aFlop.n === chunk.count, 'state sane after cut & fold');
 
-    // --- optional: cut & fold ---------------------------------------------
+    // --- optional: cut & roll ---------------------------------------------
     if (doFold) {
+      // 1. the default: the log is dropped whole right after the roll. A substep
+      // after FOLD_ROLL_SECONDS nothing is held, everything stays inside the
+      // domain and outside the rolls, and the log has not exploded (max |v|
+      // bounded, material still spans many y cells while it stands)
+      const drop = await page.evaluate(async ([n, h]) => {
+        window.__solver.sim.params.logFeed = 0;
+        window.__solver.sim.cutAndFold();
+        await window.__solver.stepFrames(n);
+        const s = await window.__solver.snapshot();
+        let kin = 0, maxV = 0;
+        const yCells = new Set();
+        for (let p = 0; p < s.count; p++) {
+          if (s.flags[p] & 1) kin++;
+          maxV = Math.max(maxV, Math.hypot(s.velocities[3 * p], s.velocities[3 * p + 1], s.velocities[3 * p + 2]));
+          yCells.add(Math.floor(s.positions[3 * p + 1] / h));
+        }
+        return { kin, maxV, yCells: yCells.size, count: s.count, positions: Array.from(s.positions), velocities: Array.from(s.velocities), latents: Array.from(s.latents), deformation: Array.from(s.deformation), flags: Array.from(s.flags), busy: window.__solver.sim.operatorBusy, error: window.__solver.error };
+      }, [framesFor(1.2 + 0.4), dims.h]);
+      const aDrop = analyse(drop, dims);
+      console.log(`  cut & roll (drop): ${drop.kin} held of ${drop.count} 0.4 s after the roll, max |v| ${drop.maxV.toFixed(2)}, ${drop.yCells} y cells; ${JSON.stringify({ bad: aDrop.bad, outside: aDrop.outside, inRoller: aDrop.inRoller, busy: drop.busy })}`);
+      assert(!drop.error, 'no WebGPU errors during the dropped cut & roll: ' + drop.error);
+      assert(drop.kin === 0 && !drop.busy, `the dropped log is let go whole right after the roll (${drop.kin} still held)`);
+      assert(drop.maxV < 6, `the dropped log does not explode (max |v| ${drop.maxV.toFixed(2)})`);
+      assert(aDrop.bad === 0 && aDrop.outside === 0 && aDrop.inRoller === 0 && aDrop.n === chunk.count, 'state sane after the dropped log');
+      // let it settle and get pulled in before the second move
+      await page.evaluate(async (n) => { await window.__solver.stepFrames(n); }, framesFor(1.0));
+
+      // 2. lowered in at FOLD_FEED_SPEED: released a slice at a time onto the live pile
       const mid = await page.evaluate(async () => {
+        window.__solver.sim.params.logFeed = 0.15;
         window.__solver.sim.cutAndFold();
         await window.__solver.stepFrames(10);
         const s = await window.__solver.snapshot();

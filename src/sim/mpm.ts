@@ -40,21 +40,29 @@ export const PARTICLE_WG = 128;
 export const GRID_WG = 4;
 /** Uniform ring stride (>= minUniformBufferOffsetAlignment). */
 const UNIFORM_STRIDE = 256;
-/** Operator move (design §6): roll the sheet into a log (FOLD_ROLL_SECONDS),
- * then feed the standing log end-first into the nip at FOLD_FEED_SPEED. */
+/** Operator move (design §6): roll the sheet into a log (FOLD_ROLL_SECONDS), then
+ * put it back: dropped whole onto the nip (params.logFeed = 0) or lowered in
+ * end-first at params.logFeed units/s. */
 /** Pigment load of a masterbatch chunk (mirrors PIGMENT_LOAD in common.wgsl). The clear base
  * carries load 0: pigment is an opaque colourant in a transparent medium, so a node's colour
  * is the Mixbox mix of the pigments present and its load per unit mass sets the opacity. */
 export const PIGMENT_LOAD = 12.0;
 export const FOLD_ROLL_SECONDS = 1.2;
-export const FOLD_FEED_SPEED = 0.15;          // sim units / s along the log axis (the nip only takes the log where it touches it)
+/** Lowering speed the design doc and the lowered-in e2e case use (sim units / s along the log axis). */
+export const FOLD_FEED_SPEED = 0.15;
 export const FOLD_TILT = 0.42;                // log axis tilt from vertical toward the viewer (rad)
 /** Arc bins and depth slices of the fold's thickness histogram (mirror NB / NS in fold.wgsl). */
 export const FOLD_BINS = 128;
 export const FOLD_SLICES = 32;
-/** Total script length: roll, then feed the log (the material folded in half: L/2 long,
- * plus the tilted end face of a log up to ~0.7 units across) through the nip. */
-export const FOLD_DURATION = FOLD_ROLL_SECONDS + (0.5 * GEOMETRY.length + 0.6) / FOLD_FEED_SPEED + 0.3;
+/** Total script length for a given feed: roll, then either let the whole log go (a
+ * substep later) or lower it (the material folded in half: L/2 long, plus the
+ * tilted end face of a log up to ~0.7 units across) through the nip. */
+export function foldDuration(logFeed: number): number {
+  if (!(logFeed > 0)) return FOLD_ROLL_SECONDS + 0.02;
+  return FOLD_ROLL_SECONDS + (0.5 * GEOMETRY.length + 0.6) / logFeed + 0.3;
+}
+/** Script length of the lowered-in move at FOLD_FEED_SPEED (≈ 10.5 s). */
+export const FOLD_DURATION = foldDuration(FOLD_FEED_SPEED);
 /** Cut & fold (fold the cut flap over the cut onto the sheet beside it; fold.wgsl): the fold takes FLOP_SECONDS. */
 export const FLOP_SECONDS = 0.8;
 export const FLOP_DURATION = FLOP_SECONDS + 0.02;
@@ -181,6 +189,9 @@ export class GpuMpm implements GpuMpmSim {
   private foldPending = false;
   private foldActive = false;
   private foldTime = 0;
+  /** feed of the running / pending cut & roll (captured when the move starts, so a
+   *  slider change mid-move cannot change its length under it) */
+  private foldFeed = 0;
   private foldMode: FoldMode = 0;
 
   private readbackStaging: GPUBuffer | null = null;
@@ -442,7 +453,7 @@ export class GpuMpm implements GpuMpmSim {
     f.set([front.axisY, front.axisZ, front.omegaX, GEOMETRY.radius], o + 16);
     f.set([mu, lambda, this.config.material.thetaC, this.config.material.thetaS], o + 20);
     f.set([pVol, pMass, pMass / (pVol * MATERIAL_DENSITY), p.dispersion], o + 24);
-    f.set([foldActive ? this.foldMode : 0, foldT, FOLD_ROLL_SECONDS, FOLD_FEED_SPEED], o + 28);
+    f.set([foldActive ? this.foldMode : 0, foldT, FOLD_ROLL_SECONDS, this.foldFeed], o + 28);
     // fold: the live bank top is reduced on the GPU (fold.wgsl); fold2.x is only the fallback
     const yMax = GEOMETRY.domain[1] - 3 * h;
     const bankTopFallback = Math.min(bankTopY(this.batch, this.config.params), yMax);
@@ -513,7 +524,7 @@ export class GpuMpm implements GpuMpmSim {
     // uniform ring: one slot per substep (fold script state differs per substep)
     let foldActive = this.foldActive || this.foldPending;
     let foldT = this.foldPending ? 0 : this.foldTime;
-    const duration = this.foldMode === 1 ? FOLD_DURATION : FLOP_DURATION;
+    const duration = this.foldMode === 1 ? foldDuration(this.foldFeed) : FLOP_DURATION;
     const finishAt: number[] = [];
     for (let s = 0; s < substeps; s++) {
       this.writeParams(s, foldT, foldActive);
@@ -746,6 +757,7 @@ export class GpuMpm implements GpuMpmSim {
   cutAndFold(): void {
     if (this.destroyed || this.operatorBusy) return;
     this.foldMode = 1;
+    this.foldFeed = Math.max(this.params.logFeed, 0);
     this.foldPending = true;
   }
 

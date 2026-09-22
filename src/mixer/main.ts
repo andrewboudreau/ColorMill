@@ -11,7 +11,9 @@
  */
 import './styles.css';
 import { PALETTE_ORDER, PIGMENTS, hexToRgb, rgbToLatentAsync, type Latent } from '../color/pigments';
-import { formatDrops, recipeToDrops } from '../drops';
+import { recipeToDrops } from '../drops';
+import { LINK_PARAM_KEYS, PARAM_LABELS, clampParam, formatMillQuery, isDefaultParam, parseMillStart } from '../config/link';
+import { BATCH_CHOICES, DEFAULT_PARAMS, PARAM_LIMITS, QUALITY_PRESETS, type MillParams, type QualityPreset } from '../config/mill';
 import {
   CUSTOM_KEY, MAX_PARTS, STARTER_RECIPES, describeRecipe, formatMix, ladder, mixRecipe, parseMix,
   type CustomPigment, type MixResult, type RecipeEntry
@@ -23,6 +25,11 @@ interface MixerApi {
   getRecipe(): RecipeEntry[];
   result(): { hex: string; naiveHex: string; latent: number[] };
   reset(): void;
+  /** mill settings forwarded to the simulator (only non-defaults reach the link) */
+  setMill(key: keyof MillParams, value: number): void;
+  setMillPreset(preset: QualityPreset | undefined): void;
+  setMillBatch(batch: number): void;
+  millQuery(): string;
 }
 
 declare global {
@@ -54,6 +61,12 @@ function boot(): void {
   parts.set(CUSTOM_KEY, 0);
   let custom: CustomPigment | undefined;
   let customHex = '#ff8a00';
+  // mill settings forwarded to the simulator: the URL's, else the defaults
+  const start = parseMillStart(window.location.search);
+  const mill: MillParams = { ...DEFAULT_PARAMS, ...start.params };
+  let millPreset: QualityPreset | undefined = start.preset;
+  let millBatch = start.batch;
+  const millQuery = (): string => formatMillQuery({ batch: millBatch, preset: millPreset, params: mill });
   let lastResult: MixResult = mixRecipe([]);
 
   const recipe = (): RecipeEntry[] => [...parts.entries()].map(([key, p]) => ({ key, parts: p }));
@@ -69,7 +82,7 @@ function boot(): void {
   }
   const head = el('div', 'mx-head');
   head.appendChild(el('h1', undefined, 'Colour mixer'));
-  head.appendChild(el('p', undefined, 'Pick pigments in parts and see what the mill will make of them. The big swatch is mixed the way the simulation mixes, a parts-weighted average of the same Mixbox pigment latents, so it is the colour the batch converges to once it is milled through. The small one is the plain RGB average, which is what naive mixing would give.'));
+  head.appendChild(el('p', undefined, 'Pick pigments in parts, see what the mill will make of them, then open the mill with those chunks already on the bank. The big swatch is mixed the way the simulation mixes, a parts-weighted average of the same Mixbox pigment latents, so it is the colour the batch converges to once it is milled through; the small one is the plain RGB average. Mill settings live under the button and only reach the link when you change them.'));
   main.append(nav, head);
 
   const grid = el('div', 'mx-grid');
@@ -101,11 +114,21 @@ function boot(): void {
     left.appendChild(row);
     rows.set(key, { row, range, count });
   };
+  let family: string | undefined;
   for (const key of PALETTE_ORDER) {
     const p = PIGMENTS[key];
     if (!p) continue;
+    if (p.family !== family) {
+      family = p.family;
+      const h = el('h3', 'mixer-family', family === 'silicone' ? 'Silicone pastes' : 'Artist pigments');
+      h.title = family === 'silicone'
+        ? 'Pigments silicone colour houses use, or stand-ins for their common paste colours'
+        : 'Mixbox oil-paint pigments kept for range; cadmium and cobalt are not used in silicone';
+      left.appendChild(h);
+    }
     const sw = el('div', 'mixer-swatch');
     sw.style.background = p.hex;
+    sw.title = p.note;
     makeRow(key, p.name, sw, p.hex);
   }
   // custom colour: the native picker is the swatch; the latent comes from mixbox.js on demand
@@ -160,8 +183,19 @@ function boot(): void {
   const ladderCap = el('p', 'mx-ladder-caption', '');
   right.append(ladderEl, ladderCap);
 
+  // hand the recipe to the simulator: one medium chunk per part (halves as small
+  // chunks), spread along the roll, via the mill's ?drops= parameter, plus any
+  // mill setting changed below
+  const openMill = el('a', 'mx-btn mx-btn-primary mx-btn-big', 'Open in the mill');
+  openMill.id = 'open-mill';
+  openMill.href = 'index.html';
+  openMill.title = 'Start the simulator with these pigments already dropped on the bank';
+  const openHint = el('p', 'mx-open-hint', '');
+  openHint.id = 'open-hint';
+  right.append(openMill, openHint);
+
   const actions = el('div', 'mx-actions');
-  const share = el('a', 'mx-btn mx-btn-primary', 'Share link');
+  const share = el('a', 'mx-btn', 'Share link');
   share.id = 'share-link';
   share.href = '#';
   const copy = el('button', 'mx-btn', 'Copy recipe');
@@ -173,14 +207,74 @@ function boot(): void {
   const clear = el('button', 'mx-btn', 'Clear');
   clear.type = 'button';
   clear.addEventListener('click', () => reset());
-  // hand the recipe to the simulator: one medium chunk per part (halves as small
-  // chunks), spread along the roll, via the mill's ?drops= parameter
-  const openMill = el('a', 'mx-btn', 'Open in the mill');
-  openMill.id = 'open-mill';
-  openMill.href = 'index.html';
-  openMill.title = 'Start the simulator with these pigments already dropped on the bank';
-  actions.append(share, copy, clear, openMill);
+  actions.append(share, copy, clear);
   right.appendChild(actions);
+
+  // --- mill settings (advanced): the simulator's drawer, forwarded in the link ---------
+  const adv = el('details', 'mx-advanced');
+  adv.id = 'mill-settings';
+  const advSummary = el('summary');
+  const advTitle = el('span', undefined, 'Mill settings');
+  const advState = el('span', 'mx-adv-state', 'defaults');
+  advState.id = 'mill-settings-state';
+  advSummary.append(advTitle, advState);
+  adv.appendChild(advSummary);
+  const advBody = el('div', 'mx-adv-body');
+  adv.appendChild(advBody);
+  const selectRow = (label: string, select: HTMLSelectElement): void => {
+    const row = el('label', 'mx-adv-row');
+    row.append(el('span', 'mx-adv-label', label), select);
+    advBody.appendChild(row);
+  };
+  const presetSel = el('select', 'mx-adv-select');
+  presetSel.name = 'preset';
+  for (const [v, label] of [['', 'Auto (by GPU)'], ...(Object.keys(QUALITY_PRESETS) as QualityPreset[]).map((p) => [p, p] as const)]) {
+    const o = el('option', undefined, label);
+    o.value = v;
+    presetSel.appendChild(o);
+  }
+  presetSel.addEventListener('change', () => setMillPreset(presetSel.value ? (presetSel.value as QualityPreset) : undefined));
+  selectRow('Quality', presetSel);
+  const batchSel = el('select', 'mx-adv-select');
+  batchSel.name = 'batch';
+  const batchChoices = BATCH_CHOICES.includes(millBatch) ? BATCH_CHOICES : [...BATCH_CHOICES, millBatch].sort((a, b) => a - b);
+  for (const b of batchChoices) {
+    const o = el('option', undefined, `${b}×`);
+    o.value = String(b);
+    batchSel.appendChild(o);
+  }
+  batchSel.addEventListener('change', () => setMillBatch(parseFloat(batchSel.value)));
+  selectRow('Batch', batchSel);
+  const millRows = new Map<keyof MillParams, { range: HTMLInputElement; value: HTMLElement }>();
+  for (const key of LINK_PARAM_KEYS) {
+    const spec = PARAM_LABELS[key];
+    const lim = PARAM_LIMITS[key];
+    const row = el('label', 'mx-adv-row mx-adv-slider');
+    const name = el('span', 'mx-adv-label', spec.label);
+    const value = el('span', 'mx-adv-value', spec.format(mill[key]));
+    const range = el('input', 'mx-adv-range');
+    range.type = 'range';
+    range.name = key;
+    range.min = String(lim.min);
+    range.max = String(lim.max);
+    range.step = String(lim.step);
+    range.value = String(mill[key]);
+    range.addEventListener('input', () => setMill(key, parseFloat(range.value)));
+    row.append(name, value, range);
+    advBody.appendChild(row);
+    millRows.set(key, { range, value });
+  }
+  const advReset = el('button', 'mx-btn mx-btn-small', 'Reset to defaults');
+  advReset.type = 'button';
+  advReset.addEventListener('click', () => {
+    for (const key of LINK_PARAM_KEYS) mill[key] = DEFAULT_PARAMS[key];
+    millPreset = undefined;
+    millBatch = 1;
+    render();
+  });
+  advBody.appendChild(advReset);
+  advBody.appendChild(el('p', 'mx-adv-note', 'The same sliders as the simulator\'s drawer. Only settings that differ from the defaults are written into the links, so most links stay short.'));
+  right.appendChild(adv);
 
   const startersTitle = el('h2', undefined, 'Starters');
   startersTitle.style.marginTop = '18px';
@@ -232,13 +326,48 @@ function boot(): void {
     } else {
       ladderCap.textContent = top.length === 1 ? 'Add a second pigment to see the blend ladder' : '';
     }
-    // the recipe reads as written in the URL: ':' and ',' are fine in a query string
+    // mill settings rows
+    presetSel.value = millPreset ?? '';
+    batchSel.value = String(millBatch);
+    for (const [key, ui] of millRows) {
+      if (parseFloat(ui.range.value) !== mill[key]) ui.range.value = String(mill[key]);
+      ui.value.textContent = PARAM_LABELS[key].format(mill[key]);
+      ui.range.parentElement?.classList.toggle('is-changed', !isDefaultParam(key, mill[key]));
+    }
+    const changed = LINK_PARAM_KEYS.filter((k) => !isDefaultParam(k, mill[k])).length + (millPreset ? 1 : 0) + (millBatch !== 1 ? 1 : 0);
+    advState.textContent = changed ? `${changed} changed` : 'defaults';
+    adv.classList.toggle('is-changed', changed > 0);
+    // the recipe reads as written in the URL: ':' and ',' are fine in a query string;
+    // the mill settings ride along so a shared mixer link restores them too
+    const settings = millQuery();
     const q = formatMix(r);
-    const href = `${window.location.origin}${window.location.pathname}${q ? `?mix=${q}` : ''}`;
+    const pieces = [q ? `mix=${q}` : '', settings].filter(Boolean);
+    const href = `${window.location.origin}${window.location.pathname}${pieces.length ? `?${pieces.join('&')}` : ''}`;
     share.href = href;
     history.replaceState(null, '', href);
-    const drops = formatDrops(recipeToDrops(r, custom?.hex));
-    openMill.href = drops ? `index.html?drops=${drops}` : 'index.html';
+    const drops = recipeToDrops(r, custom?.hex);
+    const millHref = formatMillQuery({ drops, batch: millBatch, preset: millPreset, params: mill });
+    openMill.href = millHref ? `index.html?${millHref}` : 'index.html';
+    const n = drops.length;
+    openHint.textContent = n
+      ? `Starts the mill with ${n} chunk${n === 1 ? '' : 's'} on the bank${changed ? ` and ${changed} setting${changed === 1 ? '' : 's'} changed` : ''}.`
+      : changed ? `Starts an empty mill with ${changed} setting${changed === 1 ? '' : 's'} changed.` : 'Starts the mill with nothing dropped yet.';
+  }
+
+  function setMill(key: keyof MillParams, value: number): void {
+    if (!(key in PARAM_LIMITS)) return;
+    mill[key] = clampParam(key, Number.isFinite(value) ? value : DEFAULT_PARAMS[key]);
+    render();
+  }
+
+  function setMillPreset(preset: QualityPreset | undefined): void {
+    millPreset = preset && preset in QUALITY_PRESETS ? preset : undefined;
+    render();
+  }
+
+  function setMillBatch(batch: number): void {
+    millBatch = Number.isFinite(batch) && batch > 0 ? batch : 1;
+    render();
   }
 
   function setParts(key: string, p: number): void {
@@ -268,6 +397,10 @@ function boot(): void {
     ready: true,
     setParts,
     getRecipe: () => recipe(),
+    setMill,
+    setMillPreset,
+    setMillBatch,
+    millQuery,
     result: () => ({ hex: lastResult.hex, naiveHex: lastResult.naiveHex, latent: Array.from(lastResult.latent) }),
     reset
   };

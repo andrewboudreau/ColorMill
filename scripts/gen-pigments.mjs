@@ -31,28 +31,46 @@ const OUT_TS = path.join(ROOT, 'src', 'color', 'pigments.ts');
 const CHECK_ONLY = process.argv.includes('--check');
 
 /**
- * The palette. sRGB values are the Mixbox pigment set (see the header of
- * mixbox.js) plus titanium white, ivory black and a cobalt teal (PG50, the
- * turquoise the reference mill videos use; docs/design-v2.md §5b). `key` is the identifier
- * used by the UI, the keyboard shortcuts and window.__colormill.tapPigment.
+ * The palette, in two families (docs/design-v2.md §5):
+ *
+ *  - 'silicone': pigments a silicone colour house actually uses (iron oxides,
+ *    titanium dioxide, carbon black, phthalocyanines, ultramarine, azo and
+ *    quinacridone organics) or a plausible stand-in for a common paste
+ *    colour. Where the sRGB value is one of Mixbox's calibrated pigments it
+ *    is that pigment's; the ones marked "estimated" have no published paste
+ *    colour, so their hex is taken from artist-paint swatches of the same
+ *    colour-index pigment.
+ *  - 'artist': the rest of the Mixbox oil-paint set (sRGB from the header of
+ *    mixbox.js). Cadmium and cobalt pigments are avoided in silicone (RoHS /
+ *    REACH / toy safety), so these are kept for range, not realism.
+ *
+ * `key` is the identifier used by the UI, the keyboard shortcuts,
+ * window.__colormill.tapPigment and ?drops= links; keys never change (old
+ * names are aliases in PIGMENT_ALIASES).
  */
 const PALETTE = [
-  { key: 'cadmiumYellow', name: 'Cadmium Yellow', hex: '#FEEC00' },
-  { key: 'hansaYellow', name: 'Hansa Yellow', hex: '#FCD300' },
-  { key: 'cadmiumOrange', name: 'Cadmium Orange', hex: '#FF6900' },
-  { key: 'cadmiumRed', name: 'Cadmium Red', hex: '#FF2702' },
-  { key: 'quinacridoneMagenta', name: 'Quinacridone Magenta', hex: '#80022E' },
-  { key: 'cobaltViolet', name: 'Cobalt Violet', hex: '#4E0042' },
-  { key: 'ultramarineBlue', name: 'Ultramarine Blue', hex: '#190059' },
-  { key: 'cobaltBlue', name: 'Cobalt Blue', hex: '#002185' },
-  { key: 'phthaloBlue', name: 'Phthalo Blue', hex: '#0D1B44' },
-  { key: 'phthaloGreen', name: 'Phthalo Green', hex: '#003C32' },
-  { key: 'permanentGreen', name: 'Permanent Green', hex: '#076D16' },
-  { key: 'sapGreen', name: 'Sap Green', hex: '#6B9404' },
-  { key: 'cobaltTeal', name: 'Cobalt Teal', hex: '#20A4A4' },
-  { key: 'burntSienna', name: 'Burnt Sienna', hex: '#7B4800' },
-  { key: 'titaniumWhite', name: 'Titanium White', hex: '#FFFFFF' },
-  { key: 'ivoryBlack', name: 'Ivory Black', hex: '#000000' }
+  // silicone
+  { key: 'naphtholRed', name: 'Naphthol Red', hex: '#D62A2A', family: 'silicone', note: 'PR170, the azo red of silicone pastes; hex estimated from artist swatches' },
+  { key: 'hansaYellow', name: 'Hansa Yellow', hex: '#FCD300', family: 'silicone', note: 'PY3 / PY74 arylide (azo) yellow; Mixbox pigment' },
+  { key: 'phthaloBlue', name: 'Phthalo Blue', hex: '#0D1B44', family: 'silicone', note: 'PB15:3 phthalocyanine; Mixbox pigment' },
+  { key: 'phthaloGreen', name: 'Phthalo Green', hex: '#003C32', family: 'silicone', note: 'PG7 phthalocyanine; Mixbox pigment' },
+  { key: 'cobaltTeal', name: 'Phthalo Turquoise', hex: '#20A4A4', family: 'silicone', note: 'phthalo-based cyan paste; hex sampled from reference mill footage (#24a2a2)' },
+  { key: 'ironOxideRed', name: 'Iron Oxide Red', hex: '#A3402C', family: 'silicone', note: 'PR101 synthetic red iron oxide; hex estimated from artist swatches' },
+  { key: 'ivoryBlack', name: 'Carbon Black', hex: '#000000', family: 'silicone', note: 'PBk7' },
+  { key: 'titaniumWhite', name: 'Titanium White', hex: '#FFFFFF', family: 'silicone', note: 'PW6' },
+  { key: 'ironOxideYellow', name: 'Iron Oxide Yellow', hex: '#C9902A', family: 'silicone', note: 'PY42 yellow iron oxide (ochre); hex estimated from artist swatches' },
+  { key: 'burntSienna', name: 'Burnt Sienna', hex: '#7B4800', family: 'silicone', note: 'PBr7 natural iron oxide; Mixbox pigment' },
+  { key: 'ultramarineBlue', name: 'Ultramarine Blue', hex: '#190059', family: 'silicone', note: 'PB29; Mixbox pigment' },
+  { key: 'quinacridoneMagenta', name: 'Quinacridone Magenta', hex: '#80022E', family: 'silicone', note: 'PR122; Mixbox pigment' },
+  { key: 'fleshTone', name: 'Flesh Tone', hex: '#E6B08E', family: 'silicone', note: 'a paste blend sold as such (white, iron oxides); hex estimated' },
+  // artist
+  { key: 'cadmiumRed', name: 'Cadmium Red', hex: '#FF2702', family: 'artist', note: 'PR108; Mixbox pigment' },
+  { key: 'cadmiumYellow', name: 'Cadmium Yellow', hex: '#FEEC00', family: 'artist', note: 'PY35; Mixbox pigment' },
+  { key: 'cadmiumOrange', name: 'Cadmium Orange', hex: '#FF6900', family: 'artist', note: 'PO20; Mixbox pigment' },
+  { key: 'cobaltBlue', name: 'Cobalt Blue', hex: '#002185', family: 'artist', note: 'PB28; Mixbox pigment' },
+  { key: 'cobaltViolet', name: 'Cobalt Violet', hex: '#4E0042', family: 'artist', note: 'PV14; Mixbox pigment' },
+  { key: 'permanentGreen', name: 'Permanent Green', hex: '#076D16', family: 'artist', note: 'phthalo + arylide blend; Mixbox pigment' },
+  { key: 'sapGreen', name: 'Sap Green', hex: '#6B9404', family: 'artist', note: 'blend; Mixbox pigment' }
 ];
 
 /** Which palette entries must reproduce the MB_* constants in src/sim/mixbox.c. */
@@ -134,6 +152,7 @@ function main() {
     const srgb = p.rgb.map((v) => (v / 255).toFixed(6)).join(', ');
     lines.push(`  ${p.key}: { // ${p.hex.toUpperCase()}`);
     lines.push(`    key: '${p.key}', name: '${p.name}', hex: '${p.hex.toLowerCase()}',`);
+    lines.push(`    family: '${p.family}', note: '${p.note.replace(/'/g, "\\'")}',`);
     lines.push(`    srgb: [${srgb}],`);
     lines.push(`    latent: [${p.latent.map(fmt).join(', ')}]`);
     lines.push(`  }${i < pigments.length - 1 ? ',' : ''}`);

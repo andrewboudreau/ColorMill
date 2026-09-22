@@ -50,6 +50,8 @@ async function readState(page) {
       starters: document.querySelectorAll('.starter').length,
       recipe: window.__mixer.getRecipe(),
       openMillHref: document.querySelector('#open-mill')?.getAttribute('href') || '',
+      millState: document.querySelector('#mill-settings-state')?.textContent || '',
+      millQuery: window.__mixer.millQuery(),
       parts
     };
   });
@@ -88,6 +90,19 @@ export default async function run() {
     assert(s1.openMillHref.includes('drops=') && s1.openMillHref.includes('cadmiumYellow@') && s1.openMillHref.includes('cobaltBlue@'),
       `#open-mill href hands the recipe to the mill as ?drops= (${s1.openMillHref})`);
 
+    // --- 2b. mill settings ride along in both links, only when changed -----------------------
+    assert(s1.millState === 'defaults' && s1.millQuery === '', `mill settings start at the defaults (${s1.millState}, "${s1.millQuery}")`);
+    await page.evaluate(() => { window.__mixer.setMill('gap', 0.06); window.__mixer.setMillPreset('high'); window.__mixer.setMill('gravity', 2.0); });
+    const s1b = await readState(page);
+    console.log(`  mill settings: ${s1b.millQuery} (${s1b.millState})`);
+    assert(s1b.millQuery === 'preset=high&gap=0.06', `only the changed settings are written, in link order (${s1b.millQuery})`);
+    assert(s1b.millState === '2 changed', `summary counts the changed settings (${s1b.millState})`);
+    assert(s1b.openMillHref.startsWith('index.html?drops=') && s1b.openMillHref.endsWith('&preset=high&gap=0.06'), `#open-mill carries drops then settings (${s1b.openMillHref})`);
+    assert(s1b.shareHref.includes('mix=') && s1b.shareHref.endsWith('&preset=high&gap=0.06'), `#share-link carries the settings too (${s1b.shareHref})`);
+    await page.evaluate(() => { window.__mixer.setMill('gap', 0.04); window.__mixer.setMillPreset(undefined); });
+    const s1c = await readState(page);
+    assert(s1c.millQuery === '' && !s1c.openMillHref.includes('gap='), `back at the defaults nothing is written (${s1c.openMillHref})`);
+
     // --- 3. reset -> empty recipe, white ---------------------------------------------------
     await page.evaluate(() => window.__mixer.reset());
     const s2 = await readState(page);
@@ -97,8 +112,10 @@ export default async function run() {
     console.log(`  reset -> ${s2.mixHexText}`);
 
     // --- 4. ?mix= restores a recipe on load -------------------------------------------------
-    await open(page, `${baseUrl}mixer.html?mix=cadmiumRed:1,cobaltBlue:1`);
+    await open(page, `${baseUrl}mixer.html?mix=cadmiumRed:1,cobaltBlue:1&batch=1.5&logFeed=0.15`);
     const s3 = await readState(page);
+    assert(s3.millQuery === 'batch=1.5&logFeed=0.15', `mill settings restored from the URL (${s3.millQuery})`);
+    assert(s3.openMillHref.endsWith('&batch=1.5&logFeed=0.15'), `and forwarded to the mill (${s3.openMillHref})`);
     console.log(`  ?mix=cadmiumRed:1,cobaltBlue:1 -> ${s3.hex}`);
     assert(s3.parts.cadmiumRed === '1' && s3.parts.cobaltBlue === '1',
       `range inputs restored from URL (red ${s3.parts.cadmiumRed}, blue ${s3.parts.cobaltBlue})`);

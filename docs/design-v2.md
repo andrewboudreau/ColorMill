@@ -337,11 +337,32 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   where the reference footage shows a black streak.)
 - Pigments are a palette of named real pigments with precomputed latents
   (generated once with the official `web/vendor/mixbox/mixbox.js`
-  `rgbToLatent`, stored as constants in `src/color/pigments.ts`):
-  Cadmium Red, Cadmium Yellow, Cobalt Blue, Phthalo Green, Ultramarine,
-  Burnt Sienna, Ivory Black, Titanium White, the rest of the Mixbox set and
-  a Cobalt Teal (`#20a4a4`, the turquoise the reference mill footage uses),
-  plus "custom" from a colour picker (converted with mixbox.js at runtime).
+  `rgbToLatent` by `scripts/gen-pigments.mjs`, stored as constants in
+  `src/color/pigments.ts`), in two families. **Silicone** (first in the
+  palette, the 1–8 shortcuts): what a silicone colour house actually uses,
+  which is iron oxides (PR101 red, PY42 yellow, PBr7 burnt sienna), titanium
+  dioxide (PW6), carbon black (PBk7), phthalocyanine blue (PB15:3) and green
+  (PG7), ultramarine (PB29), an azo red (PR170 naphthol) and yellow (PY3/74
+  hansa), quinacridone magenta (PR122), a phthalo turquoise paste and a flesh
+  paste. **Artist** (after a divider): the rest of the Mixbox oil-paint set,
+  Cadmium Red / Yellow / Orange, Cobalt Blue / Violet, Permanent and Sap
+  Green; cadmium and cobalt are avoided in silicone (RoHS / REACH / toy
+  safety) so these are kept for range, not realism. Where a pigment is one
+  of Mixbox's calibrated colours its sRGB is that pigment's; the naphthol
+  red, the two iron oxides and the flesh paste have no published paste
+  colour and their hex is estimated from artist swatches of the same
+  colour-index pigment (the turquoise was sampled from the reference
+  footage). No supplier publishes RGB values for its pastes, and there is no
+  standard silicone palette: colour houses match Pantone / RAL targets from a
+  small set of base pastes. Plus "custom" from a colour picker (converted
+  with mixbox.js at runtime). Keys never change (`?drops=` links); old
+  names stay as aliases.
+- A paste chunk in the footage is a **masterbatch**, pigment already
+  dispersed in silicone at a few percent by weight, so what the operator
+  drops is a tint, not the pigment's masstone. The palette hexes are
+  masstones (a phthalo blue chunk here is near-navy; a phthalo blue paste in
+  the footage is a bright blue). Modelling the paste as pigment + white at a
+  fixed loading is the natural next step and is not done yet.
 - **Inject** kernel: `addPigment(center, radius, latent, strength)` blends
   particle latents inside the sphere: `z = mix(z, zPigment, strength·t)`,
   `t = 1 − |d|/radius`.
@@ -372,10 +393,11 @@ terracotta. Sampling the frames gives the bands as `#d60720`, `#e8ef10`,
 `#24a2a2` and the result as `#a4634b`; Mixbox mixes those three in equal
 parts to `#a27242`, a few points yellower and within 0.1 per channel, while
 the plain sRGB average is `#a18846`, a desaturated olive. The same
-proportions with the palette pigments give an ochre (`#a5882f`): Cadmium
-Yellow is a far stronger tint than the pale yellow in the footage, so the
-closest palette recipe is 2 red : ½ yellow : 1½ teal (`#a26531`, the
-mixer's Terracotta starter). A second clip (a violet, a white, a black and
+proportions with the silicone-family pigments (naphthol red, hansa yellow,
+phthalo turquoise) give a warmer, yellower brown, because the palette
+yellow is a stronger tint than the pale paste in the footage; the closest
+recipe is 1½ naphthol red : ½ hansa yellow : 1 turquoise (`#a15c3f`, the
+mixer's Terracotta starter, within 0.06 of the sample). A second clip (a violet, a white, a black and
 an orange chunk on a clear slab, ending sky blue) does not add up under any
 subtractive model and is not used.
 

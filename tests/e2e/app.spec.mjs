@@ -202,14 +202,17 @@ export default async function run() {
     // paused: the animation loop must not keep queuing sim frames between the
     // driven steps, or readbacks (snapshot/screenshot) starve behind them on a
     // software GPU. stepFrames() forces steps while paused.
-    await page.goto(`${baseUrl}?preset=low&paused=1`, { waitUntil: 'load', timeout: 60_000 });
+    await page.goto(`${baseUrl}?preset=low&paused=1&gap=0.06&omega=2`, { waitUntil: 'load', timeout: 60_000 });
     await waitForApp(page);
 
     // --- 1. configuration honoured -------------------------------------------------
     const cfg = await withTimeout(page.evaluate(() => {
       const api = window.__colormill;
-      return { preset: api.sim.quality.preset, dims: api.sim.dims, gap: api.sim.params.gap, particleCount: api.stats().particleCount };
+      return { preset: api.sim.quality.preset, dims: api.sim.dims, gap: api.sim.params.gap, omega: api.sim.params.omega, particleCount: api.stats().particleCount, startLink: api.startLink() };
     }), EVAL_TIMEOUT_MS, 'read sim config');
+    assert(Math.abs(cfg.gap - 0.06) < 1e-9 && Math.abs(cfg.omega - 2) < 1e-9, `?gap=0.06&omega=2 set the mill parameters (gap ${cfg.gap}, omega ${cfg.omega})`);
+    assert(cfg.startLink.includes('preset=low') && cfg.startLink.includes('omega=2') && cfg.startLink.includes('gap=0.06') && !cfg.startLink.includes('gravity'),
+      `startLink() carries the pinned preset and the changed parameters only (${cfg.startLink})`);
     console.log(`  preset ${cfg.preset}, grid ${cfg.dims.nx}x${cfg.dims.ny}x${cfg.dims.nz} (h=${cfg.dims.h}), ${cfg.particleCount} particles`);
     assert(cfg.preset === 'low', `?preset=low selected the low preset (got ${cfg.preset})`);
     assert(cfg.dims.nx === 49 && cfg.dims.ny === 73 && cfg.dims.nz === 65, `low preset grid is 49x73x65 nodes (got ${cfg.dims.nx}x${cfg.dims.ny}x${cfg.dims.nz})`);

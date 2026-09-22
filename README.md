@@ -126,13 +126,25 @@ colour the mill will converge to once the bank is homogeneous; the naive RGB
 average is shown beside it for contrast. A recipe can be shared and restored
 with a link such as `?mix=cadmiumYellow:3,cobaltBlue:1`. **Open in the mill**
 hands the recipe to the simulator as a `?drops=` link (one medium chunk per
-part, halves as small chunks, spread along the roll).
+part, halves as small chunks, spread along the roll). The page doubles as a
+launch page for the mill: **Mill settings** under the button holds the same
+sliders as the simulator's drawer plus the quality preset and batch size, and
+only settings that differ from the defaults are written into the links, so
+`mixer.html?mix=…&gap=0.06` and the mill link it produces both stay short.
+
+The palette leads with the pigments silicone colour houses actually use
+(iron oxides, titanium dioxide, carbon black, phthalocyanines, ultramarine,
+azo and quinacridone organics, plus a turquoise and a flesh paste), then,
+after a divider, the rest of the Mixbox oil-paint set (cadmiums, cobalts,
+the mixed greens) for range; see design §5 for what each colour is and
+where its value came from. Old names such as `cobaltTeal` and `ivoryBlack`
+still resolve, so existing links keep working.
 
 The mixing rule was checked against footage of a real mill: red, yellow and
 teal bands of equal width milled to `#a4634b`, and Mixbox mixes the three
 sampled band colours in equal parts to `#a27242` (the plain RGB average is an
 olive). The **Terracotta** starter is the nearest palette recipe, and
-`index.html?drops=cadmiumRed@1.l,cadmiumRed@2.l,cadmiumYellow@3.l,cadmiumYellow@4.l,cobaltTeal@5.l,cobaltTeal@6.l`
+`index.html?drops=naphtholRed@1.l,naphtholRed@2.l,hansaYellow@3.l,hansaYellow@4.l,cobaltTeal@5.l,cobaltTeal@6.l`
 lays the same three bands on the bank.
 
 ## Controls
@@ -148,13 +160,14 @@ lays the same three bands on the bank.
 | **Clear pigment** | Reset every particle to clear silicone |
 | **Reset** / `R` | Re-seed the bank |
 | **Pause** / `Space` | Pause / resume |
-| `1`–`8` | Inject palette pigments 1–8 |
+| `1`–`8` | Inject palette pigments 1–8 (the silicone pastes: naphthol red, hansa yellow, phthalo blue, phthalo green, phthalo turquoise, iron oxide red, carbon black, titanium white) |
 | `↑` / `↓`, `←` / `→` | Roller speed, nip gap |
 | `[` / `]` | Move the pigment drop slot left / right |
 | `-` / `=` | Smaller / larger pigment chunks |
 | Drag / wheel / pinch | Orbit / zoom the camera; double-tap resets to the front view |
 | Right drawer (`P`) | Roller speed (rpm), friction ratio, nip gap, dispersion, gravity, back-roll friction, batch size, quality, auto-orbit, stats |
-| `?drops=cadmiumYellow@3.m,cobaltBlue@5.l` | Start with those pigment chunks already dropped (pigment@slot.size; size s, m or l; a custom colour as six hex digits); the drawer's **Copy start link** writes the current session's drops as such a link |
+| `?drops=hansaYellow@3.m,phthaloBlue@5.l` | Start with those pigment chunks already dropped (pigment@slot.size; size s, m or l; a custom colour as six hex digits) |
+| `?gap=0.06&omega=2&preset=high&batch=1.5` | Start with mill settings changed: any drawer slider by its name (`omega`, `frictionRatio`, `gap`, `dispersion`, `gravity`, `backFriction`, `logFeed`), the quality preset and the batch size. The drawer's **Copy start link** writes the session's drops plus every setting that differs from its default, so a whole setup restarts from one URL |
 
 ## Quality presets
 

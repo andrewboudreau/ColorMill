@@ -19,7 +19,8 @@ describe('formatDrops / parseDrops', () => {
   });
 
   it('resolves aliases and display names through findPigment', () => {
-    expect(parseDrops('red@2.l')).toEqual([{ pigment: 'cadmiumRed', slot: 2, size: 'l' }]);
+    expect(parseDrops('red@2.l')).toEqual([{ pigment: 'naphtholRed', slot: 2, size: 'l' }]);
+    expect(parseDrops('Carbon Black@3.m')).toEqual([{ pigment: 'ivoryBlack', slot: 3, size: 'm' }]);
     expect(parseDrops('Cobalt Blue@1.s')).toEqual([{ pigment: 'cobaltBlue', slot: 1, size: 's' }]);
   });
 

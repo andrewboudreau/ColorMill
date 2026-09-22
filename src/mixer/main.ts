@@ -101,11 +101,21 @@ function boot(): void {
     left.appendChild(row);
     rows.set(key, { row, range, count });
   };
+  let family: string | undefined;
   for (const key of PALETTE_ORDER) {
     const p = PIGMENTS[key];
     if (!p) continue;
+    if (p.family !== family) {
+      family = p.family;
+      const h = el('h3', 'mixer-family', family === 'silicone' ? 'Silicone pastes' : 'Artist pigments');
+      h.title = family === 'silicone'
+        ? 'Pigments silicone colour houses use, or stand-ins for their common paste colours'
+        : 'Mixbox oil-paint pigments kept for range; cadmium and cobalt are not used in silicone';
+      left.appendChild(h);
+    }
     const sw = el('div', 'mixer-swatch');
     sw.style.background = p.hex;
+    sw.title = p.note;
     makeRow(key, p.name, sw, p.hex);
   }
   // custom colour: the native picker is the swatch; the latent comes from mixbox.js on demand

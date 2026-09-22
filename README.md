@@ -128,11 +128,19 @@ with a link such as `?mix=cadmiumYellow:3,cobaltBlue:1`. **Open in the mill**
 hands the recipe to the simulator as a `?drops=` link (one medium chunk per
 part, halves as small chunks, spread along the roll).
 
+The palette leads with the pigments silicone colour houses actually use
+(iron oxides, titanium dioxide, carbon black, phthalocyanines, ultramarine,
+azo and quinacridone organics, plus a turquoise and a flesh paste), then,
+after a divider, the rest of the Mixbox oil-paint set (cadmiums, cobalts,
+the mixed greens) for range; see design §5 for what each colour is and
+where its value came from. Old names such as `cobaltTeal` and `ivoryBlack`
+still resolve, so existing links keep working.
+
 The mixing rule was checked against footage of a real mill: red, yellow and
 teal bands of equal width milled to `#a4634b`, and Mixbox mixes the three
 sampled band colours in equal parts to `#a27242` (the plain RGB average is an
 olive). The **Terracotta** starter is the nearest palette recipe, and
-`index.html?drops=cadmiumRed@1.l,cadmiumRed@2.l,cadmiumYellow@3.l,cadmiumYellow@4.l,cobaltTeal@5.l,cobaltTeal@6.l`
+`index.html?drops=naphtholRed@1.l,naphtholRed@2.l,hansaYellow@3.l,hansaYellow@4.l,cobaltTeal@5.l,cobaltTeal@6.l`
 lays the same three bands on the bank.
 
 ## Controls
@@ -148,7 +156,7 @@ lays the same three bands on the bank.
 | **Clear pigment** | Reset every particle to clear silicone |
 | **Reset** / `R` | Re-seed the bank |
 | **Pause** / `Space` | Pause / resume |
-| `1`–`8` | Inject palette pigments 1–8 |
+| `1`–`8` | Inject palette pigments 1–8 (the silicone pastes: naphthol red, hansa yellow, phthalo blue, phthalo green, phthalo turquoise, iron oxide red, carbon black, titanium white) |
 | `↑` / `↓`, `←` / `→` | Roller speed, nip gap |
 | `[` / `]` | Move the pigment drop slot left / right |
 | `-` / `=` | Smaller / larger pigment chunks |

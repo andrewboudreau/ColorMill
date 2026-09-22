@@ -174,7 +174,7 @@ export const STARTER_RECIPES: ReadonlyArray<{ name: string; recipe: RecipeEntry[
   {
     // reference: red, yellow and teal bands milled to #a4634b (docs/design-v2.md §5, reference check)
     name: 'Terracotta',
-    recipe: [{ key: 'cadmiumRed', parts: 2 }, { key: 'cadmiumYellow', parts: 0.5 }, { key: 'cobaltTeal', parts: 1.5 }]
+    recipe: [{ key: 'naphtholRed', parts: 1.5 }, { key: 'hansaYellow', parts: 0.5 }, { key: 'cobaltTeal', parts: 1 }]
   }
 ];
 
@@ -182,7 +182,7 @@ export const STARTER_RECIPES: ReadonlyArray<{ name: string; recipe: RecipeEntry[
  * Colour a real two-roll mill produced from red, yellow and teal bands of
  * about equal width (reference footage; the band colours sampled from the
  * frames were #d60720, #e8ef10 and #24a2a2, and Mixbox mixes those three in
- * equal parts to #a27242). The Terracotta starter is the closest palette
- * recipe to it.
+ * equal parts to #a27242). The Terracotta starter is the closest recipe from
+ * the silicone family (#a15c3f).
  */
 export const REFERENCE_TERRACOTTA_HEX = '#a4634b';

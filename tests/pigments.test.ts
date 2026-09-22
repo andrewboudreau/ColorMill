@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BASE_LATENT, PALETTE_ORDER, PIGMENTS, findPigment, hexToRgb, latentToHex, latentToRgb, lerpLatent,
+  BASE_LATENT, PALETTE_ORDER, PIGMENTS, findPigment, paletteFamily, hexToRgb, latentToHex, latentToRgb, lerpLatent,
   mixLatents, rgbToHex
 } from '../src/color/pigments';
 
@@ -12,7 +12,7 @@ function expectRgbClose(got: readonly number[], want: readonly number[], tol = T
 
 describe('pigment latents', () => {
   it('has the full palette with well-formed latents', () => {
-    expect(Object.keys(PIGMENTS).length).toBe(16);
+    expect(Object.keys(PIGMENTS).length).toBe(20);
     for (const p of Object.values(PIGMENTS)) {
       expect(p.latent.length).toBe(7);
       for (const v of p.latent) expect(Number.isFinite(v)).toBe(true);
@@ -108,18 +108,37 @@ describe('latent mixing', () => {
 });
 
 describe('palette lookups', () => {
-  it('orders the design §5 pigments first for the 1–8 shortcuts', () => {
+  it('puts the silicone pigments first, the eight of the 1–8 shortcuts leading', () => {
     expect(PALETTE_ORDER.slice(0, 8)).toEqual([
-      'cadmiumRed', 'cadmiumYellow', 'cobaltBlue', 'phthaloGreen', 'ultramarineBlue', 'burntSienna', 'ivoryBlack', 'titaniumWhite'
+      'naphtholRed', 'hansaYellow', 'phthaloBlue', 'phthaloGreen', 'cobaltTeal', 'ironOxideRed', 'ivoryBlack', 'titaniumWhite'
     ]);
     for (const key of PALETTE_ORDER) expect(PIGMENTS[key]?.key).toBe(key);
     expect(new Set(PALETTE_ORDER).size).toBe(Object.keys(PIGMENTS).length);
+    // the families are contiguous: every silicone pigment before every artist one
+    const fam = PALETTE_ORDER.map((k) => PIGMENTS[k].family);
+    const firstArtist = fam.indexOf('artist');
+    expect(firstArtist).toBeGreaterThanOrEqual(8);
+    expect(fam.slice(0, firstArtist).every((f) => f === 'silicone')).toBe(true);
+    expect(fam.slice(firstArtist).every((f) => f === 'artist')).toBe(true);
+    expect(paletteFamily('silicone').length + paletteFamily('artist').length).toBe(PALETTE_ORDER.length);
+    for (const p of Object.values(PIGMENTS)) expect(p.note.length).toBeGreaterThan(0);
+  });
+
+  it('keeps the silicone workhorses and honest names', () => {
+    expect(PIGMENTS.ivoryBlack.name).toBe('Carbon Black');
+    expect(PIGMENTS.cobaltTeal.name).toBe('Phthalo Turquoise');
+    for (const k of ['ironOxideRed', 'ironOxideYellow', 'naphtholRed', 'fleshTone', 'titaniumWhite', 'phthaloBlue']) expect(PIGMENTS[k].family).toBe('silicone');
+    for (const k of ['cadmiumRed', 'cadmiumYellow', 'cobaltBlue', 'cobaltViolet']) expect(PIGMENTS[k].family).toBe('artist');
   });
 
   it('finds pigments by key, alias, display name and hex', () => {
     expect(findPigment('cobaltBlue')?.key).toBe('cobaltBlue');
-    expect(findPigment('blue')?.key).toBe('cobaltBlue');
+    expect(findPigment('blue')?.key).toBe('phthaloBlue');
+    expect(findPigment('red')?.key).toBe('naphtholRed');
     expect(findPigment('white')?.key).toBe('titaniumWhite');
+    expect(findPigment('Carbon Black')?.key).toBe('ivoryBlack');
+    expect(findPigment('Phthalo Turquoise')?.key).toBe('cobaltTeal');
+    expect(findPigment('ochre')?.key).toBe('ironOxideYellow');
     expect(findPigment('Cadmium Yellow')?.key).toBe('cadmiumYellow');
     expect(findPigment('phthalo-green')?.key).toBe('phthaloGreen');
     expect(findPigment('#002185')?.key).toBe('cobaltBlue');

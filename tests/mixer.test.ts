@@ -109,7 +109,7 @@ describe('formatMix / parseMix', () => {
 
   it('resolves aliases and names through findPigment', () => {
     expect(parseMix('red:1,Cobalt Blue:2,white:0.5')).toEqual([
-      { key: 'cadmiumRed', parts: 1 }, { key: 'cobaltBlue', parts: 2 }, { key: 'titaniumWhite', parts: 0.5 }
+      { key: 'naphtholRed', parts: 1 }, { key: 'cobaltBlue', parts: 2 }, { key: 'titaniumWhite', parts: 0.5 }
     ]);
   });
 
@@ -118,7 +118,7 @@ describe('formatMix / parseMix', () => {
   });
 
   it('lets the last duplicate key win', () => {
-    expect(parseMix('cobaltBlue:1,cadmiumRed:2,blue:3')).toEqual([{ key: 'cobaltBlue', parts: 3 }, { key: 'cadmiumRed', parts: 2 }]);
+    expect(parseMix('cobaltBlue:1,cadmiumRed:2,cobalt:3')).toEqual([{ key: 'cobaltBlue', parts: 3 }, { key: 'cadmiumRed', parts: 2 }]);
   });
 });
 
@@ -185,9 +185,9 @@ describe('reference check', () => {
 
   it('mixes the three sampled band colours in equal parts to a sienna close to the reference', () => {
     expect(PIGMENTS.cobaltTeal.hex).toBe('#20a4a4');
-    const res = mixRecipe([{ key: 'cadmiumRed', parts: 1 }, { key: 'cadmiumYellow', parts: 1 }, { key: 'cobaltTeal', parts: 1 }]);
+    const res = mixRecipe([{ key: 'naphtholRed', parts: 1 }, { key: 'hansaYellow', parts: 1 }, { key: 'cobaltTeal', parts: 1 }]);
     const [r, g, b] = hexToRgb(res.hex);
-    // equal parts of the stronger palette yellow lands on an ochre, still red over green over blue
+    // equal parts of the palette pigments lands warmer and yellower than the footage, still red over green over blue
     expect(r).toBeGreaterThan(g);
     expect(g).toBeGreaterThan(b);
   });

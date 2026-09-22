@@ -82,15 +82,26 @@ export class Palette {
 
     const swatches = document.createElement('div');
     swatches.className = 'cm-swatches';
+    let lastFamily: string | undefined;
     PALETTE_ORDER.forEach((key, i) => {
       const p = PIGMENTS[key];
       if (!p) return;
+      if (lastFamily && p.family !== lastFamily) {
+        // silicone pastes first, then the artist pigments kept for range
+        const gap = document.createElement('span');
+        gap.className = 'cm-swatch-divider';
+        gap.title = 'Artist pigments (not used in silicone)';
+        swatches.appendChild(gap);
+      }
+      lastFamily = p.family;
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'cm-swatch';
       b.style.setProperty('--c', p.hex);
       b.dataset.pigment = key;
-      b.title = i < 8 ? `${p.name} (${i + 1})` : p.name;
+      b.dataset.family = p.family;
+      const kind = p.family === 'silicone' ? 'silicone paste' : 'artist pigment';
+      b.title = `${p.name}${i < 8 ? ` (${i + 1})` : ''} · ${kind}`;
       b.setAttribute('aria-label', `Add ${p.name}`);
       if (i < 8) {
         const k = document.createElement('span');

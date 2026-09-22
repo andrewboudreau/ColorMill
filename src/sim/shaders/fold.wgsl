@@ -1,9 +1,10 @@
 // Operator move (design §6): cut ALL the material off the mill (the sheet on the
 // front roll, the bank in the nip, whatever rides the back roll), roll it up
-// into a log, stand the log over the nip and FEED it in end-first, the way an
-// operator does (the rolls consume it over a few seconds and its spiral
-// cross-section, every colour interleaved, is squeezed out across the full roll
-// width). That is how a two-roll mill mixes along the roll axis.
+// into a log, stand the log over the nip and put it back end-first, the way an
+// operator does: dropped whole onto the nip (P.fold.w = 0, the default) or
+// lowered in at P.fold.w units/s. The rolls consume it over a few seconds and
+// its spiral cross-section, every colour interleaved, is squeezed out across
+// the full roll width. That is how a two-roll mill mixes along the roll axis.
 //
 // Each particle is parameterised by (x, radial depth dr = d_front - R, arc
 // s = theta * R around the front axis from the nip, in the direction of
@@ -33,10 +34,12 @@
 //   tables: one workgroup turns the histogram into per-bin spiral tables
 //           (radius, angle, thickness, depth) and the log's size and base.
 //   move:   t < T_roll: p(s) = lerp(p0, pLog, smoothstep(t / T_roll)).
-//           t >= T_roll: the log translates along -a at the feed speed; a particle
-//           that reaches the release plane (just above the live pile the nip is
-//           eating, reduced by g2p every substep, or the roll tops) is released:
-//           flag cleared, C = 0, F = I, v = feed velocity, P2G affine rebuilt.
+//           t >= T_roll, feed = 0: the whole log is let go where it stands (v = 0;
+//           gravity and the rolls take it from there).
+//           t >= T_roll, feed > 0: the log translates along -a at the feed speed; a
+//           particle that reaches the release plane (just above the live pile the
+//           nip is eating, reduced by g2p every substep, or the roll tops) is
+//           released: flag cleared, C = 0, F = I, v = feed velocity, P2G affine rebuilt.
 //   finish: release whatever is still held.
 @group(0) @binding(1) var<storage, read_write> pos : array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read_write> vel : array<vec4<f32>>;
@@ -529,7 +532,13 @@ fn move_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
     vel[p] = vec4<f32>(v, 0.0);
     return;
   }
-  // feed: the log descends along its axis; release what reaches the pile the nip
+  if (feed <= 0.0) {
+    // drop: the log is set down whole; it stands on the nip and the rolls pull it in
+    pos[p] = vec4<f32>(clamp(pLog, lo, hi), pos[p].w);
+    release(p, vec3<f32>(0.0));
+    return;
+  }
+  // lower in: the log descends along its axis; release what reaches the pile the nip
   // is eating (or the roll tops), so nothing is let go in mid-air
   let x = clamp(pLog - a * (feed * (t - tRoll)), lo, hi);
   let v = -a * feed;

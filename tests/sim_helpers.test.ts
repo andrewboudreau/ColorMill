@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { FOLD_DURATION, WHITE_LATENT, dispatchSize, foldProfile, halfToFloat } from '../src/sim/mpm';
+import { FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, WHITE_LATENT, dispatchSize, foldDuration, foldProfile, halfToFloat } from '../src/sim/mpm';
+import { DEFAULT_PARAMS, PARAM_LIMITS } from '../src/config/mill';
 
 describe('solver helpers', () => {
   it('splits large particle dispatches into 2D so no dimension exceeds the limit', () => {
@@ -36,5 +37,19 @@ describe('solver helpers', () => {
 
   it('white base latent has unit pigment weight on the white channel', () => {
     expect(WHITE_LATENT[0] + WHITE_LATENT[1] + WHITE_LATENT[2] + WHITE_LATENT[3]).toBeCloseTo(1, 9);
+  });
+});
+
+describe('foldDuration', () => {
+  it('drops the log right after the roll by default, and lowers it in over several seconds otherwise', () => {
+    expect(DEFAULT_PARAMS.logFeed).toBe(0);
+    expect(PARAM_LIMITS.logFeed.min).toBe(0);
+    expect(foldDuration(0)).toBeCloseTo(FOLD_ROLL_SECONDS + 0.02, 9);
+    expect(foldDuration(-1)).toBe(foldDuration(0));
+    expect(foldDuration(FOLD_FEED_SPEED)).toBe(FOLD_DURATION);
+    expect(FOLD_DURATION).toBeGreaterThan(FOLD_ROLL_SECONDS + 5);
+    // a faster feed is a shorter move, never shorter than the drop
+    expect(foldDuration(0.6)).toBeLessThan(foldDuration(0.3));
+    expect(foldDuration(0.6)).toBeGreaterThan(foldDuration(0));
   });
 });

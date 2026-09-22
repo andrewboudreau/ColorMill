@@ -48,7 +48,7 @@ const UNIFORM_STRIDE = 256;
  * is the Mixbox mix of the pigments present and its load per unit mass sets the opacity. */
 export const PIGMENT_LOAD = 12.0;
 export const FOLD_ROLL_SECONDS = 1.2;
-/** Lowering speed the design doc and the lowered-in e2e case use (sim units / s along the log axis). */
+/** The design's original lowering speed (sim units / s along the log axis); FOLD_DURATION is the move's length at it. */
 export const FOLD_FEED_SPEED = 0.15;
 export const FOLD_TILT = 0.42;                // log axis tilt from vertical toward the viewer (rad)
 /** Arc bins and depth slices of the fold's thickness histogram (mirror NB / NS in fold.wgsl). */

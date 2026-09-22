@@ -272,9 +272,12 @@ export default async function run() {
       // let it settle and get pulled in before the second move
       await page.evaluate(async (n) => { await window.__solver.stepFrames(n); }, framesFor(1.0));
 
-      // 2. lowered in at FOLD_FEED_SPEED: released a slice at a time onto the live pile
+      // 2. lowered in: released a slice at a time onto the live pile. Fed at 0.4 units/s
+      // (the slider's upper range) so that a second of feeding after the roll has let
+      // some of the log go past the tilted end face and the pile the drop left behind,
+      // but not all of it
       const mid = await page.evaluate(async () => {
-        window.__solver.sim.params.logFeed = 0.15;
+        window.__solver.sim.params.logFeed = 0.4;
         window.__solver.sim.cutAndFold();
         await window.__solver.stepFrames(10);
         const s = await window.__solver.snapshot();
@@ -291,7 +294,7 @@ export default async function run() {
       // area-preserving spiral (no node carries more than ~48 particles' mass), it
       // spans many y cells, and material is being released progressively (fewer
       // kinematic particles than mid-move, but not yet zero)
-      const foldFrames = framesFor(1.2 + 1.0); // FOLD_ROLL_SECONDS + 1 s of feeding
+      const foldFrames = framesFor(1.2 + 1.0); // FOLD_ROLL_SECONDS + 1 s of feeding (0.4 units of the 0.75 log plus its end face)
       const rel = await page.evaluate(async ([n, idx, h]) => {
         await window.__solver.stepFrames(n);
         const s = await window.__solver.snapshot();

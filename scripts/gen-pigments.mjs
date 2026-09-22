@@ -32,7 +32,8 @@ const CHECK_ONLY = process.argv.includes('--check');
 
 /**
  * The palette. sRGB values are the Mixbox pigment set (see the header of
- * mixbox.js) plus titanium white and ivory black. `key` is the identifier
+ * mixbox.js) plus titanium white, ivory black and a cobalt teal (PG50, the
+ * turquoise the reference mill videos use; docs/design-v2.md §5b). `key` is the identifier
  * used by the UI, the keyboard shortcuts and window.__colormill.tapPigment.
  */
 const PALETTE = [
@@ -48,6 +49,7 @@ const PALETTE = [
   { key: 'phthaloGreen', name: 'Phthalo Green', hex: '#003C32' },
   { key: 'permanentGreen', name: 'Permanent Green', hex: '#076D16' },
   { key: 'sapGreen', name: 'Sap Green', hex: '#6B9404' },
+  { key: 'cobaltTeal', name: 'Cobalt Teal', hex: '#20A4A4' },
   { key: 'burntSienna', name: 'Burnt Sienna', hex: '#7B4800' },
   { key: 'titaniumWhite', name: 'Titanium White', hex: '#FFFFFF' },
   { key: 'ivoryBlack', name: 'Ivory Black', hex: '#000000' }

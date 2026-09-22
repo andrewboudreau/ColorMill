@@ -91,6 +91,11 @@ export const PIGMENTS: Readonly<Record<string, Pigment>> = {
     srgb: [0.419608, 0.580392, 0.015686],
     latent: [0.19606709, 0.77697809, 0.02768655, -0.00073172, -0.01365738, -0.01454314, -0.15701284]
   },
+  cobaltTeal: { // #20A4A4
+    key: 'cobaltTeal', name: 'Cobalt Teal', hex: '#20a4a4',
+    srgb: [0.125490, 0.643137, 0.643137],
+    latent: [0.52216840, 0.14287699, 0.00000000, 0.33495461, -0.08199721, 0.07103653, 0.00674509]
+  },
   burntSienna: { // #7B4800
     key: 'burntSienna', name: 'Burnt Sienna', hex: '#7b4800',
     srgb: [0.482353, 0.282353, 0.000000],
@@ -118,7 +123,7 @@ export const BASE_LATENT: Latent = PIGMENTS.titaniumWhite.latent;
  */
 export const PALETTE_ORDER: readonly string[] = [
   'cadmiumRed', 'cadmiumYellow', 'cobaltBlue', 'phthaloGreen', 'ultramarineBlue', 'burntSienna', 'ivoryBlack', 'titaniumWhite',
-  'hansaYellow', 'cadmiumOrange', 'quinacridoneMagenta', 'cobaltViolet', 'phthaloBlue', 'permanentGreen', 'sapGreen'
+  'hansaYellow', 'cadmiumOrange', 'quinacridoneMagenta', 'cobaltViolet', 'phthaloBlue', 'permanentGreen', 'sapGreen', 'cobaltTeal'
 ];
 
 /** Short names accepted by findPigment() in addition to the palette keys. */
@@ -133,7 +138,9 @@ export const PIGMENT_ALIASES: Readonly<Record<string, string>> = {
   orange: 'cadmiumOrange',
   magenta: 'quinacridoneMagenta',
   violet: 'cobaltViolet',
-  sienna: 'burntSienna'
+  sienna: 'burntSienna',
+  teal: 'cobaltTeal',
+  turquoise: 'cobaltTeal'
 };
 
 /**

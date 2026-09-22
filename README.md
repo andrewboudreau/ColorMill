@@ -127,6 +127,13 @@ with a link such as `?mix=cadmiumYellow:3,cobaltBlue:1`. **Open in the mill**
 hands the recipe to the simulator as a `?drops=` link (one medium chunk per
 part, halves as small chunks, spread along the roll).
 
+The mixing rule was checked against footage of a real mill: red, yellow and
+teal bands of equal width milled to `#a4634b`, and Mixbox mixes the three
+sampled band colours in equal parts to `#a27242` (the plain RGB average is an
+olive). The **Terracotta** starter is the nearest palette recipe, and
+`index.html?drops=cadmiumRed@1.l,cadmiumRed@2.l,cadmiumYellow@3.l,cadmiumYellow@4.l,cobaltTeal@5.l,cobaltTeal@6.l`
+lays the same three bands on the bank.
+
 ## Controls
 
 | Input | Action |

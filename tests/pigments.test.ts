@@ -12,7 +12,7 @@ function expectRgbClose(got: readonly number[], want: readonly number[], tol = T
 
 describe('pigment latents', () => {
   it('has the full palette with well-formed latents', () => {
-    expect(Object.keys(PIGMENTS).length).toBe(15);
+    expect(Object.keys(PIGMENTS).length).toBe(16);
     for (const p of Object.values(PIGMENTS)) {
       expect(p.latent.length).toBe(7);
       for (const v of p.latent) expect(Number.isFinite(v)).toBe(true);

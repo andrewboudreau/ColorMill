@@ -84,3 +84,14 @@ body {
 
 .mx-note { font-size: 13px; color: var(--muted); margin-top: 16px; }
 .mx-note a { color: var(--accent); }
+
+/* inline reference swatch in the note */
+.mx-ref {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  border-radius: 3px;
+  background: var(--c);
+  vertical-align: -0.1em;
+  margin-right: 2px;
+}

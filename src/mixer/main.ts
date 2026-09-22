@@ -197,7 +197,7 @@ function boot(): void {
   right.append(startersTitle, starters);
 
   const note = el('p', 'mx-note');
-  note.innerHTML = 'Parts are by mass of masterbatch. Mixing uses <a href="pigment.html">Mixbox</a> pigment latents, the same ones the simulator carries on every particle; drop the same pigments on the bank in the same proportions and the sheet ends up this colour once it is milled through.';
+  note.innerHTML = 'Parts are by mass of masterbatch. Mixing uses <a href="pigment.html">Mixbox</a> pigment latents, the same ones the simulator carries on every particle; drop the same pigments on the bank in the same proportions and the sheet ends up this colour once it is milled through. Checked against a real mill: red, yellow and teal bands of equal width milled to <span class="mx-ref" style="--c:#a4634b"></span> #a4634b, and Mixbox puts the same three colours in equal parts at #a27242; the Terracotta starter is the nearest palette recipe.';
   right.appendChild(note);
 
   // --- behaviour -----------------------------------------------------------------

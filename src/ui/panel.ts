@@ -4,9 +4,10 @@
  * sits in the top-right corner. Plain DOM, no framework.
  */
 import {
-  BATCH_CHOICES, batchLitres, PARAM_LIMITS, QUALITY_PRESETS, estimateParticleCount, omegaToRpm,
+  BATCH_CHOICES, batchLitres, PARAM_LIMITS, QUALITY_PRESETS, estimateParticleCount,
   type MillParams, type QualityPreset
 } from '../config/mill';
+import { LINK_PARAM_KEYS, PARAM_LABELS } from '../config/link';
 import { formatCount } from './hud';
 
 export interface PanelCallbacks {
@@ -46,15 +47,8 @@ interface SliderSpec {
   readonly format: (v: number) => string;
 }
 
-const SLIDERS: readonly SliderSpec[] = [
-  { key: 'omega', label: 'Roller speed', format: (v) => `${omegaToRpm(v).toFixed(1)} rpm` },
-  { key: 'frictionRatio', label: 'Friction ratio', format: (v) => `${v.toFixed(2)}×` },
-  { key: 'gap', label: 'Nip gap', format: (v) => v.toFixed(3) },
-  { key: 'dispersion', label: 'Dispersion', format: (v) => v.toFixed(2) },
-  { key: 'gravity', label: 'Gravity', format: (v) => v.toFixed(1) },
-  { key: 'backFriction', label: 'Back-roll friction', format: (v) => v.toFixed(2) },
-  { key: 'logFeed', label: 'Log feed', format: (v) => (v > 0 ? `lower in ${v.toFixed(2)}/s` : 'drop') }
-];
+/** The linkable parameters, in link order, with the shared labels (src/config/link.ts). */
+const SLIDERS: readonly SliderSpec[] = LINK_PARAM_KEYS.map((key) => ({ key, ...PARAM_LABELS[key] }));
 
 const PRESETS: readonly QualityPreset[] = ['low', 'medium', 'high', 'ultra'];
 

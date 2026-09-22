@@ -16,9 +16,10 @@
  */
 import './styles.css';
 import { BASE_LATENT, findPigment, rgbToLatentAsync } from './color/pigments';
-import { formatDrops, parseDrops, type Drop } from './drops';
+import { parseDrops, type Drop } from './drops';
+import { clampParam, formatMillQuery, parseMillParams } from './config/link';
 import {
-  BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres,
+  BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres,
   type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
@@ -109,12 +110,6 @@ function nextPaint(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
 }
 
-function clampParam(key: keyof MillParams, v: number): number {
-  const l = PARAM_LIMITS[key];
-  const snapped = Math.round(v / l.step) * l.step;
-  return Math.min(l.max, Math.max(l.min, parseFloat(snapped.toFixed(6))));
-}
-
 export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   const root = opts.root;
   root.innerHTML = '';
@@ -162,6 +157,8 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   const offscreen = navigator.webdriver || query.get('offscreen') === '1';
   // pigment chunks to set down once the first frame is up (?drops=)
   const initialDrops = parseDrops(query.get('drops'));
+  // mill parameters from the URL (?gap=0.06&omega=2 …; src/config/link.ts), the rest default
+  const initialParams: MillParams = { ...DEFAULT_PARAMS, ...parseMillParams(query) };
   // the preset goes into the start link when it was chosen on purpose (URL or panel), not auto-selected
   let presetPinned = chosen.reason === 'query parameter';
 
@@ -210,7 +207,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     onBatch: (b) => { void rebuildSim(preset, b); },
     onAutoOrbit: (on) => { autoOrbit = on; },
     onCopyStartLink: () => copyStartLink()
-  }, { params: { ...DEFAULT_PARAMS }, preset, batch, autoOrbit, open: wideScreen });
+  }, { params: { ...initialParams }, preset, batch, autoOrbit, open: wideScreen });
 
   // where along the roll a tap lands: one of DROP_SLOTS fixed positions, the
   // operator picks which (strip in the palette, [ and ], ?slot=)
@@ -296,12 +293,9 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
 
   /** index.html URL that reproduces this session's start: the drop log, plus batch/preset when set. */
   const startLink = (): string => {
-    // built by hand: ',', '@' and '.' are legal in a query string and read better than percent-escapes
-    const parts: string[] = [];
-    if (dropLog.length) parts.push(`drops=${formatDrops(dropLog)}`);
-    if (batch !== 1) parts.push(`batch=${batch}`);
-    if (presetPinned) parts.push(`preset=${preset}`);
-    return `${location.origin}${location.pathname}${parts.length ? `?${parts.join('&')}` : ''}`;
+    // drops, batch, preset (when pinned) and every mill parameter that differs from its default
+    const q = formatMillQuery({ drops: dropLog, batch, preset: presetPinned ? preset : undefined, params: sim ? sim.params : initialParams });
+    return `${location.origin}${location.pathname}${q ? `?${q}` : ''}`;
   };
 
   const copyStartLink = (): void => {
@@ -543,7 +537,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   hud.setText(`${preset} · ${gridDims(QUALITY_PRESETS[preset]).nx}³-ish grid · building…`);
   await nextPaint();
   try {
-    sim = opts.makeSim(device, buildConfig(preset, DEFAULT_PARAMS));
+    sim = opts.makeSim(device, buildConfig(preset, initialParams));
     await sim.ready;
     sim.paused = startPaused;
   } catch (e) {

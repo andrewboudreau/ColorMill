@@ -126,7 +126,11 @@ colour the mill will converge to once the bank is homogeneous; the naive RGB
 average is shown beside it for contrast. A recipe can be shared and restored
 with a link such as `?mix=cadmiumYellow:3,cobaltBlue:1`. **Open in the mill**
 hands the recipe to the simulator as a `?drops=` link (one medium chunk per
-part, halves as small chunks, spread along the roll).
+part, halves as small chunks, spread along the roll). The page doubles as a
+launch page for the mill: **Mill settings** under the button holds the same
+sliders as the simulator's drawer plus the quality preset and batch size, and
+only settings that differ from the defaults are written into the links, so
+`mixer.html?mix=…&gap=0.06` and the mill link it produces both stay short.
 
 The palette leads with the pigments silicone colour houses actually use
 (iron oxides, titanium dioxide, carbon black, phthalocyanines, ultramarine,
@@ -162,7 +166,8 @@ lays the same three bands on the bank.
 | `-` / `=` | Smaller / larger pigment chunks |
 | Drag / wheel / pinch | Orbit / zoom the camera; double-tap resets to the front view |
 | Right drawer (`P`) | Roller speed (rpm), friction ratio, nip gap, dispersion, gravity, back-roll friction, batch size, quality, auto-orbit, stats |
-| `?drops=cadmiumYellow@3.m,cobaltBlue@5.l` | Start with those pigment chunks already dropped (pigment@slot.size; size s, m or l; a custom colour as six hex digits); the drawer's **Copy start link** writes the current session's drops as such a link |
+| `?drops=hansaYellow@3.m,phthaloBlue@5.l` | Start with those pigment chunks already dropped (pigment@slot.size; size s, m or l; a custom colour as six hex digits) |
+| `?gap=0.06&omega=2&preset=high&batch=1.5` | Start with mill settings changed: any drawer slider by its name (`omega`, `frictionRatio`, `gap`, `dispersion`, `gravity`, `backFriction`, `logFeed`), the quality preset and the batch size. The drawer's **Copy start link** writes the session's drops plus every setting that differs from its default, so a whole setup restarts from one URL |
 
 ## Quality presets
 

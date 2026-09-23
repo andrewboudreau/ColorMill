@@ -606,7 +606,10 @@ so the renderer can be tested with a procedural volume without the sim.
   "Cut & fold" (alternating sides), "Clear pigment", "Reset", Pause.
 - Right drawer (collapsible; hidden by default on narrow screens): sliders
   for roller speed (rpm shown), friction ratio, nip gap, dispersion, gravity,
-  back-roll friction, log feed (drop, or lower in at a speed; §6);
+  back-roll friction, log feed (drop, or lower in at a speed; §6); an
+  **experimental** toggle (`?experimental=1`) that lifts the sliders' caps
+  (4× their top; URL values then accepted as written, floored at the
+  minimum) with no stability promise past the normal range;
   quality select; camera auto-orbit toggle; stats (particles, grid, fps,
   ms/frame, sim speed).
 - Drag in the viewport orbits; wheel/pinch zooms; double-tap resets the

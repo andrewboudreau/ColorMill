@@ -102,6 +102,20 @@ export default async function run() {
     await page.evaluate(() => { window.__mixer.setMill('gap', 0.04); window.__mixer.setMillPreset(undefined); });
     const s1c = await readState(page);
     assert(s1c.millQuery === '' && !s1c.openMillHref.includes('gap='), `back at the defaults nothing is written (${s1c.openMillHref})`);
+    // experimental: the caps come off (omega 50 is accepted), the flag leads the link, and turning it off clamps again
+    await page.evaluate(() => { window.__mixer.setMill('omega', 50); });
+    const s1d = await readState(page);
+    assert(s1d.millQuery === 'omega=6', `capped without experimental mode (${s1d.millQuery})`);
+    await page.evaluate(() => { window.__mixer.setMillExperimental(true); window.__mixer.setMill('omega', 50); });
+    const s1e = await readState(page);
+    const omegaMax = await page.evaluate(() => document.querySelector('.mx-adv-range[name="omega"]').max);
+    console.log(`  experimental: ${s1e.millQuery} (${s1e.millState}, omega slider max ${omegaMax})`);
+    assert(s1e.millQuery === 'experimental=1&omega=50', `experimental mode accepts the value and leads the link (${s1e.millQuery})`);
+    assert(parseFloat(omegaMax) >= 50, `the omega slider reaches the value (max ${omegaMax})`);
+    await page.evaluate(() => { window.__mixer.setMillExperimental(false); });
+    const s1f = await readState(page);
+    assert(s1f.millQuery === 'omega=6', `leaving experimental mode clamps the value (${s1f.millQuery})`);
+    await page.evaluate(() => { window.__mixer.setMill('omega', 3); });
 
     // --- 3. reset -> empty recipe, white ---------------------------------------------------
     await page.evaluate(() => window.__mixer.reset());

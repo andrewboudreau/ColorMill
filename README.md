@@ -167,7 +167,8 @@ lays the same three bands on the bank.
 | Drag / wheel / pinch | Orbit / zoom the camera; double-tap resets to the front view |
 | Right drawer (`P`) | Roller speed (rpm), friction ratio, nip gap, dispersion, gravity, back-roll friction, batch size, quality, auto-orbit, stats |
 | `?drops=hansaYellow@3.m,phthaloBlue@5.l` | Start with those pigment chunks already dropped (pigment@slot.size; size s, m or l; a custom colour as six hex digits) |
-| `?gap=0.06&omega=2&preset=high&batch=1.5` | Start with mill settings changed: any drawer slider by its name (`omega`, `frictionRatio`, `gap`, `dispersion`, `gravity`, `backFriction`, `logFeed`), the quality preset and the batch size. The drawer's **Copy start link** writes the session's drops plus every setting that differs from its default, so a whole setup restarts from one URL |
+| `?gap=0.06&omega=2&preset=high&batch=1.5` | Start with mill settings changed: any drawer slider by its name (`omega`, `frictionRatio`, `gap`, `dispersion`, `gravity`, `backFriction`, `logFeed`), the quality preset and the batch size. Values are snapped to the slider's step and capped at its range. The drawer's **Copy start link** writes the session's drops plus every setting that differs from its default, so a whole setup restarts from one URL |
+| `?experimental=1&omega=50` | Experimental mode: the caps come off. URL values are accepted as written (floored at each slider's minimum), the sliders stretch to 4× their normal top, and the drawer / mixer toggle **Experimental: lift the slider caps** does the same. The solver is not guaranteed stable up there |
 
 ## Quality presets
 

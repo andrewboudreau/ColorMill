@@ -12,7 +12,7 @@
 import './styles.css';
 import { PALETTE_ORDER, PIGMENTS, hexToRgb, rgbToLatentAsync, type Latent } from '../color/pigments';
 import { recipeToDrops } from '../drops';
-import { LINK_PARAM_KEYS, PARAM_LABELS, clampParam, formatMillQuery, isDefaultParam, parseMillStart } from '../config/link';
+import { LINK_PARAM_KEYS, PARAM_LABELS, clampParam, formatMillQuery, isDefaultParam, paramMax, parseMillStart } from '../config/link';
 import { BATCH_CHOICES, DEFAULT_PARAMS, PARAM_LIMITS, QUALITY_PRESETS, type MillParams, type QualityPreset } from '../config/mill';
 import {
   CUSTOM_KEY, MAX_PARTS, STARTER_RECIPES, describeRecipe, formatMix, ladder, mixRecipe, parseMix,
@@ -29,6 +29,8 @@ interface MixerApi {
   setMill(key: keyof MillParams, value: number): void;
   setMillPreset(preset: QualityPreset | undefined): void;
   setMillBatch(batch: number): void;
+  /** experimental mode: slider caps lifted, values accepted as written */
+  setMillExperimental(on: boolean): void;
   millQuery(): string;
 }
 
@@ -66,7 +68,8 @@ function boot(): void {
   const mill: MillParams = { ...DEFAULT_PARAMS, ...start.params };
   let millPreset: QualityPreset | undefined = start.preset;
   let millBatch = start.batch;
-  const millQuery = (): string => formatMillQuery({ batch: millBatch, preset: millPreset, params: mill });
+  let millExperimental = start.experimental;
+  const millQuery = (): string => formatMillQuery({ experimental: millExperimental, batch: millBatch, preset: millPreset, params: mill });
   let lastResult: MixResult = mixRecipe([]);
 
   const recipe = (): RecipeEntry[] => [...parts.entries()].map(([key, p]) => ({ key, parts: p }));
@@ -256,7 +259,7 @@ function boot(): void {
     range.type = 'range';
     range.name = key;
     range.min = String(lim.min);
-    range.max = String(lim.max);
+    range.max = String(Math.max(paramMax(key, millExperimental), mill[key]));
     range.step = String(lim.step);
     range.value = String(mill[key]);
     range.addEventListener('input', () => setMill(key, parseFloat(range.value)));
@@ -264,12 +267,23 @@ function boot(): void {
     advBody.appendChild(row);
     millRows.set(key, { range, value });
   }
+  const xrow = el('label', 'mx-adv-row mx-adv-check');
+  const xbox = el('input');
+  xbox.type = 'checkbox';
+  xbox.name = 'experimental';
+  xbox.id = 'mill-experimental';
+  xbox.addEventListener('change', () => setMillExperimental(xbox.checked));
+  const xtext = el('span', 'mx-adv-label', 'Experimental: lift the slider caps');
+  xtext.title = 'Sliders reach 4× their normal top and the link accepts any value. The solver is not guaranteed stable up there.';
+  xrow.append(xtext, xbox);
+  advBody.appendChild(xrow);
   const advReset = el('button', 'mx-btn mx-btn-small', 'Reset to defaults');
   advReset.type = 'button';
   advReset.addEventListener('click', () => {
     for (const key of LINK_PARAM_KEYS) mill[key] = DEFAULT_PARAMS[key];
     millPreset = undefined;
     millBatch = 1;
+    millExperimental = false;
     render();
   });
   advBody.appendChild(advReset);
@@ -329,12 +343,14 @@ function boot(): void {
     // mill settings rows
     presetSel.value = millPreset ?? '';
     batchSel.value = String(millBatch);
+    xbox.checked = millExperimental;
     for (const [key, ui] of millRows) {
+      ui.range.max = String(Math.max(paramMax(key, millExperimental), mill[key]));
       if (parseFloat(ui.range.value) !== mill[key]) ui.range.value = String(mill[key]);
       ui.value.textContent = PARAM_LABELS[key].format(mill[key]);
       ui.range.parentElement?.classList.toggle('is-changed', !isDefaultParam(key, mill[key]));
     }
-    const changed = LINK_PARAM_KEYS.filter((k) => !isDefaultParam(k, mill[k])).length + (millPreset ? 1 : 0) + (millBatch !== 1 ? 1 : 0);
+    const changed = LINK_PARAM_KEYS.filter((k) => !isDefaultParam(k, mill[k])).length + (millPreset ? 1 : 0) + (millBatch !== 1 ? 1 : 0) + (millExperimental ? 1 : 0);
     advState.textContent = changed ? `${changed} changed` : 'defaults';
     adv.classList.toggle('is-changed', changed > 0);
     // the recipe reads as written in the URL: ':' and ',' are fine in a query string;
@@ -356,7 +372,14 @@ function boot(): void {
 
   function setMill(key: keyof MillParams, value: number): void {
     if (!(key in PARAM_LIMITS)) return;
-    mill[key] = clampParam(key, Number.isFinite(value) ? value : DEFAULT_PARAMS[key]);
+    mill[key] = clampParam(key, Number.isFinite(value) ? value : DEFAULT_PARAMS[key], millExperimental);
+    render();
+  }
+
+  function setMillExperimental(on: boolean): void {
+    millExperimental = !!on;
+    // back under the caps: pull every value into range
+    if (!millExperimental) for (const key of LINK_PARAM_KEYS) mill[key] = clampParam(key, mill[key]);
     render();
   }
 
@@ -400,6 +423,7 @@ function boot(): void {
     setMill,
     setMillPreset,
     setMillBatch,
+    setMillExperimental,
     millQuery,
     result: () => ({ hex: lastResult.hex, naiveHex: lastResult.naiveHex, latent: Array.from(lastResult.latent) }),
     reset

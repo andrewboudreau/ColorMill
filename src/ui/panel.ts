@@ -7,7 +7,7 @@ import {
   BATCH_CHOICES, batchLitres, PARAM_LIMITS, QUALITY_PRESETS, estimateParticleCount,
   type MillParams, type QualityPreset
 } from '../config/mill';
-import { LINK_PARAM_KEYS, PARAM_LABELS } from '../config/link';
+import { LINK_PARAM_KEYS, PARAM_LABELS, paramMax } from '../config/link';
 import { formatCount } from './hud';
 
 export interface PanelCallbacks {
@@ -16,6 +16,8 @@ export interface PanelCallbacks {
   /** batch size multiplier (rebuilds the bank) */
   onBatch(batch: number): void;
   onAutoOrbit(on: boolean): void;
+  /** experimental mode: the sliders' upper caps lifted (link.ts EXPERIMENTAL_SCALE) */
+  onExperimental(on: boolean): void;
   /** "Copy start link": a URL that reproduces this session's pigment drops */
   onCopyStartLink(): void;
 }
@@ -38,6 +40,7 @@ export interface PanelInitial {
   /** batch size multiplier */
   readonly batch?: number;
   readonly autoOrbit: boolean;
+  readonly experimental?: boolean;
   readonly open: boolean;
 }
 
@@ -59,6 +62,7 @@ export class Panel {
   private readonly quality: HTMLSelectElement;
   private readonly batch: HTMLSelectElement;
   private readonly orbit: HTMLInputElement;
+  private readonly experimental: HTMLInputElement;
   private readonly stats: Record<string, HTMLElement> = {};
   private open: boolean;
 
@@ -99,7 +103,7 @@ export class Panel {
       const input = document.createElement('input');
       input.type = 'range';
       input.min = String(lim.min);
-      input.max = String(lim.max);
+      input.max = String(Math.max(paramMax(spec.key, !!initial.experimental), initial.params[spec.key]));
       input.step = String(lim.step);
       input.value = String(initial.params[spec.key]);
       input.name = spec.key;
@@ -115,6 +119,21 @@ export class Panel {
       params.appendChild(field);
       this.sliders.set(spec.key, { input, value, spec });
     }
+    const xfield = document.createElement('label');
+    xfield.className = 'cm-field cm-field-check';
+    this.experimental = document.createElement('input');
+    this.experimental.type = 'checkbox';
+    this.experimental.name = 'experimental';
+    this.experimental.checked = !!initial.experimental;
+    this.experimental.addEventListener('change', () => {
+      this.setExperimental(this.experimental.checked);
+      this.cb.onExperimental(this.experimental.checked);
+    });
+    const xtext = document.createElement('span');
+    xtext.textContent = 'Experimental: lift the slider caps';
+    xtext.title = 'Sliders reach 4× their normal top and links accept any value. The solver is not guaranteed stable up there.';
+    xfield.append(this.experimental, xtext);
+    params.appendChild(xfield);
 
     // --- quality --------------------------------------------------------------
     const qsec = this.section('Quality');
@@ -236,6 +255,7 @@ export class Panel {
   setParams(p: MillParams): void {
     for (const [key, s] of this.sliders) {
       const v = p[key];
+      if (v > parseFloat(s.input.max)) s.input.max = String(v);
       if (parseFloat(s.input.value) !== v) s.input.value = String(v);
       s.value.textContent = s.spec.format(v);
     }
@@ -256,6 +276,15 @@ export class Panel {
 
   setAutoOrbit(on: boolean): void {
     this.orbit.checked = on;
+  }
+
+  /** Stretch (or restore) the sliders' tops; a value already past the cap keeps its slider wide enough. */
+  setExperimental(on: boolean): void {
+    this.experimental.checked = on;
+    for (const [key, s] of this.sliders) {
+      const v = parseFloat(s.input.value);
+      s.input.max = String(Math.max(paramMax(key, on), Number.isFinite(v) ? v : 0));
+    }
   }
 
   setStats(s: PanelStats): void {

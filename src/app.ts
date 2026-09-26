@@ -410,10 +410,12 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
    * One frame: resize, (optionally) step the sim, render, submit. A throwing
    * sim.step is reported in the HUD, pauses the sim and the frame is still
    * rendered on a fresh encoder; a throwing render is reported and skipped.
+   * `render = false` steps without drawing (stepFrames() draws only its last
+   * frame: the ray march is the bulk of a frame on a software GPU).
    */
-  const runFrame = (frameDt: number, forceStep = false): void => {
+  const runFrame = (frameDt: number, forceStep = false, render = true): void => {
     if (destroyed || !sim || !renderer) return;
-    try { renderer.resize(); } catch (e) { reportError('resize failed', e); }
+    if (render) { try { renderer.resize(); } catch (e) { reportError('resize failed', e); } }
     if (autoOrbit && !(orbit?.active ?? false)) renderer.camera.yaw += frameDt * AUTO_ORBIT_RATE;
 
     let encoder = device.createCommandEncoder({ label: 'colormill frame' });
@@ -430,6 +432,10 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       }
     }
     if (forceStep && !sim.paused) sim.paused = wasPaused;
+    if (!render) {
+      device.queue.submit([encoder.finish()]);
+      return;
+    }
 
     const st = sim.stats;
     try {
@@ -586,7 +592,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     async stepFrames(n: number): Promise<void> {
       stepping = true;
       try {
-        for (let i = 0; i < n; i++) runFrame(1 / 60, true);
+        for (let i = 0; i < n; i++) runFrame(1 / 60, true, i === n - 1);
         await device.queue.onSubmittedWorkDone();
         paintStats(true);
       } finally {

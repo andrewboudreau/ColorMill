@@ -7,14 +7,16 @@ on:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # v2: the WebGPU Vite app. Type-check, unit tests, production build, then the
-  # Playwright end-to-end tests in headless Chromium with SwiftShader WebGPU
-  # (no GPU on the runner). tests/e2e/lib.mjs falls back to Playwright's own
-  # Chromium when COLORMILL_CHROMIUM / the /opt path is absent.
+  # v2: the WebGPU Vite app. `web` type-checks, unit-tests and builds; `e2e`
+  # runs the Playwright end-to-end specs in headless Chromium with SwiftShader
+  # WebGPU (no GPU on the runner), sharded so the two slow specs (app, solver)
+  # run side by side instead of one after the other. tests/e2e/lib.mjs falls
+  # back to Playwright's own Chromium when COLORMILL_CHROMIUM / the /opt path
+  # is absent.
   # ---------------------------------------------------------------------------
   web:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,6 +50,36 @@ jobs:
           test ! -e dist/shell.html
           ls -R dist | head -50
 
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: app
+            specs: app
+          - shard: solver
+            specs: solver
+          - shard: quick
+            specs: render mixer webgpu
+    name: e2e (${{ matrix.shard }})
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
       - name: Playwright version
         id: pw
         run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
@@ -62,10 +94,9 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       # Runs against the production bundle (`vite preview` on dist/). Locally
-      # the same thing is `E2E_MODE=preview npm run test:e2e`.
+      # the same thing is `E2E_MODE=preview npm run test:e2e <names>`.
       - name: End-to-end tests (headless Chromium + SwiftShader WebGPU)
-        run: npm run test:e2e
-        continue-on-error: false
+        run: node tests/e2e/run.mjs ${{ matrix.specs }}
         env:
           E2E_MODE: preview
 
@@ -73,7 +104,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-out
+          name: e2e-out-${{ matrix.shard }}
           path: tests/e2e/out/
           if-no-files-found: ignore
 

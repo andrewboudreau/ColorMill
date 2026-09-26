@@ -211,7 +211,8 @@ screenshot to `tests/e2e/out/app.png`. They need a Chromium — run
 `npx playwright install --with-deps chromium` once, or point
 `COLORMILL_CHROMIUM` at one. `E2E_MODE=preview npm run test:e2e` tests the
 production bundle instead of the dev server (this is what CI does).
-`npm run test:e2e app` runs only the specs whose file name contains `app`,
+`npm run test:e2e app` runs only the specs whose file name contains `app`
+(several names run any of them: `npm run test:e2e render mixer`),
 and `E2E_SOLVER_FOLD=1` makes the solver spec exercise cut & roll too.
 
 The screenshots in this README were rendered the same way, headless through
@@ -251,7 +252,11 @@ too.
 ## Deployment and CI
 
 - **CI** (`.github/workflows/ci.yml`, PRs and pushes to `main`): a `web` job
-  (type-check, unit tests, build, Playwright e2e), a `native` job (the v1 CPU
+  (type-check, unit tests, build), three `e2e` shards side by side (`app`,
+  `solver`, and `render` + `mixer` + `webgpu`; the two slow specs no longer
+  queue behind each other, and the app spec draws only the last of the
+  frames it steps, since the software ray march was most of its time), a
+  `native` job (the v1 CPU
   solver still compiles; `make ref` builds the reference solver) and a
   `legacy-web` job (the Emscripten build).
 - **Pages** (`.github/workflows/pages.yml`, pushes to `main`): builds the v2

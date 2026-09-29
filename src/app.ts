@@ -333,7 +333,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   const cutFlop = (): void => withSim('cutAndFlop failed', (s) => {
     if (s.operatorBusy) return;
     s.cutAndFlop(flopSide);
-    hud.showHint(`Cut & fold: the sheet is cut from the ${flopSide} end to the middle and the freed half flips over onto the other half`, 3000);
+    hud.showHint(`Cut & fold: the sheet is cut across from the ${flopSide} end to the middle and folded like a flag onto the other half`, 3000);
     flopSide = flopSide === 'left' ? 'right' : 'left';
   });
 

@@ -463,57 +463,61 @@ roll axis. Modelled as a scripted kinematic move:
 Nothing is placed inside existing material and no material is left behind. Exposed as
 `GpuMpmSim.cutAndFold()`; the UI button is "Cut & roll" (F).
 
-### 6b. Cut & fold (the flip)
+### 6b. Cut & fold (the flag fold)
 
 The other move an operator makes, and the one most milling actually uses
-(reference footage: silicone colour mixing on a lab mill): hold a knife
-against the sheet on the **front face** of the front roll and draw it from
-the roll end to the middle while the sheet comes up past it. Because the
-sheet moves during the stroke the top of the cut is a diagonal (the end was
-cut first and has moved up since); once the knife reaches the middle the cut
-is done, and from there down to where the sheet comes up from under the roll
-the middle line is the **uncut seam**. The freed flap is the whole cut half
-of the sheet on the front face below the cut. The operator takes it by the
-roll end and flips it over the seam onto the other half, like a page turned
-on a spine that runs around the roll at x = L/2, so what was against the
-roll is now on top and the doubled sheet rides up into the nip. Ends
-alternate. Same kernels as the log, mode `P.fold.x` = 2 (cut from the x = 0
-end) or 3 (from the x = L end); `GpuMpmSim.cutAndFlop(side)`, UI button
-"Cut & fold" (C), which alternates. No knife is drawn: the flip starts when
-the button is pressed.
+(reference footage: silicone colour mixing on a lab mill), done the way a
+flag is folded. A knife cuts the sheet **across** on the front face of the
+front roll, from the roll end to the middle just below the crown
+(`FLAP_TH_MIN` = 0.08 rad down from the crown), so the half-width strip
+below the cut (width `W` = L/2) is free at the top and still joined to the
+other half along the **uncut seam** at the middle. Then two large triangular
+folds, in the strip's top square (W down the face as well as W across):
 
-1. **Select** the flap: the sheet on the front face (radial depth off the
-   front roll below `flapDepth()` = 3 gap + h, angle `FLAP_TH_MIN`..
-   `FLAP_TH_MAX` = 0.08..2.2 rad down from the crown, so from just in front
-   of the crown line to where the sheet comes up from under the roll) on the
-   cut side of `cutX(θ)`: the cut runs from the roll end at the top to the
-   middle `FLAP_CUT_ARC` = 0.6 rad lower, and below that the whole half is
-   free. It is binned by arc (`NB` bins) and depth (`NS` linear slices) and
-   flagged. The sheet on the receiving half over the same arc is binned the
-   same way, unflagged.
-2. **Tables**: per arc bin the thickness of each half's sheet (the 97th
-   percentile of its depth, at least a cell): the flap's, and the receiving
-   sheet's it lands on.
-3. **Flip** (`FLOP_SECONDS` = 1.0 s): at its own angle θ down the front face a
-   particle turns about the seam point (x = L/2 at the top of the flap there)
-   in the plane spanned by the roll axis and the local radial direction,
-   through π. Lateral offset −w → +w (mirrored across the seam) and radial
-   offset −d → +d (its depth below the flap's top becomes height above the
-   landing, roll side up), so the whole flap swings out from the roll and
-   over as one body and keeps its shape. The swing's radial reach is
-   flattened to `FLOP_LIFT` = 0.6 of its lateral one so a half-width flap
-   (0.75 units) stays inside the 2.0-deep domain in front of the roll; the
-   receiving sheet may be thicker or thinner than the flap, so the radial
-   offset eases onto its top over the turn. The flap only ever moves outward
-   from the roll, so nothing is placed inside the roll or the sheet.
-4. **Release** at rest, `F = I`, `C = 0`, as for the log. The roll carries the
-   doubled half up into the nip; the bare half on the cut side is covered
-   again by the sheet coming up from the nip within half a turn.
+1. **First fold** (modes `P.fold.x` = 2 / 3, cut at the x = 0 / x = L end):
+   the free corner at the roll end goes over the square's diagonal (from the
+   seam at the cut down to the roll end W lower) onto the triangle below it,
+   so the corner lands at the seam at the bottom of the square.
+2. **Second fold** (modes 4 / 5, queued by the solver the frame the first
+   ends and selected afresh, so it takes the doubled triangle and whatever
+   the roll has brought up under it): the doubled triangle goes over the seam
+   onto the other half, roll side up, and rides up into the nip.
 
-Every flip doubles the sheet on one half from the other half's material;
-alternating ends walks material back and forth across the middle, which is
-where a real mill's lateral mixing comes from. Cut & roll remains the move
-that reaches from one end of the roll to the other.
+Ends alternate. `GpuMpmSim.cutAndFlop(side)` starts the pair; UI button
+"Cut & fold" (C). No knife is drawn: the first fold starts when the button
+is pressed.
+
+Per fold:
+
+- **Select** the flap: the sheet on the front face (radial depth off the
+  front roll below `flapDepth()` = 3 gap + h) inside the strip's square, in
+  the sheet's own coordinates (u in from the cut end, s = R·θ down from the
+  cut): the corner triangle u + s < W for the first fold, the lower triangle
+  u + s ≥ W (both plies) for the second. Binned by arc (`NB` bins) and depth
+  (`NS` linear slices) and flagged. What it lands on (the lower triangle, or
+  the other half) is binned the same way, unflagged.
+- **Tables**: per arc bin the thickness of each (the 97th percentile of its
+  depth, at least a cell).
+- **Turn** (`FLOP_SECONDS` = 0.8 s each): a page turn on a hinge drawn in
+  sheet coordinates (the sheet is developable, so the hinge is a straight
+  line there although it is a helix on the roll): the diagonal u + s = W, or
+  the seam u = W. A particle turns about its foot on the hinge in the plane
+  of the hinge's in-sheet normal and the local radial direction, through π:
+  in-sheet offset −w → +w (mirrored across the hinge) and radial offset
+  −d → +d (its depth below the flap's top becomes height above the landing,
+  roll side up), so the whole flap swings out from the roll and over as one
+  body. The swing's radial reach is flattened to `FLOP_LIFT` = 0.6 of its
+  lateral one so the widest flap (W/√2 for the diagonal, W for the seam)
+  stays inside the 2.0-deep domain in front of the roll; the landing sheet
+  may be thicker or thinner than the flap, so the radial offset eases onto
+  its top over the turn. The flap only ever moves outward from the roll.
+- **Release** at rest, `F = I`, `C = 0`, as for the log.
+
+Two folds move a triangle of sheet from the roll end to the other half of
+the roll, four plies deep at the seam; alternating ends walks material back
+and forth across the middle, which is where a real mill's lateral mixing
+comes from. Cut & roll remains the move that reaches from one end of the
+roll to the other.
 
 ---
 

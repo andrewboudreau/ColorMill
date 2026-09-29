@@ -31,10 +31,11 @@ without WebGPU.
 - **The sheet.** The front roll is tackier, so the putty leaves the nip stuck
   to it as a thin sheet and comes back over the top to rejoin the bank.
 - **Cut & fold, cut & roll.** A mill has no sideways transport of its own;
-  the operator supplies it. Cut & fold cuts the sheet on the front roll from
-  the end to the middle while it comes up, then flips the freed half over
-  the uncut seam at the middle onto the other half, alternating ends. Cut &
-  roll takes everything off, rolls it
+  the operator supplies it. Cut & fold cuts the sheet across on the front
+  roll from the end to the middle, then folds it the way a flag is folded:
+  the free corner over as a big triangle, then the doubled triangle over the
+  uncut seam onto the other half, alternating ends. Cut & roll takes
+  everything off, rolls it
   into a log and feeds it back in end-first. ColorMill scripts both moves; a
   few rounds turn stripes into a blend.
 - **Pigment.** The base is clear silicone. A tap sets a chunk of concentrated
@@ -93,12 +94,14 @@ crisp in the resting bank and blend in the nip. The clear base carries no
 pigment at all; a chunk's load spreads out as it is milled and the colour
 gets deeper where the load is higher.
 
-**Cut & fold** cuts the sheet on the front face of the front roll from the
-roll end to the middle while the sheet comes up past the knife, so the top of
-the cut is a short diagonal; below it the middle of the sheet is the uncut
-seam. The freed half of the sheet flips over that seam like a page on a
-spine, out in front of the roll and over onto the other half, roll side up,
-and the doubled sheet rides up into the nip. **Cut & roll** takes
+**Cut & fold** cuts the sheet across on the front face of the front roll,
+from the roll end to the middle just below the crown, so the half-width strip
+below the cut is free at the top and still joined to the other half along
+the uncut seam. Then it folds the strip the way a flag is folded, in two big
+triangles: the free corner at the roll end goes over the diagonal onto the
+triangle below it, and the doubled triangle goes over the seam onto the
+other half, roll side up, where the doubled sheet rides up into the nip.
+Each fold is a page turn out in front of the roll. **Cut & roll** takes
 everything on the mill, winds it into a
 volume-preserving log standing over the nip (bank kneaded into the core,
 sheet wrapped around it), and sets the log down on the nip for the rolls to
@@ -155,7 +158,7 @@ lays the same three bands on the bank.
 | Chunk-size dots (bottom bar) | Small, medium or large chunk for the next tap (also `-` / `=`, or `?chunk=s`, `m`, `l`) |
 | Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack) |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
-| **Cut & fold** / `C` | Cut the sheet on the front roll from the end to the middle and flip the freed half over the uncut seam onto the other half (ends alternate) |
+| **Cut & fold** / `C` | Cut the sheet across from the end to the middle and fold it like a flag: the corner triangle over the diagonal, then the doubled triangle over the seam onto the other half (ends alternate) |
 | **Cut & roll** / `F` | Cut everything off, roll it into a log and drop it back on the nip (or lower it in: **Log feed** slider) |
 | **Clear pigment** | Reset every particle to clear silicone |
 | **Reset** / `R` | Re-seed the bank |

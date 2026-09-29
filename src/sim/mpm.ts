@@ -63,11 +63,16 @@ export function foldDuration(logFeed: number): number {
 }
 /** Script length of the lowered-in move at FOLD_FEED_SPEED (≈ 10.5 s). */
 export const FOLD_DURATION = foldDuration(FOLD_FEED_SPEED);
-/** Cut & fold (fold the cut flap over the cut onto the sheet beside it; fold.wgsl): the fold takes FLOP_SECONDS. */
+/** Cut & fold (fold.wgsl): cut the sheet across from one end to the middle, fold the free corner
+ * over the diagonal as a triangle, then fold the doubled triangle over the uncut seam onto the
+ * other half. Each fold takes FLOP_SECONDS (mirrors the shader); the solver queues the second
+ * fold when the first ends. */
 export const FLOP_SECONDS = 0.8;
 export const FLOP_DURATION = FLOP_SECONDS + 0.02;
-/** Operator-move modes carried in P.fold.x: 1 = cut & roll (log), 2 / 3 = cut & fold lifting the x < L/2 / x >= L/2 half. */
-export type FoldMode = 0 | 1 | 2 | 3;
+/** Operator-move modes carried in P.fold.x: 1 = cut & roll (log); cut & fold with the cut at the
+ * x = 0 / x = L end: 2 / 3 the first fold (the corner triangle over the diagonal), 4 / 5 the second
+ * (the doubled triangle over the seam onto the other half). */
+export type FoldMode = 0 | 1 | 2 | 3 | 4 | 5;
 /** Arc length along the front roll -> z on the bank (the unrolled sheet is compressed by this factor). */
 /**
  * Reference material density. The stress force in P2G is scaled by
@@ -570,6 +575,11 @@ export class GpuMpm implements GpuMpmSim {
         if (finishAt.includes(s)) {
           this.dispatchParticles(pass, k.foldFinish, s);
           this.foldActive = false;
+          // cut & fold: the second fold follows the first, selected afresh next frame
+          if (this.foldMode === 2 || this.foldMode === 3) {
+            this.foldMode = (this.foldMode + 2) as FoldMode;
+            this.foldPending = true;
+          }
         }
       }
     }

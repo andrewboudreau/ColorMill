@@ -219,7 +219,8 @@ export default async function run() {
     assert(!chunk.error && chunk.bad === 0, 'chunk particles are finite: ' + chunk.error);
     assert(chunk.added > 500 && chunk.count === chunk.n0 + chunk.added && chunk.statCount === chunk.count, `chunk added particles consistently (${JSON.stringify(chunk)})`);
 
-    // --- cut & fold (the flop): cuts a flap of the sheet from the left end of the front roll and folds it over the cut toward the middle ---
+    // --- cut & fold (the flag fold): cut across from the left end to the middle, fold the free corner triangle over the
+    // diagonal onto the triangle below, then fold the doubled triangle over the uncut seam onto the right half ---
     const flop = await page.evaluate(async (n) => {
       window.__solver.sim.cutAndFlop('left');
       await window.__solver.stepFrames(4);
@@ -227,20 +228,29 @@ export default async function run() {
       const idx = [];
       let sumX0 = 0;
       for (let p = 0; p < s.count; p++) if (s.flags[p] & 1) { idx.push(p); sumX0 += s.positions[3 * p]; }
+      // the first fold ends; the corner triangle now lies on the lower triangle, still on the left half
       await window.__solver.stepFrames(n);
+      const m = await window.__solver.snapshot();
+      let sumXm = 0, kinM = 0;
+      for (const p of idx) sumXm += m.positions[3 * p];
+      for (let p = 0; p < m.count; p++) if (m.flags[p] & 1) kinM++;
+      // the second fold (queued by the solver) ends: the doubled triangle is on the right half
+      await window.__solver.stepFrames(n + 2);
       const e = await window.__solver.snapshot();
       let kin = 0, sumX1 = 0, sumY1 = 0;
       for (let p = 0; p < e.count; p++) if (e.flags[p] & 1) kin++;
       for (const p of idx) { sumX1 += e.positions[3 * p]; sumY1 += e.positions[3 * p + 1]; }
-      return { lifted: idx.length, count: s.count, meanX0: sumX0 / idx.length, kin, meanX1: sumX1 / idx.length, meanY1: sumY1 / idx.length,
+      return { lifted: idx.length, count: s.count, meanX0: sumX0 / idx.length, meanXm: sumXm / idx.length, kinM, kin, meanX1: sumX1 / idx.length, meanY1: sumY1 / idx.length,
         positions: Array.from(e.positions), velocities: Array.from(e.velocities), latents: Array.from(e.latents), deformation: Array.from(e.deformation), flags: Array.from(e.flags), error: window.__solver.error };
     }, framesFor(0.8) + 4);
     const aFlop = analyse(flop, dims);
-    console.log(`  cut & fold: lifted ${flop.lifted} of ${flop.count} (mean x ${flop.meanX0.toFixed(3)}), landed at mean x ${flop.meanX1.toFixed(3)}, y ${flop.meanY1.toFixed(3)}; ${flop.kin} still held; ${JSON.stringify({ bad: aFlop.bad, outside: aFlop.outside, inRoller: aFlop.inRoller })}`);
+    console.log(`  cut & fold: lifted ${flop.lifted} of ${flop.count} (mean x ${flop.meanX0.toFixed(3)}); after the first fold mean x ${flop.meanXm.toFixed(3)} (${flop.kinM} held for the second); after the second mean x ${flop.meanX1.toFixed(3)}, y ${flop.meanY1.toFixed(3)}; ${flop.kin} still held; ${JSON.stringify({ bad: aFlop.bad, outside: aFlop.outside, inRoller: aFlop.inRoller })}`);
     assert(!flop.error, 'no WebGPU errors during cut & fold: ' + flop.error);
-    assert(flop.lifted > 0.015 * flop.count && flop.lifted < 0.3 * flop.count, `cut & fold lifts a flap of the sheet, not a whole half (${flop.lifted} of ${flop.count})`);
-    assert(flop.meanX0 < 0.5 * 1.5 && flop.meanX1 > flop.meanX0 + 0.08 && flop.meanX1 < 0.5 * 1.5 + 0.1, `the flap folds over the cut toward the middle (mean x ${flop.meanX0.toFixed(3)} -> ${flop.meanX1.toFixed(3)})`);
-    assert(flop.kin === 0, `everything is released once the flop is over (${flop.kin} still held)`);
+    assert(flop.lifted > 0.015 * flop.count && flop.lifted < 0.3 * flop.count, `the first fold lifts the corner triangle of the strip (${flop.lifted} of ${flop.count})`);
+    assert(flop.meanX0 < 0.4 && flop.meanXm > flop.meanX0 + 0.15 && flop.meanXm < 0.75, `the corner triangle folds over the diagonal toward the seam, still on the left half (mean x ${flop.meanX0.toFixed(3)} -> ${flop.meanXm.toFixed(3)})`);
+    assert(flop.kinM > 0, `the second fold takes over (${flop.kinM} held after the first)`);
+    assert(flop.meanX1 > 0.75 && flop.meanX1 > flop.meanXm + 0.2, `the doubled triangle folds over the seam onto the right half (mean x ${flop.meanXm.toFixed(3)} -> ${flop.meanX1.toFixed(3)})`);
+    assert(flop.kin === 0, `everything is released once both folds are over (${flop.kin} still held)`);
     assert(aFlop.bad === 0 && aFlop.outside === 0 && aFlop.inRoller === 0 && aFlop.n === chunk.count, 'state sane after cut & fold');
 
     // --- optional: cut & roll ---------------------------------------------

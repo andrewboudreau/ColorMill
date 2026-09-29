@@ -63,8 +63,9 @@ export function foldDuration(logFeed: number): number {
 }
 /** Script length of the lowered-in move at FOLD_FEED_SPEED (≈ 10.5 s). */
 export const FOLD_DURATION = foldDuration(FOLD_FEED_SPEED);
-/** Cut & fold (fold the cut flap over the cut onto the sheet beside it; fold.wgsl): the fold takes FLOP_SECONDS. */
-export const FLOP_SECONDS = 0.8;
+/** Cut & fold (cut the sheet from one end to the middle and flip the freed half over the uncut
+ * seam onto the other half; fold.wgsl): the flip takes FLOP_SECONDS (mirrors the shader). */
+export const FLOP_SECONDS = 1.0;
 export const FLOP_DURATION = FLOP_SECONDS + 0.02;
 /** Operator-move modes carried in P.fold.x: 1 = cut & roll (log), 2 / 3 = cut & fold lifting the x < L/2 / x >= L/2 half. */
 export type FoldMode = 0 | 1 | 2 | 3;

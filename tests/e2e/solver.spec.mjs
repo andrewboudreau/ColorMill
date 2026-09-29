@@ -219,7 +219,7 @@ export default async function run() {
     assert(!chunk.error && chunk.bad === 0, 'chunk particles are finite: ' + chunk.error);
     assert(chunk.added > 500 && chunk.count === chunk.n0 + chunk.added && chunk.statCount === chunk.count, `chunk added particles consistently (${JSON.stringify(chunk)})`);
 
-    // --- cut & fold (the flop): cuts a flap of the sheet from the left end of the front roll and folds it over the cut toward the middle ---
+    // --- cut & fold (the flop): cuts the sheet from the left end of the front roll to the middle and flips the freed half over the uncut seam onto the right half ---
     const flop = await page.evaluate(async (n) => {
       window.__solver.sim.cutAndFlop('left');
       await window.__solver.stepFrames(4);
@@ -234,12 +234,12 @@ export default async function run() {
       for (const p of idx) { sumX1 += e.positions[3 * p]; sumY1 += e.positions[3 * p + 1]; }
       return { lifted: idx.length, count: s.count, meanX0: sumX0 / idx.length, kin, meanX1: sumX1 / idx.length, meanY1: sumY1 / idx.length,
         positions: Array.from(e.positions), velocities: Array.from(e.velocities), latents: Array.from(e.latents), deformation: Array.from(e.deformation), flags: Array.from(e.flags), error: window.__solver.error };
-    }, framesFor(0.8) + 4);
+    }, framesFor(1.0) + 4);
     const aFlop = analyse(flop, dims);
     console.log(`  cut & fold: lifted ${flop.lifted} of ${flop.count} (mean x ${flop.meanX0.toFixed(3)}), landed at mean x ${flop.meanX1.toFixed(3)}, y ${flop.meanY1.toFixed(3)}; ${flop.kin} still held; ${JSON.stringify({ bad: aFlop.bad, outside: aFlop.outside, inRoller: aFlop.inRoller })}`);
     assert(!flop.error, 'no WebGPU errors during cut & fold: ' + flop.error);
-    assert(flop.lifted > 0.015 * flop.count && flop.lifted < 0.3 * flop.count, `cut & fold lifts a flap of the sheet, not a whole half (${flop.lifted} of ${flop.count})`);
-    assert(flop.meanX0 < 0.5 * 1.5 && flop.meanX1 > flop.meanX0 + 0.08 && flop.meanX1 < 0.5 * 1.5 + 0.1, `the flap folds over the cut toward the middle (mean x ${flop.meanX0.toFixed(3)} -> ${flop.meanX1.toFixed(3)})`);
+    assert(flop.lifted > 0.03 * flop.count && flop.lifted < 0.35 * flop.count, `cut & fold lifts the cut half of the front-face sheet, not the whole mill (${flop.lifted} of ${flop.count})`);
+    assert(flop.meanX0 < 0.5 * 1.5 && flop.meanX1 > 0.5 * 1.5 && Math.abs(flop.meanX1 - (1.5 - flop.meanX0)) < 0.1, `the flap flips over the middle seam onto the other half, mirrored (mean x ${flop.meanX0.toFixed(3)} -> ${flop.meanX1.toFixed(3)})`);
     assert(flop.kin === 0, `everything is released once the flop is over (${flop.kin} still held)`);
     assert(aFlop.bad === 0 && aFlop.outside === 0 && aFlop.inRoller === 0 && aFlop.n === chunk.count, 'state sane after cut & fold');
 

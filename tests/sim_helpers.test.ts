@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, WHITE_LATENT, dispatchSize, foldDuration, foldProfile, halfToFloat } from '../src/sim/mpm';
-import { DEFAULT_PARAMS, PARAM_LIMITS } from '../src/config/mill';
+import { FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, LIFT_SECONDS, WHITE_LATENT, WIND_HOP_SECONDS, WIND_MAX_SECONDS, dispatchSize, foldDuration, foldProfile, halfToFloat, rollSeconds, windArc, windSeconds, windSpeed } from '../src/sim/mpm';
+import { DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS } from '../src/config/mill';
 
 describe('solver helpers', () => {
   it('splits large particle dispatches into 2D so no dimension exceeds the limit', () => {
@@ -51,5 +51,27 @@ describe('foldDuration', () => {
     // a faster feed is a shorter move, never shorter than the drop
     expect(foldDuration(0.6)).toBeLessThan(foldDuration(0.3));
     expect(foldDuration(0.6)).toBeGreaterThan(foldDuration(0));
+  });
+});
+
+describe('peel and wind timing', () => {
+  it('winds at the roll surface speed, floored so a slow roll still finishes, then lifts', () => {
+    // the arc from the nip exit round to the crown of a 0.32 roll
+    expect(windArc()).toBeCloseTo(1.5 * Math.PI * GEOMETRY.radius, 9);
+    // at the default speed the surface is faster than the floor: one arc at omega R
+    const omega = DEFAULT_PARAMS.omega;
+    expect(windSpeed(omega)).toBeCloseTo(omega * GEOMETRY.radius, 9);
+    expect(windSeconds(omega)).toBeCloseTo(windArc() / (omega * GEOMETRY.radius) + WIND_HOP_SECONDS, 9);
+    expect(rollSeconds(omega)).toBeCloseTo(windSeconds(omega) + LIFT_SECONDS, 9);
+    expect(FOLD_ROLL_SECONDS).toBe(rollSeconds(omega));
+    expect(rollSeconds(omega)).toBeGreaterThan(1.5);
+    expect(rollSeconds(omega)).toBeLessThan(3.5);
+    // a stopped or crawling roll: the operator pulls at the floor speed instead
+    expect(windSeconds(0)).toBeCloseTo(WIND_MAX_SECONDS + WIND_HOP_SECONDS, 9);
+    expect(windSeconds(0.1)).toBe(windSeconds(0));
+    // a faster roll winds faster, and the whole move follows
+    expect(rollSeconds(6)).toBeLessThan(rollSeconds(3));
+    expect(foldDuration(0, 6)).toBeLessThan(foldDuration(0, 3));
+    expect(foldDuration(0.3, 6)).toBeCloseTo(rollSeconds(6) + (0.75 + 0.6) / 0.3 + 0.3, 9);
   });
 });

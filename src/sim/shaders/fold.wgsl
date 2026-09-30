@@ -33,7 +33,15 @@
 //   select: flag every particle kinematic, store (p0, s_rel) and bin it.
 //   tables: one workgroup turns the histogram into per-bin spiral tables
 //           (radius, angle, thickness, depth) and the log's size and base.
-//   move:   t < T_roll: p(s) = lerp(p0, pLog, smoothstep(t / T_roll)).
+//   move:   t < T_wind ("peel and wind"): the operator rolls the material off the mill.
+//           A coil sits on the crown of the front roll (WIND_CONTACT), axis along the roll,
+//           the bank and what is beyond the crown gathered into its core at once; the rest
+//           of the sheet rides the roll toward the crown at the wind speed (P.fold4.x, the
+//           roll's own surface speed or faster) and, as its arc reaches the crown, hops onto
+//           the coil at its tabled radius and winding angle. The coil spins as it winds
+//           (rolling without slipping on the sheet) and rises as it grows.
+//           T_wind <= t < T_roll: the finished coil swings up rigidly (lift, P.fold4.z)
+//           from the crown to the standing tilted pose over the nip.
 //           t >= T_roll, feed = 0: the whole log is let go where it stands (v = 0;
 //           gravity and the rolls take it from there).
 //           t >= T_roll, feed > 0: the log translates along -a at the feed speed; a
@@ -53,13 +61,20 @@
 // [8 + 2NB + (k*NB + b)*NS + j] particle count per (half, bin, depth slice j)
 @group(0) @binding(8) var<storage, read_write> info : array<atomic<u32>>;
 @group(0) @binding(9) var<storage, read> pmass : array<i32>;   // last raster (unused here, kept for the bind group)
-// per bin: rhoStart, phiStart, t0, t1, T, ell, rhoEnd, 0; header at NB*8: rLog, baseY, Lhalf, count;
+// per bin: rhoStart, phiStart, t0, t1, T, ell, rhoEnd, rMax (the spiral's outer radius once
+// wound up to and including this bin); header at NB*8: rLog, baseY, Lhalf, count;
 // then the depth CDF per (half, bin): NS + 1 cumulative fractions (0 .. 1)
 @group(0) @binding(10) var<storage, read_write> tables : array<f32>;
 
 const NB : u32 = 128u;          // arc bins
 const NS : u32 = 32u;           // depth slices per bin, square-root spaced (fine near the roll, coarse deep in the bank)
 const DMAX : f32 = 0.5;         // depth covered by the slices (sim units); deeper material lands in the last slice
+// Peel and wind (mirrors WIND_* in mpm.ts): the coil winds on the crown of the front roll
+// (angle around the front axis from the nip, in the direction of rotation: 3 pi / 2 is the
+// crown); material beyond the crown (the bank) is the core and gathers at once; a hop from
+// the roll onto the coil takes WIND_HOP seconds.
+const WIND_CONTACT : f32 = 4.71238898;   // 1.5 pi
+const WIND_HOP : f32 = 0.3;
 
 // Second operator move, "cut & fold" (P.fold.x = 2 / 3: first fold, cut at the
 // x = 0 / x = L end; 4 / 5: second fold, same ends), the one an operator makes
@@ -140,25 +155,46 @@ fn coreRadius() -> f32 { return 0.5 * sheetThickness(); }
 /** Thickest layer one half of the fold may add per bin; thicker material is spread along the arc. */
 fn layerMax() -> f32 { return 1.5 * sheetThickness(); }
 
-/** Position in the standing log at t = T_roll for a particle at p0 with arc s_rel (0 = bank end). */
-fn foldTarget(p0 : vec3<f32>, sRel : f32) -> vec3<f32> {
-  let h = P.hdt.x;
-  let L = P.fold2.y;
-  let R = P.front.w;
-  let ds = binWidth();
-  let rc = coreRadius();
-  let fb = clamp(sRel / ds, 0.0, f32(NB) - 1e-4);
+/** Winding angle of the spiral at arc sRel (0 at the bank end), from the tables. */
+fn windPhi(sRel : f32) -> f32 {
+  let fb = clamp(sRel / binWidth(), 0.0, f32(NB) - 1e-4);
   let b = u32(fb);
   let f = fb - f32(b);
   let o = b * 8u;
-  let rho0 = tables[o];
-  let phi0 = tables[o + 1u];
+  let rho = mix(tables[o], tables[o + 6u], f);
+  return tables[o + 1u] + f * tables[o + 5u] / max(rho + 0.5 * tables[o + 4u], coreRadius());
+}
+
+/** Outer radius of the coil once the spiral is wound up to arc sRel: the running maximum the
+    tables keep per bin (so the coil never shrinks when a thin bin follows a thick one), blended
+    across the bin so it grows smoothly. */
+fn windRadius(sRel : f32) -> f32 {
+  let fb = clamp(sRel / binWidth(), 0.0, f32(NB) - 1e-4);
+  let b = u32(fb);
+  let f = fb - f32(b);
+  let prev = select(coreRadius(), tables[(b - 1u) * 8u + 7u], b > 0u);
+  return max(mix(prev, tables[b * 8u + 7u], f), coreRadius());
+}
+
+/** Arc at which the winding starts: the crown; material beyond it (the bank) is the core. */
+fn contactArc() -> f32 { return (2.0 * PI - WIND_CONTACT) * P.front.w; }
+
+/** Unit vector from the front axis at angle th (as in select_: 0 the nip, pi / 2 the bottom). */
+fn rhat(th : f32) -> vec3<f32> { return vec3<f32>(0.0, -sin(th), -cos(th)); }
+
+/** A particle's place in the log (design §6): distance along the axis, radius and winding
+    angle, for a particle at p0 with arc sRel (0 = bank end). */
+fn coilCoords(p0 : vec3<f32>, sRel : f32) -> vec3<f32> {
+  let L = P.fold2.y;
+  let R = P.front.w;
+  let fb = clamp(sRel / binWidth(), 0.0, f32(NB) - 1e-4);
+  let b = u32(fb);
+  let f = fb - f32(b);
+  let o = b * 8u;
   let t0 = tables[o + 2u];
   let t1 = tables[o + 3u];
   let T = tables[o + 4u];
-  let ell = tables[o + 5u];
-  let rho = mix(rho0, tables[o + 6u], f);
-  let phi = phi0 + f * ell / max(rho + 0.5 * T, rc);
+  let rho = mix(tables[o], tables[o + 6u], f);
   let dr = max(rollerDist(P.front.x, P.front.y, p0) - R, 0.0);
   let secondHalf = p0.x >= 0.5 * L;
   let k = select(0u, 1u, secondHalf);
@@ -174,14 +210,72 @@ fn foldTarget(p0 : vec3<f32>, sRel : f32) -> vec3<f32> {
   // core is not denser on its inside than on its outside
   let rOut = rho + T;
   let rr = sqrt(mix(rho * rho, rOut * rOut, clamp(u / max(T, 1e-6), 0.0, 1.0)));
-  let a = logAxis();
-  let e1 = vec3<f32>(1.0, 0.0, 0.0);
-  let e2 = normalize(cross(a, e1));
-  let base = vec3<f32>(0.5 * L, tables[HDR + 1u], P.fold2.w);
-  var q = base + a * along + e1 * (rr * cos(phi)) + e2 * (rr * sin(phi));
-  let lo = vec3<f32>(1.5 * h);
-  q = clamp(q, lo, vec3<f32>(P.domain.x, P.fold3.w, P.domain.z) - lo);
-  return q;
+  return vec3<f32>(along, rr, windPhi(sRel));
+}
+
+/** The log's frame turned by theta from lying along the roll (theta = 0: axis x, cross-section
+    in y, z) to standing (theta = pi / 2: axis logAxis()). A rotation about the horizontal
+    n = (0, -sin tilt, cos tilt), so the axis swings up in the plane of x and the standing axis. */
+fn liftFrame(theta : f32) -> mat3x3<f32> {
+  let tilt = P.fold3.z;
+  let sT = sin(tilt);
+  let cT = cos(tilt);
+  let c = cos(theta);
+  let sn = sin(theta);
+  let ax = vec3<f32>(c, cT * sn, sT * sn);
+  let g1 = vec3<f32>(-cT * sn, c + sT * sT * (1.0 - c), -sT * cT * (1.0 - c));
+  let g2 = vec3<f32>(-sT * sn, -sT * cT * (1.0 - c), c + cT * cT * (1.0 - c));
+  return mat3x3<f32>(ax, g1, g2);
+}
+
+/** The base point (along = 0) of the coil on the crown once wound to arc sCur, and its centre height. */
+fn coilBase(sCur : f32) -> vec3<f32> {
+  let c = vec3<f32>(0.0, P.front.x, P.front.y) + (P.front.w + windRadius(sCur)) * rhat(WIND_CONTACT);
+  return vec3<f32>(0.0, c.y, c.z);
+}
+
+/** Where a held particle is at time t of the move (unclamped): riding the roll, hopping onto
+    the coil, wound on the spinning coil, or swinging up with it into the standing log
+    (t >= T_roll gives the standing log, as the drop and the lowering-in need). */
+fn windPos(p0 : vec3<f32>, sRel : f32, t : f32) -> vec3<f32> {
+  let R = P.front.w;
+  let vW = max(P.fold4.x, 1e-3);
+  let tWind = P.fold4.y;
+  let tLift = max(P.fold4.z, 1e-3);
+  let sCon = contactArc();
+  let cc = coilCoords(p0, sRel);
+  let along = cc.x;
+  let rr = cc.y;
+  let phiP = cc.z;
+  // the winding at time t: the arc that has reached the crown, and the coil that holds it
+  let tw = min(t, tWind - WIND_HOP);
+  let sCur = min(sCon + vW * tw, arcTotal());
+  let psi = PI + windPhi(sCur) - phiP;          // the sheet joins at the coil's bottom; the coil spins as it winds
+  let local = vec3<f32>(along, rr * cos(psi), rr * sin(psi));
+  if (t >= tWind) {
+    // lift: the coil swings up from the crown to the standing pose over the nip
+    let tau = clamp((t - tWind) / tLift, 0.0, 1.0);
+    let s = tau * tau * (3.0 - 2.0 * tau);
+    let baseStand = vec3<f32>(0.5 * P.fold2.y, tables[HDR + 1u], P.fold2.w);
+    let base = mix(coilBase(arcTotal()), baseStand, s);
+    return base + liftFrame(0.5 * PI * s) * local;
+  }
+  let onCoil = coilBase(sCur) + local;
+  // departure: the bank (arc < sCon) goes at once; the sheet when the roll brings it to the crown
+  let tDep = max(sRel - sCon, 0.0) / vW;
+  if (t >= tDep + WIND_HOP) { return onCoil; }
+  // ride: the sheet on the roll moves with it (arc-wise at the wind speed) until it departs;
+  // anything deep off the roll (strays on the floor, the back roll) waits where it is
+  let dr = max(rollerDist(P.front.x, P.front.y, p0) - R, 0.0);
+  let th0 = 2.0 * PI - sRel / R;
+  var ride = p0;
+  if (dr < flapDepth()) {
+    let th = th0 + vW * min(t, tDep) / R;
+    ride = vec3<f32>(p0.x, P.front.x, P.front.y) + (R + dr) * rhat(th);
+  }
+  if (t < tDep) { return ride; }
+  let tau = clamp((t - tDep) / WIND_HOP, 0.0, 1.0);
+  return mix(ride, onCoil, tau * tau * (3.0 - 2.0 * tau));
 }
 
 fn loadMatF(p : u32) -> mat3x3<f32> {
@@ -355,6 +449,7 @@ fn tables_(@builtin(local_invocation_id) lid : vec3<u32>) {
       tables[i * 8u + 1u] = phi;
       phi += ell / max(rho0 + 0.5 * T, rc);
       rLog = max(rLog, rho0 + T);
+      tables[i * 8u + 7u] = rLog;
     }
     for (var i = 0u; i < NB; i++) {
       // radius at the end of the bin: where the next bin starts (or one more step along the spiral)
@@ -468,23 +563,23 @@ fn move_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
     }
     return;
   }
-  let pLog = foldTarget(p0, f0.w);
   let tRoll = P.fold.z;
   let feed = P.fold.w;
   let a = logAxis();
   let lo = vec3<f32>(1.5 * P.hdt.x);
   let hi = vec3<f32>(P.domain.x, P.fold3.w, P.domain.z) - lo;
   if (t < tRoll) {
-    // roll: fly from the mill into the standing log
-    let tau = clamp(t / tRoll, 0.0, 1.0);
-    let s = tau * tau * (3.0 - 2.0 * tau);
-    let dsdt = 6.0 * tau * (1.0 - tau) / tRoll;
-    let x = clamp(mix(p0, pLog, s), lo, hi);
-    let v = (pLog - p0) * dsdt;
+    // peel and wind, then lift (windPos); the velocity is the move's over the last substep
+    let dt = P.hdt.z;
+    let tPrev = max(t - dt, 0.0);
+    let x = clamp(windPos(p0, f0.w, t), lo, hi);
+    let xPrev = clamp(windPos(p0, f0.w, tPrev), lo, hi);
+    let v = select(vec3<f32>(0.0), (x - xPrev) / (t - tPrev), t > tPrev);
     pos[p] = vec4<f32>(x, pos[p].w);
     vel[p] = vec4<f32>(v, 0.0);
     return;
   }
+  let pLog = windPos(p0, f0.w, tRoll);
   if (feed <= 0.0) {
     // drop: the log is set down whole; it stands on the nip and the rolls pull it in
     pos[p] = vec4<f32>(clamp(pLog, lo, hi), pos[p].w);

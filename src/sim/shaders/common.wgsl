@@ -34,6 +34,10 @@ struct Params {
   // fold slab: bank half depth (z window for the live bank-top estimate), slab clearance above the bank,
   // arc -> z scale (0.6), max y any folded particle may reach (domain.y - 3h)
   fold3 : vec4<f32>,
+  // colour raster (design §3.5): node counts nxF, nyF, nzF, 0
+  fine : vec4<u32>,
+  // colour raster: hF, 1/hF, normalisation (h/hF)^3 / 8 so a packed fine cell reads ~1, 0
+  fineH : vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> P : Params;
@@ -53,6 +57,11 @@ fn nodeIndex(i : u32, j : u32, k : u32) -> u32 {
 
 fn nodeIndexI(c : vec3<i32>) -> u32 {
   return nodeIndex(u32(c.x), u32(c.y), u32(c.z));
+}
+
+/// Node index on the colour raster's finer grid.
+fn fineIndexI(c : vec3<i32>) -> u32 {
+  return (u32(c.z) * P.fine.y + u32(c.y)) * P.fine.x + u32(c.x);
 }
 
 /// Quadratic B-spline weights for the three nodes base..base+2 (fx = x/h - base).

@@ -16,13 +16,17 @@ export interface QualitySettings {
   readonly dt: number;
   /** substeps per rendered frame (fixed, deterministic) */
   readonly substepsPerFrame: number;
+  /** cells per sim unit of the colour raster the renderer reads pigment from (finer than the
+   *  solver grid: the sheet is one or two solver cells thick, and a streak inside it is lost
+   *  at that resolution; the mechanics stay on the solver grid) */
+  readonly colourCellsPerUnit: number;
 }
 
 export const QUALITY_PRESETS: Readonly<Record<QualityPreset, QualitySettings>> = {
-  low: { preset: 'low', cellsPerUnit: 32, dt: 1.6e-3, substepsPerFrame: 8 },
-  medium: { preset: 'medium', cellsPerUnit: 48, dt: 1.1e-3, substepsPerFrame: 12 },
-  high: { preset: 'high', cellsPerUnit: 64, dt: 8e-4, substepsPerFrame: 16 },
-  ultra: { preset: 'ultra', cellsPerUnit: 72, dt: 7.1e-4, substepsPerFrame: 18 }
+  low: { preset: 'low', cellsPerUnit: 32, dt: 1.6e-3, substepsPerFrame: 8, colourCellsPerUnit: 64 },
+  medium: { preset: 'medium', cellsPerUnit: 48, dt: 1.1e-3, substepsPerFrame: 12, colourCellsPerUnit: 80 },
+  high: { preset: 'high', cellsPerUnit: 64, dt: 8e-4, substepsPerFrame: 16, colourCellsPerUnit: 88 },
+  ultra: { preset: 'ultra', cellsPerUnit: 72, dt: 7.1e-4, substepsPerFrame: 18, colourCellsPerUnit: 88 }
 };
 
 export interface MaterialConstants {
@@ -192,7 +196,16 @@ export interface GridDims {
 
 /** Node grid for a quality preset: N = round(domain / h) + 1 per axis. */
 export function gridDims(q: QualitySettings): GridDims {
-  const h = 1 / q.cellsPerUnit;
+  return gridDimsFor(q.cellsPerUnit);
+}
+
+/** Node grid of the colour raster (design §3.5): the same rule at colourCellsPerUnit. */
+export function colourGridDims(q: QualitySettings): GridDims {
+  return gridDimsFor(q.colourCellsPerUnit);
+}
+
+function gridDimsFor(cellsPerUnit: number): GridDims {
+  const h = 1 / cellsPerUnit;
   const nx = Math.round(GEOMETRY.domain[0] / h) + 1;
   const ny = Math.round(GEOMETRY.domain[1] / h) + 1;
   const nz = Math.round(GEOMETRY.domain[2] / h) + 1;

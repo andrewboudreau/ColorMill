@@ -381,7 +381,11 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   });
 
   // --- stats --------------------------------------------------------------------
-  const gridText = (s: GpuMpmSim): string => `${s.dims.nx}×${s.dims.ny}×${s.dims.nz}`;
+  const gridText = (s: GpuMpmSim): string => {
+    const f = s.volumes.fineDims;
+    const fine = f.nx !== s.dims.nx ? ` · colour ${f.nx}×${f.ny}×${f.nz}` : '';
+    return `${s.dims.nx}×${s.dims.ny}×${s.dims.nz}${fine}`;
+  };
   const fpsNow = (): number => (frameTimes.length ? frameTimes.length / frameTimeSum : 0);
   const paintStats = (force = false): void => {
     if (!sim) return;
@@ -499,8 +503,12 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   const material: MaterialConstants = materialOverride;
   const tackQuery = parseFloat(query.get('tack') ?? '');
   const tackCells = Number.isFinite(tackQuery) && tackQuery > 0 ? tackQuery : undefined;
+  // experiment: the colour raster's resolution in cells per unit (?colour=32 puts it on the
+  // solver grid, the look before the colour raster existed; the preset's value otherwise)
+  const colourQuery = parseFloat(query.get('colour') ?? '');
+  const colourCells = Number.isFinite(colourQuery) && colourQuery >= 16 && colourQuery <= 128 ? colourQuery : undefined;
   const buildConfig = (p: QualityPreset, params: MillParams, b: number = batch): MillConfig => ({
-    quality: QUALITY_PRESETS[p],
+    quality: colourCells !== undefined ? { ...QUALITY_PRESETS[p], colourCellsPerUnit: colourCells } : QUALITY_PRESETS[p],
     material,
     params: { ...params, ...(tackCells !== undefined ? { tackCells } : {}) },
     batch: b

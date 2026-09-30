@@ -14,7 +14,7 @@
  */
 import {
   PIGMENT_POOL_FRACTION,
-  GEOMETRY, bankTopY, gridDims, lameParameters, rollerPoses, seedBankPositions,
+  GEOMETRY, bankTopY, colourGridDims, gridDims, lameParameters, rollerPoses, seedBankPositions,
   type GridDims, type MillConfig, type MillParams, type QualitySettings
 } from '../config/mill';
 import type {
@@ -109,7 +109,7 @@ export function halfToFloat(h: number): number {
 type Resource =
   | { kind: 'storage'; buffer: GPUBuffer; readOnly?: boolean }
   | { kind: 'uniform'; buffer: GPUBuffer }
-  | { kind: 'storageTexture'; view: GPUTextureView };
+  | { kind: 'storageTexture'; view: GPUTextureView; format?: GPUTextureFormat };
 
 interface Kernel {
   readonly name: string;
@@ -179,6 +179,15 @@ export class GpuMpm implements GpuMpmSim {
   private readonly volA: GPUTexture;
   private readonly volB: GPUTexture;
   private readonly volC: GPUTexture;
+  /** colour raster (design §3.5): accumulators and textures on the finer grid fineDims */
+  readonly fineDims: GridDims;
+  private readonly bufFMass: GPUBuffer;
+  private readonly bufFLat: GPUBuffer;
+  private readonly bufFLoad: GPUBuffer;
+  private readonly finA: GPUTexture;
+  private readonly finB: GPUTexture;
+  private readonly finC: GPUTexture;
+  private readonly fineDispatch: [number, number, number];
 
   private readonly kernels: Record<string, Kernel>;
   private readonly modules: GPUShaderModule[] = [];
@@ -210,6 +219,15 @@ export class GpuMpm implements GpuMpmSim {
     this.params = config.params;
     this.dims = gridDims(config.quality);
     const d = this.dims;
+    // the colour raster's grid: finer than the solver's unless its accumulators would not fit
+    // the device's storage-binding limit (then it is the solver grid, and the picture is as before)
+    let fd = colourGridDims(config.quality);
+    const fineBytes = 7 * 4 * fd.nodeCount;
+    if (fineBytes > device.limits.maxStorageBufferBindingSize || fineBytes > device.limits.maxBufferSize) {
+      console.warn(`colour raster ${fd.nx}x${fd.ny}x${fd.nz} needs ${(fineBytes / 1e6).toFixed(0)} MB per buffer, over the device limit; using the solver grid`);
+      fd = d;
+    }
+    this.fineDims = fd;
 
     this.batch = config.batch ?? 1;
     this.seeds = seedBankPositions(config.quality, config.params, 1234, this.batch);
@@ -238,6 +256,9 @@ export class GpuMpm implements GpuMpmSim {
     this.bufPMass = mk(d.nodeCount);
     this.bufPLat = mk(7 * d.nodeCount);
     this.bufPLoad = mk(d.nodeCount);
+    this.bufFMass = mk(fd.nodeCount);
+    this.bufFLat = mk(7 * fd.nodeCount);
+    this.bufFLoad = mk(fd.nodeCount);
 
     this.uniformSlots = config.quality.substepsPerFrame + 1;
     this.bufParams = device.createBuffer({ size: UNIFORM_STRIDE * this.uniformSlots, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -251,11 +272,15 @@ export class GpuMpm implements GpuMpmSim {
     this.volA = device.createTexture({ size: [d.nx, d.ny, d.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'volA' });
     this.volB = device.createTexture({ size: [d.nx, d.ny, d.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'volB' });
     this.volC = device.createTexture({ size: [d.nx, d.ny, d.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'volC' });
-    this.volumes = { volA: this.volA, volB: this.volB, volC: this.volC, dims: d };
+    this.finA = device.createTexture({ size: [fd.nx, fd.ny, fd.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'finA' });
+    this.finB = device.createTexture({ size: [fd.nx, fd.ny, fd.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'finB' });
+    this.finC = device.createTexture({ size: [fd.nx, fd.ny, fd.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'finC' });
+    this.volumes = { volA: this.volA, volB: this.volB, volC: this.volC, dims: d, finA: this.finA, finB: this.finB, finC: this.finC, fineDims: fd };
 
     const maxDim = device.limits.maxComputeWorkgroupsPerDimension;
     this.particleDispatch = dispatchSize(Math.ceil(Math.max(this.count, 1) / PARTICLE_WG), maxDim);
     this.gridDispatch = [Math.ceil(d.nx / GRID_WG), Math.ceil(d.ny / GRID_WG), Math.ceil(d.nz / GRID_WG)];
+    this.fineDispatch = [Math.ceil(fd.nx / GRID_WG), Math.ceil(fd.ny / GRID_WG), Math.ceil(fd.nz / GRID_WG)];
 
     this.statsData = {
       particleCount: this.count,
@@ -321,7 +346,7 @@ export class GpuMpm implements GpuMpmSim {
         entries.push({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } });
         bindings.push({ binding, resource: { buffer: r.buffer } });
       } else {
-        entries.push({ binding, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba16float', viewDimension: '3d' } });
+        entries.push({ binding, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: r.format ?? 'rgba16float', viewDimension: '3d' } });
         bindings.push({ binding, resource: r.view });
       }
     });
@@ -354,23 +379,37 @@ export class GpuMpm implements GpuMpmSim {
     const volAView = this.volA.createView({ dimension: '3d' });
     const volBView = this.volB.createView({ dimension: '3d' });
     const volCView = this.volC.createView({ dimension: '3d' });
+    const finAView = this.finA.createView({ dimension: '3d' });
+    const finBView = this.finB.createView({ dimension: '3d' });
+    const finCView = this.finC.createView({ dimension: '3d' });
+    const rasterMod = mod('raster', rasterSrc);
+    const packMod = mod('pack', packSrc);
 
     return {
       clearGrid: this.makeKernel('clearGrid', clearMod, 'clearGrid', clearRes),
       clearRaster: this.makeKernel('clearRaster', clearMod, 'clearRaster', clearRes),
+      clearFine: this.makeKernel('clearFine', clearMod, 'clearFine',
+        [rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGVel), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad)]),
       p2g: this.makeKernel('p2g', mod('p2g', p2gSrc), 'main',
         [ro(this.bufPos), ro(this.bufVel), ro(this.bufAff), ro(this.bufFlags), rw(this.bufGMass), rw(this.bufGMom)]),
       grid: this.makeKernel('grid', mod('grid', gridSrc), 'main', [ro(this.bufGMass), ro(this.bufGMom), rw(this.bufGVel), ro(this.bufPMass)]),
       g2p: this.makeKernel('g2p', mod('g2p', g2pSrc), 'main',
         [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), ro(this.bufFlags), ro(this.bufGVel),
           ro(this.bufGMass), rw(this.bufFoldInfo), ro(this.bufFold)]),
-      raster: this.makeKernel('raster', mod('raster', rasterSrc), 'main',
+      raster: this.makeKernel('raster', rasterMod, 'main',
         [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)]),
       disperse: this.makeKernel('disperse', mod('disperse', disperseSrc), 'main',
         [rw(this.bufPos), ro(this.bufC), rw(this.bufLat), ro(this.bufPMass), ro(this.bufPLat), ro(this.bufFlags), ro(this.bufPLoad)]),
-      pack: this.makeKernel('pack', mod('pack', packSrc), 'main',
+      pack: this.makeKernel('pack', packMod, 'main',
         [ro(this.bufPMass), ro(this.bufPLat), { kind: 'storageTexture', view: volAView }, { kind: 'storageTexture', view: volBView }, ro(this.bufPLoad),
-          { kind: 'storageTexture', view: volCView }]),
+          { kind: 'storageTexture', view: volCView }, { kind: 'storageTexture', view: finCView }]),
+      // the colour raster: the same scatter and pack onto the finer grid, its accumulators bound
+      // where the solver grid's are
+      rasterFine: this.makeKernel('rasterFine', rasterMod, 'mainFine',
+        [ro(this.bufPos), ro(this.bufLat), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad)]),
+      packFine: this.makeKernel('packFine', packMod, 'mainFine',
+        [ro(this.bufFMass), ro(this.bufFLat), { kind: 'storageTexture', view: finAView }, { kind: 'storageTexture', view: finBView }, ro(this.bufFLoad),
+          { kind: 'storageTexture', view: volCView }, { kind: 'storageTexture', view: finCView }]),
       inject: this.makeKernel('inject', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
       probe: this.makeKernel('probe', injectMod, 'probeColumn', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
       injectAll: this.makeKernel('injectAll', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInjectAll }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
@@ -470,6 +509,11 @@ export class GpuMpm implements GpuMpmSim {
     const tackBand = p.tackCells > 0 ? p.tackCells * h : p.gap + 1.0 * h;
     f.set([tackBand, 0.5 * h, 2 * h, 0.6], o + 36);
     f.set([GEOMETRY.bankHalfDepth, 0.5 * h, FOLD_TILT, yMax], o + 40);
+    // colour raster grid (design §3.5)
+    const fd = this.fineDims;
+    const ratio = h / fd.h;
+    u[o + 44] = fd.nx; u[o + 45] = fd.ny; u[o + 46] = fd.nz; u[o + 47] = 0;
+    f.set([fd.h, 1 / fd.h, (ratio * ratio * ratio) / 8, 0], o + 48);
   }
 
   // ---------------------------------------------------------------------------
@@ -498,13 +542,23 @@ export class GpuMpm implements GpuMpmSim {
     pass.dispatchWorkgroups(this.gridDispatch[0], this.gridDispatch[1], this.gridDispatch[2]);
   }
 
-  /** raster (+ disperse) + pack, using uniform slot `slot`. */
+  /** raster (+ disperse) + pack, then the colour raster, using uniform slot `slot`. */
   private encodeFrameKernels(pass: GPUComputePassEncoder, slot: number, disperse: boolean): void {
     const k = this.kernels;
     this.dispatchGrid(pass, k.clearRaster, slot);
     this.dispatchParticles(pass, k.raster, slot);
     if (disperse) this.dispatchParticles(pass, k.disperse, slot);
     this.dispatchGrid(pass, k.pack, slot);
+    // the colour raster after disperse, so the picture carries this frame's mixing
+    this.dispatchFine(pass, k.clearFine, slot);
+    this.dispatchParticles(pass, k.rasterFine, slot);
+    this.dispatchFine(pass, k.packFine, slot);
+  }
+
+  private dispatchFine(pass: GPUComputePassEncoder, k: Kernel, slot: number): void {
+    pass.setPipeline(k.pipeline);
+    pass.setBindGroup(0, k.bindGroup, [slot * UNIFORM_STRIDE]);
+    pass.dispatchWorkgroups(this.fineDispatch[0], this.fineDispatch[1], this.fineDispatch[2]);
   }
 
   // ---------------------------------------------------------------------------
@@ -862,5 +916,9 @@ export class GpuMpm implements GpuMpmSim {
     this.volA.destroy();
     this.volB.destroy();
     this.volC.destroy();
+    this.finA.destroy();
+    this.finB.destroy();
+    this.finC.destroy();
+    for (const b of [this.bufFMass, this.bufFLat, this.bufFLoad]) b.destroy();
   }
 }

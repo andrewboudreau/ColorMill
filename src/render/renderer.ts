@@ -51,7 +51,7 @@ export function defaultLightRig(): LightRig {
   };
 }
 
-const UNIFORM_FLOATS = 17 * 4; // 17 vec4f, see Uniforms in raymarch.wgsl
+const UNIFORM_FLOATS = 18 * 4; // 18 vec4f, see Uniforms in raymarch.wgsl
 
 /** Edge length (in texels) of the blocks of the coarse max-density mip used for empty-space skipping. */
 export const MIP_BLOCK = 4;
@@ -115,7 +115,10 @@ export class RayMarchRenderer implements Renderer {
         { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
         { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
         { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
-        { binding: 6, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } }
+        { binding: 6, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
+        { binding: 7, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
+        { binding: 8, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
+        { binding: 9, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } }
       ]
     });
 
@@ -166,7 +169,7 @@ export class RayMarchRenderer implements Renderer {
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
     });
     this.mipBuffer = this.makeMipBuffer(1);
-    this.bindGroup = this.makeBindGroup(this.placeholder, this.placeholder, this.placeholder);
+    this.bindGroup = this.makeBindGroup(this.placeholder, this.placeholder, this.placeholder, this.placeholder, this.placeholder, this.placeholder);
     this.mipBindGroup = this.makeMipBindGroup(this.placeholder);
     this.resize();
   }
@@ -196,7 +199,7 @@ export class RayMarchRenderer implements Renderer {
     return this.module.getCompilationInfo();
   }
 
-  private makeBindGroup(volA: GPUTexture, volB: GPUTexture, volC: GPUTexture): GPUBindGroup {
+  private makeBindGroup(volA: GPUTexture, volB: GPUTexture, volC: GPUTexture, finA: GPUTexture, finB: GPUTexture, finC: GPUTexture): GPUBindGroup {
     return this.device.createBindGroup({
       label: 'raymarch-bg',
       layout: this.pipeline.getBindGroupLayout(0),
@@ -206,7 +209,10 @@ export class RayMarchRenderer implements Renderer {
         { binding: 2, resource: volB.createView({ dimension: '3d' }) },
         { binding: 3, resource: this.sampler },
         { binding: 4, resource: { buffer: this.mipBuffer } },
-        { binding: 6, resource: volC.createView({ dimension: '3d' }) }
+        { binding: 6, resource: volC.createView({ dimension: '3d' }) },
+        { binding: 7, resource: finA.createView({ dimension: '3d' }) },
+        { binding: 8, resource: finB.createView({ dimension: '3d' }) },
+        { binding: 9, resource: finC.createView({ dimension: '3d' }) }
       ]
     });
   }
@@ -220,7 +226,7 @@ export class RayMarchRenderer implements Renderer {
       this.mipBuffer = this.makeMipBuffer(cells);
     }
     this.mipSize = m;
-    this.bindGroup = this.makeBindGroup(volumes.volA, volumes.volB, volumes.volC);
+    this.bindGroup = this.makeBindGroup(volumes.volA, volumes.volB, volumes.volC, volumes.finA, volumes.finB, volumes.finC);
     this.mipBindGroup = this.makeMipBindGroup(volumes.volA);
   }
 
@@ -278,6 +284,9 @@ export class RayMarchRenderer implements Renderer {
     // end-guide plates: plate top (a little above the settled bank), half depth in z, thickness, enabled
     const guideTop = bankTopY(1) + 0.15;
     set4(16, guideTop, GEOMETRY.bankHalfDepth, 0.012, this.endGuides ? 1 : 0);
+    // the colour raster's grid (design §3.5): node counts and cell size
+    const cg = vol ? vol.fineDims : undefined;
+    set4(17, cg ? cg.nx : 1, cg ? cg.ny : 1, cg ? cg.nz : 1, cg ? cg.h : hCell);
     this.device.queue.writeBuffer(this.uniformBuffer, 0, u);
   }
 

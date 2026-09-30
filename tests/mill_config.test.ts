@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_CHUNK_SIZE, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PIGMENT_CHUNK_RADIUS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, bankTopY, bankVolumeBelow, dropSlotX, gridDims,
+  DEFAULT_CHUNK_SIZE, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PIGMENT_CHUNK_RADIUS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, bankTopY, bankVolumeBelow, colourGridDims, dropSlotX, gridDims,
   lameParameters, millTopSurfaceY, rollerAxisDistance, rollerPoses, rollerSurfaceVelocity, seedBankPositions
 } from '../src/config/mill';
 
@@ -110,5 +110,22 @@ describe('pigment chunk sizes', () => {
     const rMax = r[r.length - 1];
     expect(dropSlotX(0) - rMax).toBeGreaterThan(0);
     expect(dropSlotX(DROP_SLOTS - 1) + rMax).toBeLessThan(GEOMETRY.length);
+  });
+});
+
+describe('colour raster grid', () => {
+  it('is finer than the solver grid at every preset and its buffers stay under 128 MB', () => {
+    for (const q of Object.values(QUALITY_PRESETS)) {
+      const d = gridDims(q);
+      const f = colourGridDims(q);
+      expect(q.colourCellsPerUnit).toBeGreaterThan(q.cellsPerUnit);
+      expect(f.h).toBeCloseTo(1 / q.colourCellsPerUnit, 12);
+      expect(f.nx).toBeGreaterThan(d.nx);
+      expect(f.nodeCount).toBe(f.nx * f.ny * f.nz);
+      // the 7-channel latent accumulator is the biggest buffer; the default binding limit is 128 MiB
+      expect(7 * 4 * f.nodeCount).toBeLessThan(128 * 1024 * 1024);
+    }
+    expect(colourGridDims(QUALITY_PRESETS.low)).toMatchObject({ nx: 97, ny: 145, nz: 129 });
+    expect(colourGridDims(QUALITY_PRESETS.high)).toMatchObject({ nx: 133, ny: 199, nz: 177 });
   });
 });

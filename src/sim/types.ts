@@ -52,6 +52,13 @@ export interface RenderVolumes {
   /** rgba16float: (pigment load / 8, 0, 0, 0); pigment / density = load per unit mass (0 = clear base) */
   readonly volC: GPUTexture;
   readonly dims: GridDims;
+  /** colour raster (design §3.5), on the finer grid fineDims: rgba16float (pigment load, lat0, lat1, lat2) */
+  readonly finA: GPUTexture;
+  /** rgba16float (lat3, lat4, lat5, lat6) on fineDims */
+  readonly finB: GPUTexture;
+  /** rgba16float (mass, 0, 0, 0) on fineDims, same normalisation as finA.x, so finA.x / finC.x is the load per unit mass */
+  readonly finC: GPUTexture;
+  readonly fineDims: GridDims;
 }
 
 export interface GpuMpmSimOptions {

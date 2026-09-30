@@ -248,6 +248,23 @@ x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.2
   node dims: `volA = (density, lat0, lat1, lat2)`, `volB = (lat3, lat4, lat5, lat6)`
   where `density = pmass / 8` (so a fully packed cell ≈ 1) and `latN =
   plat[N] / pmass` (0 where pmass = 0).
+- **Colour raster**: the same scatter and pack a second time onto a finer
+  grid (`colourCellsPerUnit`: 64 at low, 80 at medium, 88 at high and ultra,
+  the most whose 7-channel accumulator fits the default 128 MiB storage-binding limit;
+  `colourGridDims`), into its own accumulators and three `rgba16float`
+  textures `finA = (load, lat0..2)`, `finB = (lat3..6)`, `finC = (mass)`,
+  load and mass normalised by `(h/hF)³/8` so a packed fine cell reads ≈ 1
+  and `finA.x / finC.x` is the load per unit mass. The renderer takes
+  pigment colour and load from these (§8) while the surface and the sample
+  weights still come from `volA`: the sheet the nip makes is one or two
+  solver cells thick, and a streak inside it was averaged into its cell
+  before it was drawn; on the finer grid the colour's detail limit is the
+  fine cell and, below that, the particle spacing. Costs one more raster
+  pass per frame (per particle, so independent of the fine grid's size) and
+  the fine buffers and textures (about 95 MB at low, 280 MB at high); a
+  device whose storage-binding limit cannot hold the 7-channel accumulator
+  falls back to the solver grid with a console warning. The dispersion
+  kernel keeps reading the solver-grid raster.
 
 ---
 
@@ -563,8 +580,9 @@ Single fullscreen ray-march pass (`src/render/shaders/raymarch.wgsl`):
    disagreement between the two widens the specular lobes so cell-scale
    noise reads as satin, not sparkle.
 3. Colour at the hit: five samples along −n behind the hit, weighted by
-   density and depth; the latent is the pigment-load-weighted mix of
-   `volA/volB` (the pigments only), decoded with `latentToRgb` → albedo
+   `volA` density and depth; the latent and the pigment load come from the
+   colour raster `finA/finB/finC` (§3.5), the pigment-load-weighted mix of
+   the pigments only, decoded with `latentToRgb` → albedo
    (sRGB-linearised for lighting); the mean pigment load per unit mass
    `load = volC / density` gives the opacity
    `pigment = 1 − exp(−PIGMENT_OPACITY · load)` (`PIGMENT_OPACITY` = 6: a

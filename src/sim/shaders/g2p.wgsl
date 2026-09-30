@@ -51,7 +51,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   // while the operator move feeds the log: reduce the top of the (non-stray) material
   // under its footprint, so the log releases onto the pile the nip is eating
   if (P.fold.x > 0.5 && P.fold.y - fold0[p].w >= FOLD_SETTLE
-      && abs(x.z - P.fold2.w) < P.fold3.x && abs(x.x - 0.5 * P.fold2.y) < 0.35 && x.y > P.front.x) {
+      && abs(x.z - P.fold2.w) < P.fold3.x && abs(x.x - 0.5 * P.fold2.y) < 0.6 && x.y > P.front.x) {
     let cn = clamp(vec3<i32>(round(x * invh)), vec3<i32>(0), vec3<i32>(P.grid.xyz) - vec3<i32>(1));
     if (decodeFixed(gmass[nodeIndexI(cn)], MASS_SCALE) >= 2.0 * P.part.y) {
       atomicMax(&foldInfo[0], bitcast<u32>(x.y));

@@ -56,6 +56,9 @@ export const PIGMENT_LOAD = 12.0;
 export const WIND_CONTACT = 1.5 * Math.PI;
 export const WIND_MAX_SECONDS = 2.5;
 export const WIND_HOP_SECONDS = 0.3;
+/** The full-width roll is then folded in half (the x >= L/2 half over onto the other) ... */
+export const DOUBLE_SECONDS = 0.5;
+/** ... and the doubled roll swings up to the standing pose. */
 export const LIFT_SECONDS = 0.6;
 /** Arc of sheet the wind takes in: from the nip exit round to the crown. */
 export function windArc(): number {
@@ -69,18 +72,19 @@ export function windSpeed(omega: number): number {
 export function windSeconds(omega: number): number {
   return windArc() / windSpeed(omega) + WIND_HOP_SECONDS;
 }
-/** Length of the whole roll phase (wind, then lift) at roll speed omega; the log stands over the nip after it. */
+/** Length of the whole roll phase (wind, double, lift) at roll speed omega; the log stands over the nip after it. */
 export function rollSeconds(omega: number): number {
-  return windSeconds(omega) + LIFT_SECONDS;
+  return windSeconds(omega) + DOUBLE_SECONDS + LIFT_SECONDS;
 }
 /** The roll phase at the default roll speed (≈ 2.5 s). */
 export const FOLD_ROLL_SECONDS = rollSeconds(DEFAULT_PARAMS.omega);
 /** The design's original lowering speed (sim units / s along the log axis); FOLD_DURATION is the move's length at it. */
 export const FOLD_FEED_SPEED = 0.15;
 export const FOLD_TILT = 0.42;                // log axis tilt from vertical toward the viewer (rad)
-/** Arc bins and depth slices of the fold's thickness histogram (mirror NB / NS in fold.wgsl). */
+/** Arc bins and depth slices of the fold's thickness histogram, and floats per bin in its tables (mirror NB / NS / TS in fold.wgsl). */
 export const FOLD_BINS = 128;
 export const FOLD_SLICES = 32;
+export const FOLD_TABLE_STRIDE = 16;
 /** Total script length for a given feed: roll, then either let the whole log go (a
  * substep later) or lower it (the material folded in half: L/2 long, plus the
  * tilted end face of a log up to ~0.7 units across) through the nip. */
@@ -286,7 +290,7 @@ export class GpuMpm implements GpuMpmSim {
     this.bufFlags = mk(n);
     this.bufFold = mk(4 * n);
     this.bufFoldInfo = mk(8 + 2 * FOLD_BINS + 2 * FOLD_BINS * FOLD_SLICES);
-    this.bufFoldTables = mk(8 * FOLD_BINS + 8 + 2 * FOLD_BINS * (FOLD_SLICES + 1));
+    this.bufFoldTables = mk(FOLD_TABLE_STRIDE * FOLD_BINS + 8 + 2 * FOLD_BINS * (FOLD_SLICES + 1));
     this.bufGMass = mk(d.nodeCount);
     this.bufGMom = mk(3 * d.nodeCount);
     this.bufGVel = mk(4 * d.nodeCount);
@@ -555,7 +559,7 @@ export class GpuMpm implements GpuMpmSim {
     u[o + 44] = fd.nx; u[o + 45] = fd.ny; u[o + 46] = fd.nz; u[o + 47] = 0;
     f.set([fd.h, 1 / fd.h, (ratio * ratio * ratio) / 8, 0], o + 48);
     // cut & roll: peel and wind, then lift (fold.wgsl)
-    f.set([this.foldWindSpeed, this.foldWindSeconds, LIFT_SECONDS, 0], o + 52);
+    f.set([this.foldWindSpeed, this.foldWindSeconds, DOUBLE_SECONDS, LIFT_SECONDS], o + 52);
   }
 
   // ---------------------------------------------------------------------------

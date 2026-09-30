@@ -103,10 +103,11 @@ triangle below it, and the doubled triangle goes over the seam onto the
 other half, roll side up, where the doubled sheet rides up into the nip.
 Each fold is a page turn out in front of the roll. **Cut & roll** takes
 everything on the mill and winds it off the roll into a volume-preserving log
-(bank kneaded into the core, sheet wrapped around it): a coil on the crown of
-the front roll that the sheet rides up into at the roll's own speed, spinning
-and growing as it winds, then swung up to stand over the nip and set down on
-the nip for the rolls to pull in (the **Log feed** slider lowers it in end-first instead, released only
+(bank kneaded into the core, sheet wrapped around it): a full-width coil on
+the crown of the front roll that the sheet rides up into at the roll's own
+speed, spinning and growing as it winds; the roll is then folded in half,
+swung up to stand over the nip and set down on the nip for the rolls to pull
+in (the **Log feed** slider lowers it in end-first instead, released only
 onto the pile the rolls are eating). Material from every position along the roll ends up in the log's
 cross-section and is spread back across the width as the nip flattens it.
 Nothing is lost or invented.

@@ -38,7 +38,7 @@ struct Params {
   fine : vec4<u32>,
   // colour raster: hF, 1/hF, normalisation (h/hF)^3 / 8 so a packed fine cell reads ~1, 0
   fineH : vec4<f32>,
-  // cut & roll, peel and wind (fold.wgsl): wind speed along the arc, T_wind, T_lift, 0
+  // cut & roll, peel and wind (fold.wgsl): wind speed along the arc, T_wind, T_double, T_lift
   fold4 : vec4<f32>,
 };
 

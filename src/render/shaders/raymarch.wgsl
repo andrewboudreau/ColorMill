@@ -27,6 +27,7 @@ struct Uniforms {
   misc: vec4f,        // resolution.xy, exposure, flags (bit0 = volumes bound, bit1 = target is sRGB-encoded already)
   mip: vec4f,         // coarse max-density mip dims (cx, cy, cz), w = block edge in texels
   guides: vec4f,      // end-guide plates: bank top y, bank half depth (z), plate thickness, enabled
+  fine: vec4f,        // colour raster (design §3.5): node counts (nxF, nyF, nzF), w = its cell size hF
 };
 
 @group(0) @binding(0) var<uniform> U: Uniforms;
@@ -38,6 +39,12 @@ struct Uniforms {
 @group(0) @binding(4) var<storage, read> mipMax: array<f32>;
 @group(0) @binding(5) var<storage, read_write> mipOut: array<f32>;
 @group(0) @binding(6) var volC: texture_3d<f32>;   // x = pigment load / 8 (same normalisation as density)
+// the colour raster (design §3.5), on its own finer grid: pigment load, latent and mass, so a
+// streak thinner than a solver cell still reaches the picture; the surface itself is still
+// found on volA's density
+@group(0) @binding(7) var finA: texture_3d<f32>;   // (load, lat0, lat1, lat2), load normalised like finC's mass
+@group(0) @binding(8) var finB: texture_3d<f32>;   // (lat3, lat4, lat5, lat6)
+@group(0) @binding(9) var finC: texture_3d<f32>;   // x = mass; finA.x / finC.x = load per unit mass
 
 // Pigment is an opaque colourant in a clear medium: the share of light a sample captures
 // rises with its pigment load per unit mass (0 = clear base, PIGMENT_LOAD = pure masterbatch);
@@ -243,6 +250,11 @@ fn rollerShadow(p: vec3f, l: vec3f, pose: vec4f) -> f32 {
 
 fn volUvw(p: vec3f) -> vec3f {
   return (p / U.camForward.w + vec3f(0.5)) / U.dims.xyz;
+}
+
+// Texture coordinate of world point p on the colour raster (texel i sits at world i*hF).
+fn fineUvw(p: vec3f) -> vec3f {
+  return (p / U.fine.w + vec3f(0.5)) / U.fine.xyz;
 }
 
 fn density(p: vec3f) -> f32 {
@@ -710,18 +722,23 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     for (var k = 0; k < 5; k++) {
       let depth = (0.5 + 0.8 * f32(k)) * h;
       let q = p - n * depth;
+      // the sample's weight comes from the solver-grid density (the surface the march found);
+      // its pigment comes from the colour raster, which resolves streaks the solver grid cannot
       let a = textureSampleLevel(volA, volSampler, volUvw(q), 0.0);
       let w = smoothstep(0.15, 0.6, a.x) * exp(-0.45 * f32(k));
       if (w <= 1e-5) { continue; }
-      let pl = textureSampleLevel(volC, volSampler, volUvw(q), 0.0).x / max(a.x, 1e-4);   // load per unit mass
+      let fq = fineUvw(q);
+      let fa = textureSampleLevel(finA, volSampler, fq, 0.0);
+      let fm = textureSampleLevel(finC, volSampler, fq, 0.0).x;
+      let pl = fa.x / max(fm, 1e-4);   // load per unit mass
       dsum += w;
       load += w * pl;
-      let b = textureSampleLevel(volB, volSampler, volUvw(q), 0.0);
-      let s = a.y + a.z + a.w + b.x;
+      let fb = textureSampleLevel(finB, volSampler, fq, 0.0);
+      let s = fa.y + fa.z + fa.w + fb.x;
       if (s <= 1e-4 || pl <= 1e-4) { continue; }
       let wp = w * pl;
-      c += wp * vec4f(a.yzw, b.x) / s;
-      resid += wp * b.yzw / s;
+      c += wp * vec4f(fa.yzw, fb.x) / s;
+      resid += wp * fb.yzw / s;
       csum += wp;
     }
     if (dsum > 1e-5) { load = load / dsum; }

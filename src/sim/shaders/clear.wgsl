@@ -25,3 +25,13 @@ fn clearRaster(@builtin(global_invocation_id) gid : vec3<u32>) {
   pload[n] = 0;
   for (var c = 0u; c < 7u; c++) { plat[7u * n + c] = 0; }
 }
+
+/// The colour raster's accumulators (bound in place of pmass / plat / pload), over the fine grid.
+@compute @workgroup_size(4, 4, 4)
+fn clearFine(@builtin(global_invocation_id) gid : vec3<u32>) {
+  if (gid.x >= P.fine.x || gid.y >= P.fine.y || gid.z >= P.fine.z) { return; }
+  let n = (gid.z * P.fine.y + gid.y) * P.fine.x + gid.x;
+  pmass[n] = 0;
+  pload[n] = 0;
+  for (var c = 0u; c < 7u; c++) { plat[7u * n + c] = 0; }
+}

@@ -171,16 +171,26 @@ lays the same three bands on the bank.
 | Right drawer (`P`) | Roller speed (rpm), friction ratio, nip gap, dispersion, gravity, back-roll friction, batch size, quality, auto-orbit, stats |
 | `?drops=hansaYellow@3.m,phthaloBlue@5.l` | Start with those pigment chunks already dropped (pigment@slot.size; size s, m or l; a custom colour as six hex digits) |
 | `?gap=0.06&omega=2&preset=high&batch=1.5` | Start with mill settings changed: any drawer slider by its name (`omega`, `frictionRatio`, `gap`, `dispersion`, `gravity`, `backFriction`, `logFeed`), the quality preset and the batch size. Values are snapped to the slider's step and capped at its range. The drawer's **Copy start link** writes the session's drops plus every setting that differs from its default, so a whole setup restarts from one URL |
+| `?colour=48` | Experiment: the colour raster's resolution in cells per unit (16 to 128; `?colour=32` at low is the solver grid, the look before the colour raster) |
 | `?experimental=1&omega=50` | Experimental mode: the caps come off. URL values are accepted as written (floored at each slider's minimum), the sliders stretch to 4× their normal top, and the drawer / mixer toggle **Experimental: lift the slider caps** does the same. The solver is not guaranteed stable up there |
 
 ## Quality presets
 
-| Preset | Cells / unit | Grid (cells) | Particles at 1× batch | Substep `dt` | Substeps / frame | Target |
-| --- | --- | --- | --- | --- | --- | --- |
-| low | 32 | 49 × 73 × 65 | 39k | 1.6e-3 | 8 | integrated / mobile GPU |
-| medium | 48 | 73 × 109 × 97 | 133k | 1.1e-3 | 12 | laptop GPU |
-| high (default) | 64 | 97 × 145 × 129 | 315k | 8e-4 | 16 | desktop GPU |
-| ultra | 72 | 109 × 163 × 145 | 448k | 7.1e-4 | 18 | discrete GPU |
+The **colour raster** is a second, finer grid the renderer reads pigment
+from (design §3.5): the sheet the nip makes is one or two solver cells thick,
+so a streak inside it was averaged into its cell before it was drawn. The
+solver grid still carries the mechanics and the surface; pigment colour and
+load are rastered again onto the finer grid each frame and sampled from there,
+so the detail limit for colour is the finer cell (3 mm at low instead of 6,
+2.3 mm at high) and, below that, the particle spacing.
+
+
+| Preset | Cells / unit | Grid (cells) | Colour raster | Particles at 1× batch | Substep `dt` | Substeps / frame | Target |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| low | 32 | 49 × 73 × 65 | 64 / unit, 97 × 145 × 129 | 39k | 1.6e-3 | 8 | integrated / mobile GPU |
+| medium | 48 | 73 × 109 × 97 | 80 / unit, 121 × 181 × 161 | 133k | 1.1e-3 | 12 | laptop GPU |
+| high (default) | 64 | 97 × 145 × 129 | 88 / unit, 133 × 199 × 177 | 315k | 8e-4 | 16 | desktop GPU |
+| ultra | 72 | 109 × 163 × 145 | 88 / unit, 133 × 199 × 177 | 448k | 7.1e-4 | 18 | discrete GPU |
 
 The default batch is about 1.2 L of putty; the batch-size control (0.5×–3×,
 or `?batch=1.5`) rebuilds the bank with more or less material and scales the

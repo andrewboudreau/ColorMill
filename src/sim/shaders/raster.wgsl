@@ -10,11 +10,9 @@
 @group(0) @binding(4) var<storage, read_write> plat : array<atomic<i32>>;
 @group(0) @binding(5) var<storage, read_write> pload : array<atomic<i32>>;
 
-@compute @workgroup_size(128)
-fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
-  let p = particleIndex(gid, nwg);
-  if (p >= P.grid.w) { return; }
-  let invh = P.hdt.y;
+/// Scatter particle p onto the node grid of spacing 1/invh and node counts dims (the
+/// accumulators bound to pmass / plat / pload are that grid's).
+fn scatter(p : u32, invh : f32, dims : vec3<i32>) {
   let pMass = P.part.y;
   let x = pos[p].xyz;
   let load = max(pos[p].w, 1e-3);
@@ -24,7 +22,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   let gx = x * invh - 0.5;                  // node-centred trilinear
   let base = vec3<i32>(floor(gx));
   let f = gx - vec3<f32>(base);
-  let nmax = vec3<i32>(P.grid.xyz) - vec3<i32>(1);
+  let nmax = dims - vec3<i32>(1);
   for (var k = 0; k < 2; k++) {
     for (var j = 0; j < 2; j++) {
       for (var i = 0; i < 2; i++) {
@@ -32,7 +30,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
         let w = select(vec3<f32>(1.0) - f, f, o == vec3<i32>(1));
         let wgt = w.x * w.y * w.z * pMass;
         let c = clamp(base + o, vec3<i32>(0), nmax);
-        let n = nodeIndexI(c);
+        let n = (u32(c.z) * u32(dims.y) + u32(c.y)) * u32(dims.x) + u32(c.x);
         atomicAdd(&pmass[n], encodeFixed(wgt, MASS_SCALE));
         atomicAdd(&pload[n], encodeFixed(wgt * load, MASS_SCALE));
         for (var cc = 0u; cc < 7u; cc++) {
@@ -41,4 +39,21 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
       }
     }
   }
+}
+
+/// The solver-grid raster (read by disperse and pack).
+@compute @workgroup_size(128)
+fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
+  let p = particleIndex(gid, nwg);
+  if (p >= P.grid.w) { return; }
+  scatter(p, P.hdt.y, vec3<i32>(P.grid.xyz));
+}
+
+/// The colour raster (design §3.5): the same scatter onto the finer grid the renderer reads
+/// pigment from, so streaks thinner than a solver cell survive to the picture.
+@compute @workgroup_size(128)
+fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
+  let p = particleIndex(gid, nwg);
+  if (p >= P.grid.w) { return; }
+  scatter(p, P.fineH.y, vec3<i32>(P.fine.xyz));
 }

@@ -165,7 +165,15 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
     device.queue.writeTexture({ texture: tex }, data, { bytesPerRow: nx * 8, rowsPerImage: ny }, { width: nx, height: ny, depthOrArrayLayers: nz });
     return tex;
   };
-  return { volA: make('harness-volA', a), volB: make('harness-volB', bb), volC: make('harness-volC', cc), dims };
+  // the colour raster at the same resolution: finA = (load, lat0..2) is volA with the load in x,
+  // finB = volB, finC = (mass) is volA's density in x
+  const fa = new Uint16Array(a);
+  const fc = new Uint16Array(nx * ny * nz * 4);
+  for (let i = 0; i < nx * ny * nz; i++) { fa[i * 4] = cc[i * 4]; fc[i * 4] = a[i * 4]; }
+  return {
+    volA: make('harness-volA', a), volB: make('harness-volB', bb), volC: make('harness-volC', cc), dims,
+    finA: make('harness-finA', fa), finB: make('harness-finB', bb), finC: make('harness-finC', fc), fineDims: dims
+  };
 }
 
 /**

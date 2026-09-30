@@ -8,3 +8,6 @@ raylib/
 emsdk-cache/
 .DS_Store
 *.log
+
+# agent worktrees (Claude Code)
+.claude/worktrees/

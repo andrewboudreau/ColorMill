@@ -131,5 +131,31 @@ export default async function run() {
     assert(yellowish(sheet.yellow), 'the yellow band on the thin sheet reads as yellow');
     assert(bluish(sheet.blue), 'the blue band on the thin sheet reads as blue');
     assert(reddish(sheet.red), 'the red band on the thin sheet reads as red');
+
+    // --- colour modes on a layered sheet: a two-cell clear skin over a two-cell pigment core ---
+    // surface mode (the default) draws the top-most material, so the sheet reads clear while the
+    // bank (pigment to the top) stays yellow; depth mode blends a few cells in, so the sheet
+    // still reads yellow through the skin
+    const layered = {};
+    for (const mode of ['surface', 'depth']) {
+      await page.goto(`${baseUrl}harness/render.html?quality=medium&sheet=4&skin=2&render=${mode}`);
+      await page.waitForFunction(() => window.__render && (window.__render.ready || window.__render.error), null, { timeout: 90000 });
+      const st = await page.evaluate(() => ({ ready: window.__render.ready, error: window.__render.error ?? null, validationError: window.__render.validationError ?? null, mode: window.__render.mode }));
+      assert(st.ready && !st.validationError && st.mode === mode, `layered harness initialised in ${mode} mode: ` + (st.error ?? st.validationError));
+      await page.evaluate(() => window.__render.frame());
+      const px3 = await page.evaluate(() => window.__render.readPixels());
+      const img3 = { width: px3.width, height: px3.height, data: new Uint8Array(Buffer.from(px3.base64, 'base64')) };
+      writeFileSync(path.join(OUT_DIR, `render-layered-${mode}.png`), encodePng(img3.width, img3.height, img3.data));
+      const pts = await page.evaluate(() => { const sp = window.__render.samplePoints; return { sheet: window.__render.project(sp.yellow[0]), bank: window.__render.project(sp.yellow[1]) }; });
+      layered[mode] = {
+        sheet: pts.sheet ? patchMean(img3, Math.round(pts.sheet.x), Math.round(pts.sheet.y), 3) : null,
+        bank: pts.bank ? patchMean(img3, Math.round(pts.bank.x), Math.round(pts.bank.y), 3) : null
+      };
+      console.log(`  layered (${mode}): sheet ${layered[mode].sheet ? layered[mode].sheet.map(Math.round).join(',') : 'off-screen'}, bank ${layered[mode].bank ? layered[mode].bank.map(Math.round).join(',') : 'off-screen'}`);
+    }
+    assert(layered.surface.sheet && layered.surface.bank && layered.depth.sheet, 'layered sample points are on screen');
+    assert(!yellowish(layered.surface.sheet) && layered.surface.sheet[2] > 100, `surface mode: a clear skin over yellow reads clear, not yellow (${layered.surface.sheet.map(Math.round).join(',')})`);
+    assert(yellowish(layered.surface.bank), 'surface mode: the yellow bank still reads yellow');
+    assert(yellowish(layered.depth.sheet), 'depth mode: the same sheet still reads yellow through the skin');
   }, { mode: 'dev' }); // harness pages are dev-only, not part of the production build
 }

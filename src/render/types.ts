@@ -25,10 +25,17 @@ export interface RenderFrameInfo {
   readonly timeSeconds: number;
 }
 
+/** How the colour at a hit is taken (design §8): 'depth' integrates a few cells into the
+ *  material; 'surface' takes the top-most material only, so a pigment skin over clear base
+ *  reads as pigment and clear over buried pigment reads as clear. */
+export type RenderMode = 'depth' | 'surface';
+
 export interface Renderer {
   readonly camera: CameraState;
   /** Density iso-surface threshold as a fraction of rest density (debug-tunable). */
   iso?: number;
+  /** colour mode (see RenderMode) */
+  mode?: RenderMode;
   /** Swap the volumes the ray-marcher samples (called when the sim is rebuilt). */
   setVolumes(volumes: RenderVolumes): void;
   /** Match the canvas backing store to its CSS size * dpr (capped at 2). Returns true if it changed. */

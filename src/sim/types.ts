@@ -125,8 +125,8 @@ export interface GpuMpmSim {
  */
 export interface DebugApi {
   readonly sim: GpuMpmSim;
-  /** the live renderer (camera, iso threshold) */
-  readonly renderer: { readonly camera: unknown; iso?: number };
+  /** the live renderer (camera, iso threshold, colour mode) */
+  readonly renderer: { readonly camera: unknown; iso?: number; mode?: 'depth' | 'surface' };
   /** Run exactly n frames (sim step + render) synchronously in a loop and resolve when the GPU is idle. */
   stepFrames(n: number): Promise<void>;
   /** Particle snapshot (readParticles) */

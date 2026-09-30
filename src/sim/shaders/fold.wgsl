@@ -594,10 +594,10 @@ fn move_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
       let tau = clamp(t / T, 0.0, 1.0);
       let sm = tau * tau * (3.0 - 2.0 * tau);
       let dsdt = 6.0 * tau * (1.0 - tau) / T;
-      let target = setDownPos(p0);
-      let x = clamp(mix(p0, target, sm), lo, hi);
+      let dest = setDownPos(p0);
+      let x = clamp(mix(p0, dest, sm), lo, hi);
       pos[p] = vec4<f32>(x, pos[p].w);
-      if (t >= T) { release(p, vec3<f32>(0.0)); } else { vel[p] = vec4<f32>((target - p0) * dsdt, 0.0); }
+      if (t >= T) { release(p, vec3<f32>(0.0)); } else { vel[p] = vec4<f32>((dest - p0) * dsdt, 0.0); }
       return;
     }
     if (parked) {
@@ -611,10 +611,10 @@ fn move_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
       let tau = clamp(t / T, 0.0, 1.0);
       let sm = tau * tau * (3.0 - 2.0 * tau);
       let dsdt = 6.0 * tau * (1.0 - tau) / T;
-      let target = bundlePos(p0);
-      let x = clamp(mix(p0, target, sm), lo, hi);
+      let dest = bundlePos(p0);
+      let x = clamp(mix(p0, dest, sm), lo, hi);
       pos[p] = vec4<f32>(x, pos[p].w);
-      vel[p] = vec4<f32>((target - p0) * dsdt, 0.0);
+      vel[p] = vec4<f32>((dest - p0) * dsdt, 0.0);
       return;
     }
     // the fold: a page turn on a hinge drawn in the sheet's own coordinates

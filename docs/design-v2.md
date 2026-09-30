@@ -447,7 +447,9 @@ roll axis. Modelled as a scripted kinematic move:
    depth (`NS` = 32 square-root-spaced slices over 0.5 units, fine near the
    roll so a gap-thick sheet is resolved, coarse deep in the bank). Counts go
    into a small atomic buffer; no readback.
-2. **Tables** (one workgroup): the histogram becomes the log. Bin `b` holds
+2. **Tables** (one workgroup): the histogram becomes the log, one spiral per
+   half of the width (each half is wound full width and the roll doubled
+   afterwards, step 4). Bin `b` holds
    volume `n·Vp`; spread over the bin's footprint `ell × Lhalf` that is a layer
    `t = n·Vp / (ell·Lhalf)` thick, where the bin's arc `ell` is stretched
    beyond `ds` wherever the layer would exceed `1.5 g` per half (the operator
@@ -458,18 +460,21 @@ roll axis. Modelled as a scripted kinematic move:
    on the first turn), so layers of varying thickness stack without
    overlapping. Within a bin a particle lands at the radius that gives it its
    share of the layer's area (uniform in `r²`), ordered by the bin's depth
-   CDF, and along the axis at `x` (or `L − x`: the width fold, the folded half
-   as the outer sub-layer). Every bin is volume-preserving, so the log is never
+   CDF, and along the axis at its own `x` (the `x ≥ L/2` half's `x` becomes
+   `L − x` when the roll is doubled). Every bin is volume-preserving, so the log is never
    denser than the material was (validated: ≤ 1.6× rest with a trilinear
    raster, the same as the sheet it came from). The header stores the log's
-   radius and base: the lower end face rests just above the roll tops (nothing
-   is left on the mill), never squashed against the ceiling.
+   radius (the larger half's) and base: the lower end face rests just above
+   the roll tops (nothing is left on the mill), never squashed against the
+   ceiling.
 3. **Peel and wind** (`windSeconds(omega)`): the operator rolls the material
-   off the mill rather than the log appearing in place. A coil sits on the
-   crown of the front roll (`WIND_CONTACT` = 3π/2 around the front axis from
-   the nip, axis along the roll, at `x` 0 to `L/2`: the width fold is applied
-   as material joins it). The bank and whatever is beyond the crown gather
-   into its core at once (a `WIND_HOP_SECONDS` = 0.3 s hop). The rest of the
+   off the mill rather than the log appearing in place. A full-width coil
+   sits on the crown of the front roll (`WIND_CONTACT` = 3π/2 around the
+   front axis from the nip, axis along the roll); each half of the width
+   winds its own spiral (the tables hold one per half, stride `TS` = 16
+   floats per bin) and rests on the crown at its own radius. The bank and
+   whatever is beyond the crown gather into the core at once (a
+   `WIND_HOP_SECONDS` = 0.3 s hop). The rest of the
    sheet rides the roll toward the crown at the wind speed, the roll's own
    surface speed `omega·R` floored so the 1.5πR of arc from the nip exit to
    the crown takes at most `WIND_MAX_SECONDS` = 2.5 s (the operator pulls
@@ -479,17 +484,25 @@ roll axis. Modelled as a scripted kinematic move:
    coil spins as it winds (rolling without slipping: the angle of a wound
    particle is π + Φ(arc wound so far) − φ(its own arc)) and rises on the
    crown as its outer radius grows. About 1.9 s at the default speed.
-4. **Lift** (`LIFT_SECONDS` = 0.6 s): the finished coil swings up as a rigid
+4. **Double** (`DOUBLE_SECONDS` = 0.5 s): the full-width roll is folded in
+   half: the `x ≥ L/2` half swings up and over about the roll's middle (a
+   half turn about the z line through `x = L/2` at `r0 + r1` above the
+   crown) onto the top of the other half, so the roll is `L/2` long and two
+   barrels one on the other, every `x` position in its cross-section.
+5. **Lift** (`LIFT_SECONDS` = 0.6 s): the doubled roll swings up as a rigid
    body from the crown to the standing pose: a rotation through π/2 about the
-   horizontal `n = (0, −sin tilt, cos tilt)` takes the coil's axis `x̂` to the
-   log axis `a` (in the plane of both), while its base slides from `x = 0`
-   on the crown to the log's base over the nip at `x = L/2`. The log stands
-   tilted `FOLD_TILT` (0.42 rad) from vertical toward the viewer, axis
-   `a = (0, cos, sin)`. `rollSeconds(omega)` = wind + lift (`FOLD_ROLL_SECONDS`
-   is its value at the default speed, ≈ 2.5 s); the spec reads it from
-   `operatorRollSeconds`. The held particles' velocities are the move's own
-   over the last substep.
-5. **Put it back** (`params.logFeed`, the "Log feed" slider, 0 to 0.6 units/s;
+   horizontal `n = (0, −sin tilt, cos tilt)` takes the roll's axis `x̂` (the
+   line midway between the two barrels' axes) to the log axis `a` (in the
+   plane of both), while its base slides from `x = 0` on the crown to the
+   log's base over the nip at `x = L/2`, so the pair stands centred on the
+   nip, the barrels side by side across the roll. The log stands tilted
+   `FOLD_TILT` (0.42 rad) from vertical toward the viewer, axis
+   `a = (0, cos, sin)`; its base height allows for the lower barrel. The
+   pile-top window under it (g2p) is ±0.6 in `x`. `rollSeconds(omega)` =
+   wind + double + lift (`FOLD_ROLL_SECONDS` is its value at the default
+   speed, ≈ 3 s); the spec reads it from `operatorRollSeconds`. The held
+   particles' velocities are the move's own over the last substep.
+6. **Put it back** (`params.logFeed`, the "Log feed" slider, 0 to 0.6 units/s;
    captured when the move starts). **Drop** (`logFeed` = 0, the default): the
    substep after the roll ends, every held particle is released where it
    stands (`v = 0`, `C = 0`, `F = I`); the log stands on the nip and gravity

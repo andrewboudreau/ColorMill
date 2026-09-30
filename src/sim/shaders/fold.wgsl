@@ -25,23 +25,27 @@
 // each slice of material gets exactly its share of the layer. That is
 // volume-preserving bin by bin whatever the shape of the material, so the log
 // never packs material denser than it was.
-// The sheet is folded in half across its width first (log = L/2 long, the
-// x >= L/2 half stacked outside the x < L/2 half), then the log stands tilted
-// over the nip: axis a = (0, cos tilt, sin tilt) (up and toward the viewer),
-// lower end just above the rolls at (L/2, *, nipZ); the sheet's x runs along
-// the axis (the x = 0 and x = L ends go in first).
+// Each half of the width (x < L/2 and x >= L/2) is wound into its own spiral, the
+// full-width roll is then folded in half (the x >= L/2 half over onto the top of
+// the other, so the log is L/2 long and two barrels side by side), and the pair
+// stands tilted over the nip: axis a = (0, cos tilt, sin tilt) (up and toward
+// the viewer), lower end just above the rolls at (L/2, *, nipZ); the sheet's x
+// runs along the axis (the x = 0 and x = L ends go in first).
 //   select: flag every particle kinematic, store (p0, s_rel) and bin it.
 //   tables: one workgroup turns the histogram into per-bin spiral tables
 //           (radius, angle, thickness, depth) and the log's size and base.
 //   move:   t < T_wind ("peel and wind"): the operator rolls the material off the mill.
-//           A coil sits on the crown of the front roll (WIND_CONTACT), axis along the roll,
-//           the bank and what is beyond the crown gathered into its core at once; the rest
-//           of the sheet rides the roll toward the crown at the wind speed (P.fold4.x, the
-//           roll's own surface speed or faster) and, as its arc reaches the crown, hops onto
-//           the coil at its tabled radius and winding angle. The coil spins as it winds
-//           (rolling without slipping on the sheet) and rises as it grows.
-//           T_wind <= t < T_roll: the finished coil swings up rigidly (lift, P.fold4.z)
-//           from the crown to the standing tilted pose over the nip.
+//           A full-width coil sits on the crown of the front roll (WIND_CONTACT), axis along
+//           the roll, each half resting on the crown at its own radius; the bank and what is
+//           beyond the crown gather into its core at once; the rest of the sheet rides the
+//           roll toward the crown at the wind speed (P.fold4.x, the roll's own surface speed
+//           or faster) and, as its arc reaches the crown, hops onto the coil at its tabled
+//           radius and winding angle. The coil spins as it winds (rolling without slipping
+//           on the sheet) and rises as it grows.
+//           then T_double (P.fold4.z): the roll is folded in half: the x >= L/2 half swings
+//           up and over about the roll's middle onto the top of the other half.
+//           then T_lift (P.fold4.w): the doubled roll swings up rigidly from the crown to
+//           the standing tilted pose over the nip, the two barrels side by side.
 //           t >= T_roll, feed = 0: the whole log is let go where it stands (v = 0;
 //           gravity and the rolls take it from there).
 //           t >= T_roll, feed > 0: the log translates along -a at the feed speed; a
@@ -61,9 +65,10 @@
 // [8 + 2NB + (k*NB + b)*NS + j] particle count per (half, bin, depth slice j)
 @group(0) @binding(8) var<storage, read_write> info : array<atomic<u32>>;
 @group(0) @binding(9) var<storage, read> pmass : array<i32>;   // last raster (unused here, kept for the bind group)
-// per bin: rhoStart, phiStart, t0, t1, T, ell, rhoEnd, rMax (the spiral's outer radius once
-// wound up to and including this bin); header at NB*8: rLog, baseY, Lhalf, count;
-// then the depth CDF per (half, bin): NS + 1 cumulative fractions (0 .. 1)
+// per bin (TS floats): for each half k at 8k: rhoStart, phiStart, rhoEnd, rMax (the half's
+// spiral's outer radius once wound up to and including this bin); shared at 4: t0, t1, ell;
+// (the flag fold keeps its per-bin thicknesses at 0 / 1); header at NB*TS: rLog (the larger
+// half), baseY, Lhalf, count; then the depth CDF per (half, bin): NS + 1 cumulative fractions
 @group(0) @binding(10) var<storage, read_write> tables : array<f32>;
 
 const NB : u32 = 128u;          // arc bins
@@ -109,8 +114,9 @@ const FLOP_TOP_Q : f32 = 0.97;      // sheet thickness = this quantile of its pa
 const FLAP_TH_MIN : f32 = 0.08;     // the cut runs across just in front of the crown line (rad down from the crown)
 const INFO_COUNT : u32 = 8u;
 const INFO_DEPTH : u32 = 8u + 2u * NB;
-const HDR : u32 = NB * 8u;
-const CDF : u32 = NB * 8u + 8u;
+const TS : u32 = 16u;           // floats per bin in tables
+const HDR : u32 = NB * TS;
+const CDF : u32 = NB * TS + 8u;
 
 fn arcTotal() -> f32 { return 2.0 * PI * P.front.w; }
 /** Fractional depth slice of a radial depth dr: slice j spans DMAX * (j/NS)^2 .. DMAX * ((j+1)/NS)^2. */
@@ -134,7 +140,7 @@ fn flapBinWidth() -> f32 { return (flapThMax() - FLAP_TH_MIN) / f32(NB); }
 fn sheetThick(theta : f32, slot : u32) -> f32 {
   let fb = clamp((theta - FLAP_TH_MIN) / flapBinWidth() - 0.5, 0.0, f32(NB) - 1.0001);
   let b = u32(fb);
-  return mix(tables[b * 8u + slot], tables[(b + 1u) * 8u + slot], fb - f32(b));
+  return mix(tables[b * TS + slot], tables[(b + 1u) * TS + slot], fb - f32(b));
 }
 
 /** Top of what the nip is currently eating under the log (or the roll tops). */
@@ -155,25 +161,29 @@ fn coreRadius() -> f32 { return 0.5 * sheetThickness(); }
 /** Thickest layer one half of the fold may add per bin; thicker material is spread along the arc. */
 fn layerMax() -> f32 { return 1.5 * sheetThickness(); }
 
-/** Winding angle of the spiral at arc sRel (0 at the bank end), from the tables. */
-fn windPhi(sRel : f32) -> f32 {
+/** Bin and fraction along the arc sRel (0 at the bank end). */
+fn binAt(sRel : f32) -> vec2<f32> {
   let fb = clamp(sRel / binWidth(), 0.0, f32(NB) - 1e-4);
-  let b = u32(fb);
-  let f = fb - f32(b);
-  let o = b * 8u;
-  let rho = mix(tables[o], tables[o + 6u], f);
-  return tables[o + 1u] + f * tables[o + 5u] / max(rho + 0.5 * tables[o + 4u], coreRadius());
+  return vec2<f32>(floor(fb), fb - floor(fb));
 }
 
-/** Outer radius of the coil once the spiral is wound up to arc sRel: the running maximum the
-    tables keep per bin (so the coil never shrinks when a thin bin follows a thick one), blended
-    across the bin so it grows smoothly. */
-fn windRadius(sRel : f32) -> f32 {
-  let fb = clamp(sRel / binWidth(), 0.0, f32(NB) - 1e-4);
-  let b = u32(fb);
-  let f = fb - f32(b);
-  let prev = select(coreRadius(), tables[(b - 1u) * 8u + 7u], b > 0u);
-  return max(mix(prev, tables[b * 8u + 7u], f), coreRadius());
+/** Winding angle of half k's spiral at arc sRel, from the tables. */
+fn windPhi(sRel : f32, k : u32) -> f32 {
+  let bf = binAt(sRel);
+  let o = u32(bf.x) * TS;
+  let hk = o + 8u * k;
+  let rho = mix(tables[hk], tables[hk + 2u], bf.y);
+  return tables[hk + 1u] + bf.y * tables[o + 6u] / max(rho + 0.5 * tables[o + 4u + k], coreRadius());
+}
+
+/** Outer radius of half k's coil once wound up to arc sRel: the running maximum the tables keep
+    per bin (so the coil never shrinks when a thin bin follows a thick one), blended across the
+    bin so it grows smoothly. */
+fn windRadius(sRel : f32, k : u32) -> f32 {
+  let bf = binAt(sRel);
+  let b = u32(bf.x);
+  let prev = select(coreRadius(), tables[(b - 1u) * TS + 8u * k + 3u], b > 0u);
+  return max(mix(prev, tables[b * TS + 8u * k + 3u], bf.y), coreRadius());
 }
 
 /** Arc at which the winding starts: the crown; material beyond it (the bank) is the core. */
@@ -182,35 +192,31 @@ fn contactArc() -> f32 { return (2.0 * PI - WIND_CONTACT) * P.front.w; }
 /** Unit vector from the front axis at angle th (as in select_: 0 the nip, pi / 2 the bottom). */
 fn rhat(th : f32) -> vec3<f32> { return vec3<f32>(0.0, -sin(th), -cos(th)); }
 
-/** A particle's place in the log (design §6): distance along the axis, radius and winding
-    angle, for a particle at p0 with arc sRel (0 = bank end). */
-fn coilCoords(p0 : vec3<f32>, sRel : f32) -> vec3<f32> {
-  let L = P.fold2.y;
+/** Which half of the width a particle came from. */
+fn halfOf(p0 : vec3<f32>) -> u32 { return select(0u, 1u, p0.x >= 0.5 * P.fold2.y); }
+
+/** A particle's place in its half's spiral (design §6): radius and winding angle, for a particle
+    at p0 with arc sRel (0 = bank end). */
+fn coilCoords(p0 : vec3<f32>, sRel : f32) -> vec2<f32> {
   let R = P.front.w;
-  let fb = clamp(sRel / binWidth(), 0.0, f32(NB) - 1e-4);
-  let b = u32(fb);
-  let f = fb - f32(b);
-  let o = b * 8u;
-  let t0 = tables[o + 2u];
-  let t1 = tables[o + 3u];
-  let T = tables[o + 4u];
-  let rho = mix(tables[o], tables[o + 6u], f);
+  let k = halfOf(p0);
+  let bf = binAt(sRel);
+  let b = u32(bf.x);
+  let o = b * TS;
+  let hk = o + 8u * k;
+  let T = tables[o + 4u + k];
+  let rho = mix(tables[hk], tables[hk + 2u], bf.y);
   let dr = max(rollerDist(P.front.x, P.front.y, p0) - R, 0.0);
-  let secondHalf = p0.x >= 0.5 * L;
-  let k = select(0u, 1u, secondHalf);
-  let along = select(p0.x, L - p0.x, secondHalf);      // x = 0 and x = L ends go in first
   // depth within the layer from the bin's depth CDF (linear inside a slice)
   let fj = clamp(depthSlice(dr), 0.0, f32(NS) - 1e-4);
   let j = u32(fj);
   let c = CDF + (k * NB + b) * (NS + 1u);
   let frac = mix(tables[c + j], tables[c + j + 1u], fj - f32(j));
-  var u = frac * t0;
-  if (secondHalf) { u = t0 + frac * t1; }
   // radial position: uniform in r^2 across the layer, so a thick layer near the
   // core is not denser on its inside than on its outside
   let rOut = rho + T;
-  let rr = sqrt(mix(rho * rho, rOut * rOut, clamp(u / max(T, 1e-6), 0.0, 1.0)));
-  return vec3<f32>(along, rr, windPhi(sRel));
+  let rr = sqrt(mix(rho * rho, rOut * rOut, clamp(frac, 0.0, 1.0)));
+  return vec2<f32>(rr, windPhi(sRel, k));
 }
 
 /** The log's frame turned by theta from lying along the roll (theta = 0: axis x, cross-section
@@ -228,39 +234,54 @@ fn liftFrame(theta : f32) -> mat3x3<f32> {
   return mat3x3<f32>(ax, g1, g2);
 }
 
-/** The base point (along = 0) of the coil on the crown once wound to arc sCur, and its centre height. */
-fn coilBase(sCur : f32) -> vec3<f32> {
-  let c = vec3<f32>(0.0, P.front.x, P.front.y) + (P.front.w + windRadius(sCur)) * rhat(WIND_CONTACT);
-  return vec3<f32>(0.0, c.y, c.z);
-}
+/** Height of the crown of the front roll (where the coil rests) and its z. */
+fn crownY() -> f32 { return P.front.x + P.front.w; }
 
 /** Where a held particle is at time t of the move (unclamped): riding the roll, hopping onto
-    the coil, wound on the spinning coil, or swinging up with it into the standing log
-    (t >= T_roll gives the standing log, as the drop and the lowering-in need). */
+    the coil, wound on the spinning coil, folded over with its half, or swinging up with the
+    doubled roll into the standing log (t >= T_roll gives the standing log, as the drop and the
+    lowering-in need). */
 fn windPos(p0 : vec3<f32>, sRel : f32, t : f32) -> vec3<f32> {
   let R = P.front.w;
+  let L = P.fold2.y;
   let vW = max(P.fold4.x, 1e-3);
   let tWind = P.fold4.y;
-  let tLift = max(P.fold4.z, 1e-3);
+  let tDouble = max(P.fold4.z, 1e-3);
+  let tLift = max(P.fold4.w, 1e-3);
   let sCon = contactArc();
+  let k = halfOf(p0);
   let cc = coilCoords(p0, sRel);
-  let along = cc.x;
-  let rr = cc.y;
-  let phiP = cc.z;
+  let rr = cc.x;
+  let phiP = cc.y;
   // the winding at time t: the arc that has reached the crown, and the coil that holds it
   let tw = min(t, tWind - WIND_HOP);
   let sCur = min(sCon + vW * tw, arcTotal());
-  let psi = PI + windPhi(sCur) - phiP;          // the sheet joins at the coil's bottom; the coil spins as it winds
-  let local = vec3<f32>(along, rr * cos(psi), rr * sin(psi));
+  let psi = PI + windPhi(sCur, k) - phiP;      // the sheet joins at the coil's bottom; the coil spins as it winds
+  let rk = windRadius(sCur, k);                 // this half's coil rests on the crown at its own radius
+  let onCoil = vec3<f32>(p0.x, crownY() + rk + rr * cos(psi), P.front.y + rr * sin(psi));
   if (t >= tWind) {
-    // lift: the coil swings up from the crown to the standing pose over the nip
-    let tau = clamp((t - tWind) / tLift, 0.0, 1.0);
+    // the finished roll: both halves' final radii
+    let r0 = windRadius(arcTotal(), 0u);
+    let r1 = windRadius(arcTotal(), 1u);
+    // double: the x >= L/2 half swings up and over about the roll's middle (a half turn about
+    // the z line through x = L/2 at height r0 + r1 over the crown) onto the top of the other half
+    var q = onCoil;
+    if (k == 1u) {
+      let tau = clamp((t - tWind) / tDouble, 0.0, 1.0);
+      let th = PI * tau * tau * (3.0 - 2.0 * tau);
+      let hinge = vec2<f32>(0.5 * L, crownY() + r0 + r1);
+      let d = q.xy - hinge;
+      q = vec3<f32>(hinge + vec2<f32>(d.x * cos(th) - d.y * sin(th), d.x * sin(th) + d.y * cos(th)), q.z);
+    }
+    if (t < tWind + tDouble) { return q; }
+    // lift: the doubled roll swings up from the crown to the standing pose over the nip; its
+    // axis is the line midway between the two barrels' axes, so the pair stands centred
+    let tau = clamp((t - tWind - tDouble) / tLift, 0.0, 1.0);
     let s = tau * tau * (3.0 - 2.0 * tau);
-    let baseStand = vec3<f32>(0.5 * P.fold2.y, tables[HDR + 1u], P.fold2.w);
-    let base = mix(coilBase(arcTotal()), baseStand, s);
-    return base + liftFrame(0.5 * PI * s) * local;
+    let baseCoil = vec3<f32>(0.0, crownY() + r0 + 0.5 * (r0 + r1), P.front.y);
+    let baseStand = vec3<f32>(0.5 * L, tables[HDR + 1u], P.fold2.w);
+    return mix(baseCoil, baseStand, s) + liftFrame(0.5 * PI * s) * (q - baseCoil);
   }
-  let onCoil = coilBase(sCur) + local;
   // departure: the bank (arc < sCon) goes at once; the sheet when the roll brings it to the crown
   let tDep = max(sRel - sCon, 0.0) / vW;
   if (t >= tDep + WIND_HOP) { return onCoil; }
@@ -382,7 +403,7 @@ fn tables_(@builtin(local_invocation_id) lid : vec3<u32>) {
         if (j == NS) { thick = flapDepth(); }
         thick = max(thick, P.hdt.x);
       }
-      tables[b * 8u + k] = thick;
+      tables[b * TS + k] = thick;
     }
     if (b == 0u) { tables[HDR + 3u] = f32(atomicLoad(&info[3])); }
     return;
@@ -402,12 +423,10 @@ fn tables_(@builtin(local_invocation_id) lid : vec3<u32>) {
   let ell = max(ds, max(n0, n1) * Vp / (layerMax() * Lhalf));
   let t0 = n0 * Vp / (ell * Lhalf);
   let t1 = n1 * Vp / (ell * Lhalf);
-  let o = b * 8u;
-  tables[o + 2u] = t0;
-  tables[o + 3u] = t1;
-  tables[o + 4u] = t0 + t1;
-  tables[o + 5u] = ell;
-  tables[o + 6u] = 0.0;
+  let o = b * TS;
+  tables[o + 4u] = t0;
+  tables[o + 5u] = t1;
+  tables[o + 6u] = ell;
   tables[o + 7u] = 0.0;
   // depth CDF of each half of this bin: cumulative fraction at the start of each slice, then 1
   for (var k = 0u; k < 2u; k++) {
@@ -420,49 +439,60 @@ fn tables_(@builtin(local_invocation_id) lid : vec3<u32>) {
     }
     tables[c + NS] = 1.0;
   }
-  wT[b] = t0 + t1;
-  wL[b] = ell;
   workgroupBarrier();
   if (b == 0u) {
+    // each half of the width is its own spiral (the roll is wound full width, then doubled)
     let rc = coreRadius();
-    var phi = 0.0;
-    var rLog = rc;
-    var j = 0u;   // bin one turn back (phi - 2 pi), advanced monotonically
-    for (var i = 0u; i < NB; i++) {
-      let T = wT[i];
-      let ell = wL[i];
-      var rho0 = rc;
-      if (phi >= 2.0 * PI) {
-        // inner radius = outer surface of the layer one turn earlier at this angle
-        let back = phi - 2.0 * PI;
-        for (; j + 1u < i && wPhi[j + 1u] <= back; j++) {}
-        let phiA = wPhi[j];
-        let phiB = select(phi, wPhi[j + 1u], j + 1u < i);
-        let f = clamp((back - phiA) / max(phiB - phiA, 1e-6), 0.0, 1.0);
-        let rhoA = wRho[j];
-        let rhoB = select(wRho[j] + wT[j] * wL[j] / max(2.0 * PI * (wRho[j] + 0.5 * wT[j]), 1e-6), wRho[j + 1u], j + 1u < i);
-        rho0 = mix(rhoA, rhoB, f) + wT[j];
+    var rMax = vec2<f32>(rc, rc);
+    for (var k = 0u; k < 2u; k++) {
+      for (var i = 0u; i < NB; i++) {
+        wT[i] = tables[i * TS + 4u + k];
+        wL[i] = tables[i * TS + 6u];
       }
-      wPhi[i] = phi;
-      wRho[i] = rho0;
-      tables[i * 8u] = rho0;
-      tables[i * 8u + 1u] = phi;
-      phi += ell / max(rho0 + 0.5 * T, rc);
-      rLog = max(rLog, rho0 + T);
-      tables[i * 8u + 7u] = rLog;
+      var phi = 0.0;
+      var rLog = rc;
+      var j = 0u;   // bin one turn back (phi - 2 pi), advanced monotonically
+      for (var i = 0u; i < NB; i++) {
+        let T = wT[i];
+        let ell = wL[i];
+        var rho0 = rc;
+        if (phi >= 2.0 * PI) {
+          // inner radius = outer surface of the layer one turn earlier at this angle
+          let back = phi - 2.0 * PI;
+          for (; j + 1u < i && wPhi[j + 1u] <= back; j++) {}
+          let phiA = wPhi[j];
+          let phiB = select(phi, wPhi[j + 1u], j + 1u < i);
+          let f = clamp((back - phiA) / max(phiB - phiA, 1e-6), 0.0, 1.0);
+          let rhoA = wRho[j];
+          let rhoB = select(wRho[j] + wT[j] * wL[j] / max(2.0 * PI * (wRho[j] + 0.5 * wT[j]), 1e-6), wRho[j + 1u], j + 1u < i);
+          rho0 = mix(rhoA, rhoB, f) + wT[j];
+        }
+        wPhi[i] = phi;
+        wRho[i] = rho0;
+        let hk = i * TS + 8u * k;
+        tables[hk] = rho0;
+        tables[hk + 1u] = phi;
+        phi += ell / max(rho0 + 0.5 * T, rc);
+        rLog = max(rLog, rho0 + T);
+        tables[hk + 3u] = rLog;
+      }
+      for (var i = 0u; i < NB; i++) {
+        // radius at the end of the bin: where the next bin starts (or one more step along the spiral)
+        let ell = wL[i];
+        let T = wT[i];
+        let stepOut = T * ell / max(2.0 * PI * (wRho[i] + 0.5 * T), 1e-6);
+        tables[i * TS + 8u * k + 2u] = select(wRho[i] + stepOut, wRho[i + 1u], i + 1u < NB);
+      }
+      rMax[k] = rLog;
     }
-    for (var i = 0u; i < NB; i++) {
-      // radius at the end of the bin: where the next bin starts (or one more step along the spiral)
-      let ell = wL[i];
-      let T = wT[i];
-      let stepOut = T * ell / max(2.0 * PI * (wRho[i] + 0.5 * T), 1e-6);
-      tables[i * 8u + 6u] = select(wRho[i] + stepOut, wRho[i + 1u], i + 1u < NB);
-    }
-    // the log's lower end face rests just above what is left on the mill (nothing,
-    // normally: everything was taken) or the roll tops; its lowest point is
-    // rLog * sin(tilt) below the centre. Never squash it against the ceiling.
+    // the doubled roll stands as two barrels side by side, its axis midway between theirs; its
+    // lower end rests just above what is left on the mill (nothing, normally: everything was
+    // taken) or the roll tops: the lower barrel's lowest point is its radius times sin(tilt)
+    // below its own centre, which sits half the barrels' spacing below the axis (times sin^2).
+    // Never squash it against the ceiling.
     let tilt = P.fold3.z;
-    let endDrop = rLog * sin(tilt);
+    let rLog = max(rMax.x, rMax.y);
+    let endDrop = rLog * sin(tilt) + 0.5 * (rMax.x + rMax.y) * sin(tilt) * sin(tilt);
     var baseY = pileTop() + endDrop + P.fold3.y;
     let logLen = 0.5 * L;
     baseY = min(baseY, P.fold3.w - logLen * cos(tilt) - endDrop - h);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, LIFT_SECONDS, WHITE_LATENT, WIND_HOP_SECONDS, WIND_MAX_SECONDS, dispatchSize, foldDuration, foldProfile, halfToFloat, rollSeconds, windArc, windSeconds, windSpeed } from '../src/sim/mpm';
+import { DOUBLE_SECONDS, FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, LIFT_SECONDS, WHITE_LATENT, WIND_HOP_SECONDS, WIND_MAX_SECONDS, dispatchSize, foldDuration, foldProfile, halfToFloat, rollSeconds, windArc, windSeconds, windSpeed } from '../src/sim/mpm';
 import { DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS } from '../src/config/mill';
 
 describe('solver helpers', () => {
@@ -62,10 +62,10 @@ describe('peel and wind timing', () => {
     const omega = DEFAULT_PARAMS.omega;
     expect(windSpeed(omega)).toBeCloseTo(omega * GEOMETRY.radius, 9);
     expect(windSeconds(omega)).toBeCloseTo(windArc() / (omega * GEOMETRY.radius) + WIND_HOP_SECONDS, 9);
-    expect(rollSeconds(omega)).toBeCloseTo(windSeconds(omega) + LIFT_SECONDS, 9);
+    expect(rollSeconds(omega)).toBeCloseTo(windSeconds(omega) + DOUBLE_SECONDS + LIFT_SECONDS, 9);
     expect(FOLD_ROLL_SECONDS).toBe(rollSeconds(omega));
     expect(rollSeconds(omega)).toBeGreaterThan(1.5);
-    expect(rollSeconds(omega)).toBeLessThan(3.5);
+    expect(rollSeconds(omega)).toBeLessThan(4);
     // a stopped or crawling roll: the operator pulls at the floor speed instead
     expect(windSeconds(0)).toBeCloseTo(WIND_MAX_SECONDS + WIND_HOP_SECONDS, 9);
     expect(windSeconds(0.1)).toBe(windSeconds(0));

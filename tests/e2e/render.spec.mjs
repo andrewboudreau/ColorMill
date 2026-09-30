@@ -153,7 +153,8 @@ export default async function run() {
       };
       console.log(`  layered (${mode}): sheet ${layered[mode].sheet ? layered[mode].sheet.map(Math.round).join(',') : 'off-screen'}, bank ${layered[mode].bank ? layered[mode].bank.map(Math.round).join(',') : 'off-screen'}`);
     }
-    assert(!yellowish(layered.surface.sheet), 'surface mode: a clear skin over yellow reads clear, not yellow');
+    assert(layered.surface.sheet && layered.surface.bank && layered.depth.sheet, 'layered sample points are on screen');
+    assert(!yellowish(layered.surface.sheet) && layered.surface.sheet[2] > 100, `surface mode: a clear skin over yellow reads clear, not yellow (${layered.surface.sheet.map(Math.round).join(',')})`);
     assert(yellowish(layered.surface.bank), 'surface mode: the yellow bank still reads yellow');
     assert(yellowish(layered.depth.sheet), 'depth mode: the same sheet still reads yellow through the skin');
   }, { mode: 'dev' }); // harness pages are dev-only, not part of the production build

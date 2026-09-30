@@ -51,10 +51,10 @@ struct Uniforms {
 // a few percent of masterbatch already colours the sheet solidly, as it does on a real mill.
 const PIGMENT_OPACITY: f32 = 6.0;
 // Surface colour mode (design §8): the colour of the top-most material only, sampled this many
-// colour-raster cells inside the hit (just at the outermost particles), with two sideways
-// samples half a cell away so a single texel does not speckle; loads below the floor draw as
-// clear, so the trace a chunk sheds into the base is invisible while a milled few-percent
-// batch (load ~1) still reads solid.
+// colour-raster cells inside the hit (just at the outermost particles), with four sideways
+// samples half a cell away in a cross so a single texel does not speckle; loads below the
+// floor draw as clear, so the trace a chunk sheds into the base is invisible while a milled
+// few-percent batch (load ~1) still reads solid.
 const SURFACE_DEPTH: f32 = 0.6;
 const SURFACE_SPREAD: f32 = 0.5;
 const SURFACE_LOAD_FLOOR: f32 = 0.06;
@@ -727,19 +727,20 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     var csum = 0.0;
     var dsum = 0.0;
     var load = 0.0;
-    // surface mode: three samples just inside the hit, spread along the surface, no depth;
-    // depth mode: five samples down the normal with a depth decay
+    // surface mode: five samples just inside the hit, one at the hit and a cross of four half a
+    // cell away along the surface, no depth; depth mode: five samples down the normal with a
+    // depth decay
     let surfaceMode = (flags & 4u) != 0u;
     let hF = U.fine.w;
     let tx = normalize(cross(n, select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(n.y) > 0.9)));
     let ty = cross(n, tx);
-    let nSamples = select(5, 3, surfaceMode);
-    for (var k = 0; k < nSamples; k++) {
+    for (var k = 0; k < 5; k++) {
       var q: vec3f;
       var decay = 1.0;
       if (surfaceMode) {
-        let side = select(select(ty, tx, k == 1), vec3f(0.0), k == 0) * (SURFACE_SPREAD * hF);
-        q = p - n * (SURFACE_DEPTH * hF) + side;
+        var side = vec3f(0.0);
+        if (k == 1) { side = tx; } else if (k == 2) { side = -tx; } else if (k == 3) { side = ty; } else if (k == 4) { side = -ty; }
+        q = p - n * (SURFACE_DEPTH * hF) + side * (SURFACE_SPREAD * hF);
       } else {
         q = p - n * ((0.5 + 0.8 * f32(k)) * h);
         decay = exp(-0.45 * f32(k));

@@ -334,7 +334,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   const cutFlop = (): void => withSim('cutAndFlop failed', (s) => {
     if (s.operatorBusy) return;
     s.cutAndFlop(flopSide);
-    hud.showHint(`Cut & fold: the sheet is cut across from the ${flopSide} end to the middle and folded like a flag onto the other half`, 3000);
+    hud.showHint(`Cut & fold: the sheet is cut across from the ${flopSide} end to the middle, folded like a flag into a bundle in hand for a turn of the roll, and set down on the other half`, 3500);
     flopSide = flopSide === 'left' ? 'right' : 'left';
   });
 

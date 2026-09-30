@@ -108,8 +108,9 @@ export interface GpuMpmSim {
   /** Start the scripted operator move: cut the sheet off the front roll, roll it into a log, turn it and set it on the bank (design §6). No-op if one is running. */
   cutAndFold(): void;
   /** Start the other operator move: cut the sheet on the front roll from the `side` end (x = 0 for 'left')
-   *  toward the middle and fold the freed triangular flap over the cut onto the sheet beside it
-   *  (design §6b). No-op if a move is running. */
+   *  toward the middle and, for about one turn of the roll, fold each square of strip it brings up like a
+   *  flag and lift the doubled triangle into the operator's hands, then set the bundle down on the nip on
+   *  the other half (design §6b). No-op if a move is running. */
   cutAndFlop(side: 'left' | 'right'): void;
   /** true while an operator move (cut & roll or cut & fold) is running */
   readonly operatorBusy: boolean;

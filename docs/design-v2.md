@@ -552,7 +552,7 @@ bundle is gathered in the operator's hands instead). For each of
    ends and selected afresh, so it takes the doubled triangle and whatever
    the roll has brought up under it; `BUNDLE_LIFT_SECONDS` = 0.35 s): the
    doubled triangle flies off the roll into the operator's hands out in
-   front of it (`BUNDLE_Y` = 0.3 above the crown level, `BUNDLE_Z` = 0.45
+   front of it (`BUNDLE_Y` = 0.3 above the crown level, `BUNDLE_Z` = 0.27
    beyond the face, its arc down the cut spread over `BUNDLE_SPREAD` = 0.6
    of its length toward the viewer, at its own x) and lies flat on top of
    what is already there (square q's layer `BUNDLE_LAYER` = 2.2 sheet

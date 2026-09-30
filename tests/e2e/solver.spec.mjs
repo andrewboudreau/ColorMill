@@ -257,7 +257,7 @@ export default async function run() {
     assert(flop.lifted > 0.015 * flop.count && flop.lifted < 0.3 * flop.count, `the first fold lifts the corner triangle of the strip (${flop.lifted} of ${flop.count})`);
     assert(flop.meanX0 < 0.4 && flop.meanXm > flop.meanX0 + 0.15 && flop.meanXm < 0.75, `the corner triangle folds over the diagonal toward the seam, still on the left half (mean x ${flop.meanX0.toFixed(3)} -> ${flop.meanXm.toFixed(3)})`);
     assert(flop.kinM > 0, `the lift takes over (${flop.kinM} held after the first fold)`);
-    assert(flop.held > 0 && flop.meanZh > 1.15 && flop.meanYh > 0.9, `the doubled triangle is parked in the hands out in front of the roll (${flop.held} held, mean y ${flop.meanYh.toFixed(3)}, z ${flop.meanZh.toFixed(3)})`);
+    assert(flop.held > 0 && flop.meanZh > 1.45 && flop.meanYh > 0.9, `the doubled triangle is parked in the hands out in front of the roll (${flop.held} held, mean y ${flop.meanYh.toFixed(3)}, z ${flop.meanZh.toFixed(3)})`);
     assert(!flop.busy && flop.kin === 0, `everything is released once the press is over (${flop.kin} still held, busy ${flop.busy})`);
     assert(flop.meanX1 > 0.75 && flop.meanX1 > flop.meanXm + 0.2, `the bundle is set down on the right half (mean x ${flop.meanXm.toFixed(3)} -> ${flop.meanX1.toFixed(3)})`);
     assert(aFlop.bad === 0 && aFlop.outside === 0 && aFlop.inRoller === 0 && aFlop.n === chunk.count, 'state sane after cut & fold');

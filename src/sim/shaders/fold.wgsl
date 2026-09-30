@@ -126,11 +126,12 @@ const FLOP_LIFT : f32 = 0.6;        // radial reach of the swing as a fraction o
 const FLOP_TOP_Q : f32 = 0.97;      // sheet thickness = this quantile of its particles' depth
 const FLAP_TH_MIN : f32 = 0.08;     // the cut runs across just in front of the crown line (rad down from the crown)
 // The bundle in the operator's hands (mirrors mpm.ts): out in front of the front roll, this far
-// above the crown level and beyond the face, the triangle's s spread over BUNDLE_SPREAD of its
-// length toward the viewer, each square's doubled triangle BUNDLE_LAYER sheet thicknesses up.
+// above the crown level and beyond the face (the face is 0.59 from the front of the domain, so the
+// triangle's s is spread over BUNDLE_SPREAD of its length toward the viewer about a centre
+// BUNDLE_Z out), each square's doubled triangle BUNDLE_LAYER sheet thicknesses up.
 const BUNDLE_FLAG : u32 = 2u;
 const BUNDLE_Y : f32 = 0.3;
-const BUNDLE_Z : f32 = 0.45;
+const BUNDLE_Z : f32 = 0.27;
 const BUNDLE_SPREAD : f32 = 0.6;
 const BUNDLE_LAYER : f32 = 2.2;
 const INFO_COUNT : u32 = 8u;

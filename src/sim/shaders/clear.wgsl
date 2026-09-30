@@ -5,6 +5,7 @@
 @group(0) @binding(4) var<storage, read_write> pmass : array<i32>;
 @group(0) @binding(5) var<storage, read_write> plat : array<i32>;
 @group(0) @binding(6) var<storage, read_write> pload : array<i32>;
+@group(0) @binding(7) var<storage, read_write> pcov : array<i32>;   // colour raster only
 
 @compute @workgroup_size(4, 4, 4)
 fn clearGrid(@builtin(global_invocation_id) gid : vec3<u32>) {
@@ -26,12 +27,14 @@ fn clearRaster(@builtin(global_invocation_id) gid : vec3<u32>) {
   for (var c = 0u; c < 7u; c++) { plat[7u * n + c] = 0; }
 }
 
-/// The colour raster's accumulators (bound in place of pmass / plat / pload), over the fine grid.
+/// The colour raster's accumulators (bound in place of pmass / plat / pload, plus pcov), over the
+/// fine grid.
 @compute @workgroup_size(4, 4, 4)
 fn clearFine(@builtin(global_invocation_id) gid : vec3<u32>) {
   if (gid.x >= P.fine.x || gid.y >= P.fine.y || gid.z >= P.fine.z) { return; }
   let n = (gid.z * P.fine.y + gid.y) * P.fine.x + gid.x;
   pmass[n] = 0;
   pload[n] = 0;
+  pcov[n] = 0;
   for (var c = 0u; c < 7u; c++) { plat[7u * n + c] = 0; }
 }

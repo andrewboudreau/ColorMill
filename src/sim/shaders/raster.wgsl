@@ -9,13 +9,25 @@
 @group(0) @binding(3) var<storage, read_write> pmass : array<atomic<i32>>;
 @group(0) @binding(4) var<storage, read_write> plat : array<atomic<i32>>;
 @group(0) @binding(5) var<storage, read_write> pload : array<atomic<i32>>;
+// Pigment coverage (colour raster only): the mass of pigment-carrying particles per node, so the
+// renderer can tell a cell that is one-eighth masterbatch (a lamina edge) from one that is evenly
+// tinted, which the load ratio alone cannot. The solver-grid kernel binds a small dummy here and
+// never writes it (nothing reads coverage on the solver grid).
+@group(0) @binding(6) var<storage, read_write> pcov : array<atomic<i32>>;
+
+// A particle counts as covered (pigment) above this load. Dispersion relaxes every particle of a
+// milled few-percent batch toward load ~1, and that must still count as covered so a homogeneous
+// mix reads solid; only near-clear base (0, or the faint trace a chunk sheds into it) is uncovered.
+const COVERAGE_MIN_LOAD : f32 = 0.3;
 
 /// Scatter particle p onto the node grid of spacing 1/invh and node counts dims (the
-/// accumulators bound to pmass / plat / pload are that grid's).
-fn scatter(p : u32, invh : f32, dims : vec3<i32>) {
+/// accumulators bound to pmass / plat / pload / pcov are that grid's); withCov adds the
+/// coverage term (the colour raster only).
+fn scatter(p : u32, invh : f32, dims : vec3<i32>, withCov : bool) {
   let pMass = P.part.y;
   let x = pos[p].xyz;
   let load = max(pos[p].w, 1e-3);
+  let covered = withCov && pos[p].w > COVERAGE_MIN_LOAD;
   var z : array<f32, 7>;
   for (var c = 0u; c < 7u; c++) { z[c] = lat[7u * p + c]; }
 
@@ -33,6 +45,7 @@ fn scatter(p : u32, invh : f32, dims : vec3<i32>) {
         let n = (u32(c.z) * u32(dims.y) + u32(c.y)) * u32(dims.x) + u32(c.x);
         atomicAdd(&pmass[n], encodeFixed(wgt, MASS_SCALE));
         atomicAdd(&pload[n], encodeFixed(wgt * load, MASS_SCALE));
+        if (covered) { atomicAdd(&pcov[n], encodeFixed(wgt, MASS_SCALE)); }
         for (var cc = 0u; cc < 7u; cc++) {
           atomicAdd(&plat[7u * n + cc], encodeFixed(wgt * load * z[cc], LAT_SCALE));
         }
@@ -46,14 +59,14 @@ fn scatter(p : u32, invh : f32, dims : vec3<i32>) {
 fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
   let p = particleIndex(gid, nwg);
   if (p >= P.grid.w) { return; }
-  scatter(p, P.hdt.y, vec3<i32>(P.grid.xyz));
+  scatter(p, P.hdt.y, vec3<i32>(P.grid.xyz), false);
 }
 
 /// The colour raster (design §3.5): the same scatter onto the finer grid the renderer reads
-/// pigment from, so streaks thinner than a solver cell survive to the picture.
+/// pigment from, so streaks thinner than a solver cell survive to the picture, plus coverage.
 @compute @workgroup_size(128)
 fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
   let p = particleIndex(gid, nwg);
   if (p >= P.grid.w) { return; }
-  scatter(p, P.fineH.y, vec3<i32>(P.fine.xyz));
+  scatter(p, P.fineH.y, vec3<i32>(P.fine.xyz), true);
 }

@@ -51,6 +51,20 @@ const noiseAmp = Number(query.get('noise') || 0);
  *  trilinear samples can separate); ?render=depth|surface picks the mode */
 const skinCells = Number(query.get('skin') || 0);
 const clearSkin = skinCells > 0;
+/** ?laminae=<cells>: the sheet's pigment alternates along x in bands this many cells wide (pigment,
+ *  clear, pigment, ...; band edges at multiples of the width from x = 0, so they cut through
+ *  nodes' cells), with coverage to match, so there is a finely striped sheet for the coverage term
+ *  (design §8) to draw as sharp stripes rather than a wash; 0 = off */
+const laminaeCells = Number(query.get('laminae') || 0);
+
+/** Pigment share of the cell of width h centred on x when the laminae are on (1 when off): the
+ *  measure of pigment bands (even bands of width W from x = 0) over [x - h/2, x + h/2], over h. */
+function laminaeCover(x: number, h: number): number {
+  if (laminaeCells <= 0) return 1;
+  const W = laminaeCells * h;
+  const upTo = (t: number): number => Math.floor(t / (2 * W)) * W + Math.min(t - Math.floor(t / (2 * W)) * 2 * W, W);
+  return (upTo(x + 0.5 * h) - upTo(x - 0.5 * h)) / h;
+}
 const renderMode = query.get('render') === 'depth' ? 'depth' : 'surface';
 
 function toHalf(f: number): number {
@@ -113,6 +127,7 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
   const bb = new Uint16Array(nx * ny * nz * 4);
   const cc = new Uint16Array(nx * ny * nz * 4);
   const edge = 1.2 * h;
+  const cov = new Uint16Array(nx * ny * nz);   // one channel, packed into finC.y below
   for (let k = 0; k < nz; k++) {
     const z = k * h;
     for (let j = 0; j < ny; j++) {
@@ -149,8 +164,14 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
           const lat = latentAt(x);
           // every band is pure opaque pigment (masterbatch load) so the colour checks see solid colour;
           // with a clear skin the sheet's outer cell is base (no load) over a pigment core
-          const inSkin = clearSkin && sheet <= 0.5 * edge && dF > sheetR - skinCells * h && sdBank > 0.5 * edge;   // the sheet only, not the bank
-          cc[idx] = toHalf(inSkin ? 0 : dens * PIGMENT_LOAD);
+          const onSheet = sheet <= 0.5 * edge && sdBank > 0.5 * edge;   // the sheet only, not the bank
+          const inSkin = clearSkin && onSheet && dF > sheetR - skinCells * h;
+          // coverage: the pigment-carrying share of the node's mass (masterbatch or clear base, nothing
+          // between), 0 in the skin and, with laminae, the node cell's share of the pigment bands;
+          // the load is that share at masterbatch strength, as the raster would sum it
+          const share = inSkin ? 0 : onSheet ? laminaeCover(x, h) : 1;
+          cc[idx] = toHalf(dens * share * PIGMENT_LOAD);
+          cov[idx / 4] = toHalf(dens * share);   // normalised like the mass
           a[idx] = toHalf(dens);
           a[idx + 1] = toHalf(lat[0]);
           a[idx + 2] = toHalf(lat[1]);
@@ -175,10 +196,10 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
     return tex;
   };
   // the colour raster at the same resolution: finA = (load, lat0..2) is volA with the load in x,
-  // finB = volB, finC = (mass) is volA's density in x
+  // finB = volB, finC = (mass, coverage) is volA's density in x and the coverage in y
   const fa = new Uint16Array(a);
   const fc = new Uint16Array(nx * ny * nz * 4);
-  for (let i = 0; i < nx * ny * nz; i++) { fa[i * 4] = cc[i * 4]; fc[i * 4] = a[i * 4]; }
+  for (let i = 0; i < nx * ny * nz; i++) { fa[i * 4] = cc[i * 4]; fc[i * 4] = a[i * 4]; fc[i * 4 + 1] = cov[i]; }
   return {
     volA: make('harness-volA', a), volB: make('harness-volB', bb), volC: make('harness-volC', cc), dims,
     finA: make('harness-finA', fa), finB: make('harness-finB', bb), finC: make('harness-finC', fc), fineDims: dims
@@ -207,6 +228,26 @@ function samplePoints(dims: GridDims): Record<string, [number, number, number][]
     ];
   });
   return out;
+}
+
+/**
+ * With ?laminae: two world points inside the sheet a stripe apart in the yellow band, one in a
+ * pigment stripe and one in the clear stripe next to it, each at its stripe's centre (for the
+ * e2e check that the stripes stay sharp in surface mode). null without laminae.
+ */
+function laminaePoints(dims: GridDims): { pigment: [number, number, number]; clear: [number, number, number] } | null {
+  if (laminaeCells <= 0) return null;
+  const { h } = dims;
+  const { front } = rollerPoses(params);
+  const bw = GEOMETRY.length / BANDS.length;
+  const xc = (BANDS.findIndex((b) => b.name === 'yellow') + 0.5) * bw;
+  // band m spans [m, m + 1) * W from x = 0 and is pigment when m is even
+  let m = Math.floor(xc / (laminaeCells * h));
+  if (m % 2 === 1) m -= 1;
+  const centre = (k: number): number => (k + 0.5) * laminaeCells * h;
+  const y = front.axisY - 0.08;
+  const z = front.axisZ + Math.sqrt((front.radius + 1.5 * h) ** 2 - 0.08 ** 2);
+  return { pigment: [centre(m), y, z], clear: [centre(m + 1), y, z] };
 }
 
 async function main(): Promise<void> {
@@ -324,6 +365,8 @@ async function main(): Promise<void> {
     clearSkin,
     bands: BANDS.map((b) => b.name),
     samplePoints: samplePoints(dims),
+    laminae: laminaeCells,
+    laminaePoints: laminaePoints(dims),
     project,
     frame,
     readPixels,

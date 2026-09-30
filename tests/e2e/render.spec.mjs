@@ -157,5 +157,27 @@ export default async function run() {
     assert(!yellowish(layered.surface.sheet) && layered.surface.sheet[2] > 100, `surface mode: a clear skin over yellow reads clear, not yellow (${layered.surface.sheet.map(Math.round).join(',')})`);
     assert(yellowish(layered.surface.bank), 'surface mode: the yellow bank still reads yellow');
     assert(yellowish(layered.depth.sheet), 'depth mode: the same sheet still reads yellow through the skin');
+
+    // --- coverage on a striped sheet: the sheet's pigment alternates along x in two-cell laminae
+    // (pigment / clear / ...) whose edges cut through cells, so the samples in a clear stripe pick up
+    // some pigment load (about 2 per unit mass, which the load alone draws near-opaque). Surface mode
+    // draws by coverage, so the pigment stripe reads as the pigment and the clear stripe next to it
+    // reads clear, instead of both reading as one yellow wash
+    await page.goto(`${baseUrl}harness/render.html?quality=medium&sheet=3&laminae=2&render=surface`);
+    await page.waitForFunction(() => window.__render && (window.__render.ready || window.__render.error), null, { timeout: 90000 });
+    const st4 = await page.evaluate(() => ({ ready: window.__render.ready, error: window.__render.error ?? null, validationError: window.__render.validationError ?? null, mode: window.__render.mode, laminae: window.__render.laminae }));
+    assert(st4.ready && !st4.validationError && st4.mode === 'surface' && st4.laminae === 2, 'striped harness initialised: ' + (st4.error ?? st4.validationError));
+    await page.evaluate(() => window.__render.frame());
+    const px4 = await page.evaluate(() => window.__render.readPixels());
+    const img4 = { width: px4.width, height: px4.height, data: new Uint8Array(Buffer.from(px4.base64, 'base64')) };
+    writeFileSync(path.join(OUT_DIR, 'render-laminae.png'), encodePng(img4.width, img4.height, img4.data));
+    const lp = await page.evaluate(() => { const l = window.__render.laminaePoints; return { pigment: window.__render.project(l.pigment), clear: window.__render.project(l.clear) }; });
+    assert(lp.pigment && lp.clear, 'both stripe sample points are on screen');
+    const dx = Math.hypot(lp.pigment.x - lp.clear.x, lp.pigment.y - lp.clear.y);
+    // a 5 x 5 px patch keeps the sample inside a stripe (about 15 px wide at this view)
+    const stripe = { pigment: patchMean(img4, Math.round(lp.pigment.x), Math.round(lp.pigment.y), 2), clear: patchMean(img4, Math.round(lp.clear.x), Math.round(lp.clear.y), 2) };
+    console.log(`  laminae (surface, ${dx.toFixed(0)} px apart): pigment stripe ${stripe.pigment.map(Math.round).join(',')}, clear stripe ${stripe.clear.map(Math.round).join(',')}`);
+    assert(yellowish(stripe.pigment), 'striped sheet: the pigment stripe reads as yellow');
+    assert(!yellowish(stripe.clear), 'striped sheet: the clear stripe next to it reads clear, not a yellow wash');
   }, { mode: 'dev' }); // harness pages are dev-only, not part of the production build
 }

@@ -44,7 +44,8 @@ struct Uniforms {
 // found on volA's density
 @group(0) @binding(7) var finA: texture_3d<f32>;   // (load, lat0, lat1, lat2), load normalised like finC's mass
 @group(0) @binding(8) var finB: texture_3d<f32>;   // (lat3, lat4, lat5, lat6)
-@group(0) @binding(9) var finC: texture_3d<f32>;   // x = mass; finA.x / finC.x = load per unit mass
+@group(0) @binding(9) var finC: texture_3d<f32>;   // (mass, coverage); finA.x / finC.x = load per unit mass,
+                                                   // finC.y / finC.x = share of the mass carrying pigment
 
 // Pigment is an opaque colourant in a clear medium: the share of light a sample captures
 // rises with its pigment load per unit mass (0 = clear base, PIGMENT_LOAD = pure masterbatch);
@@ -52,12 +53,20 @@ struct Uniforms {
 const PIGMENT_OPACITY: f32 = 6.0;
 // Surface colour mode (design §8): the colour of the top-most material only, sampled this many
 // colour-raster cells inside the hit (just at the outermost particles), with four sideways
-// samples half a cell away in a cross so a single texel does not speckle; loads below the
-// floor draw as clear, so the trace a chunk sheds into the base is invisible while a milled
-// few-percent batch (load ~1) still reads solid.
+// samples half a cell away in a cross so a single texel does not speckle.
 const SURFACE_DEPTH: f32 = 0.6;
 const SURFACE_SPREAD: f32 = 0.5;
-const SURFACE_LOAD_FLOOR: f32 = 0.06;
+// Surface mode draws pigment by coverage (the share of the cell's mass carried by pigment
+// particles, design §3.5), not by the cell's mean load: a cell one-eighth masterbatch is the edge
+// of a lamina, and averaging it into a translucent tint turned the marbling a real mill makes into
+// a wash. Coverage below COV_LO draws clear, above COV_HI at the covered material's full strength,
+// with a tight ramp between so lamina edges stay sharp; a per-fine-cell dither of COV_DITHER on
+// the coverage breaks that ramp into cell-sized flecks, which reads as marbling rather than a
+// smooth gradient. (This also replaces the old load floor: the faint trace a chunk sheds into the
+// base is below the raster's coverage threshold, so it is uncovered and draws clear.)
+const COV_LO: f32 = 0.2;
+const COV_HI: f32 = 0.5;
+const COV_DITHER: f32 = 0.08;
 
 const PI: f32 = 3.14159265358979;
 const INF: f32 = 1e30;
@@ -120,6 +129,12 @@ fn linearToSrgb(c: vec3f) -> vec3f {
 fn hash21(p: vec2f) -> f32 {
   var q = fract(vec3f(p.xyx) * vec3f(0.1031, 0.1030, 0.0973));
   q += dot(q, q.yzx + vec3f(33.33));
+  return fract((q.x + q.y) * q.z);
+}
+
+fn hash31(p: vec3f) -> f32 {
+  var q = fract(p * vec3f(0.1031, 0.1030, 0.0973));
+  q += dot(q, q.yxz + vec3f(33.33));
   return fract((q.x + q.y) * q.z);
 }
 
@@ -727,6 +742,7 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     var csum = 0.0;
     var dsum = 0.0;
     var load = 0.0;
+    var cov = 0.0;
     // surface mode: five samples just inside the hit, one at the hit and a cross of four half a
     // cell away along the surface, no depth; depth mode: five samples down the normal with a
     // depth decay
@@ -752,10 +768,12 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
       if (w <= 1e-5) { continue; }
       let fq = fineUvw(q);
       let fa = textureSampleLevel(finA, volSampler, fq, 0.0);
-      let fm = textureSampleLevel(finC, volSampler, fq, 0.0).x;
+      let fc = textureSampleLevel(finC, volSampler, fq, 0.0);
+      let fm = fc.x;
       let pl = fa.x / max(fm, 1e-4);   // load per unit mass
       dsum += w;
       load += w * pl;
+      cov += w * clamp(fc.y / max(fm, 1e-4), 0.0, 1.0);   // covered share of the mass
       let fb = textureSampleLevel(finB, volSampler, fq, 0.0);
       let s = fa.y + fa.z + fa.w + fb.x;
       if (s <= 1e-4 || pl <= 1e-4) { continue; }
@@ -764,15 +782,22 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
       resid += wp * fb.yzw / s;
       csum += wp;
     }
-    if (dsum > 1e-5) { load = load / dsum; }
+    if (dsum > 1e-5) { load = load / dsum; cov = cov / dsum; }
     var albedo = vec3f(1.0);
     if (csum > 1e-5) { c = c / csum; resid = resid / csum; albedo = srgbToLinear(latentToRgb(c, resid)); }
     let ao = volumeAo(p, n);
     let thickness = sheetThickness(p, n);
     // an opaque colourant in a clear medium: its share of the mass sets how much of
     // the light it captures; even a few percent of masterbatch reads solid
-    let loadEff = select(load, max(load - SURFACE_LOAD_FLOOR, 0.0), surfaceMode);
-    let pigment = 1.0 - exp(-PIGMENT_OPACITY * loadEff);
+    var pigment = 1.0 - exp(-PIGMENT_OPACITY * load);
+    if (surfaceMode) {
+      // coverage decides whether this cell is pigment or clear; where it is pigment, the colour
+      // has the covered material's own load (the clear share of the cell does not dilute it)
+      let cell = floor((p - n * (SURFACE_DEPTH * hF)) / hF + vec3f(0.5));   // nearest fine node
+      let covD = cov + COV_DITHER * (2.0 * hash31(cell) - 1.0);
+      let loadCovered = load / max(cov, 0.05);
+      pigment = smoothstep(COV_LO, COV_HI, covD) * (1.0 - exp(-PIGMENT_OPACITY * loadCovered));
+    }
     // clear base: little diffuse (a clear material has almost no body colour), the
     // look comes from specular and what shows through; pigment restores albedo
     let surface = shadePutty(p, n, v, mix(vec3f(0.58, 0.62, 0.64), albedo, pigment), ao, thickness, sn.rough);

@@ -56,7 +56,8 @@ export interface RenderVolumes {
   readonly finA: GPUTexture;
   /** rgba16float (lat3, lat4, lat5, lat6) on fineDims */
   readonly finB: GPUTexture;
-  /** rgba16float (mass, 0, 0, 0) on fineDims, same normalisation as finA.x, so finA.x / finC.x is the load per unit mass */
+  /** rgba16float (mass, coverage, 0, 0) on fineDims, same normalisation as finA.x, so finA.x / finC.x is the load per unit mass
+   *  and finC.y / finC.x the share of the mass that carries pigment (0..1) */
   readonly finC: GPUTexture;
   readonly fineDims: GridDims;
 }

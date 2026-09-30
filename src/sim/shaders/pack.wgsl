@@ -13,6 +13,7 @@
 @group(0) @binding(4) var volB : texture_storage_3d<rgba16float, write>;
 @group(0) @binding(6) var volC : texture_storage_3d<rgba16float, write>;
 @group(0) @binding(7) var finC : texture_storage_3d<rgba16float, write>;
+@group(0) @binding(8) var<storage, read> pcov : array<i32>;   // colour raster only (see raster.wgsl)
 
 @compute @workgroup_size(4, 4, 4)
 fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
@@ -34,8 +35,9 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
 // The colour raster's textures (design §3.5 / §8), from the fine accumulators bound in place
 // of pmass / plat / pload: finA = (load, lat0, lat1, lat2), finB = (lat3, lat4, lat5, lat6),
-// finC = (mass), load and mass normalised by (h/hF)^3 / 8 so a packed fine cell reads ~1 and
-// finA.x / finC.x is the load per unit mass, as volC.x / volA.x is on the solver grid.
+// finC = (mass, coverage, 0, 0), load, mass and coverage normalised by (h/hF)^3 / 8 so a packed
+// fine cell reads ~1, finA.x / finC.x is the load per unit mass (as volC.x / volA.x is on the
+// solver grid) and finC.y / finC.x is the share of the cell's mass that carries pigment.
 @compute @workgroup_size(4, 4, 4)
 fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>) {
   if (gid.x >= P.fine.x || gid.y >= P.fine.y || gid.z >= P.fine.z) { return; }
@@ -43,6 +45,7 @@ fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>) {
   let norm = P.fineH.z;
   let m = decodeFixed(pmass[n], MASS_SCALE);
   let w = decodeFixed(pload[n], MASS_SCALE);
+  let cov = decodeFixed(pcov[n], MASS_SCALE);
   var l : array<f32, 7>;
   if (m > 1e-6 && w > 1e-6) {
     for (var c = 0u; c < 7u; c++) { l[c] = decodeFixed(plat[7u * n + c], LAT_SCALE) / w; }
@@ -52,5 +55,5 @@ fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>) {
   let coord = vec3<i32>(gid);
   textureStore(volA, coord, vec4<f32>(w * norm, l[0], l[1], l[2]));
   textureStore(volB, coord, vec4<f32>(l[3], l[4], l[5], l[6]));
-  textureStore(finC, coord, vec4<f32>(m * norm, 0.0, 0.0, 0.0));
+  textureStore(finC, coord, vec4<f32>(m * norm, cov * norm, 0.0, 0.0));
 }

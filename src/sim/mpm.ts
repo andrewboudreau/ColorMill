@@ -184,6 +184,10 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufFMass: GPUBuffer;
   private readonly bufFLat: GPUBuffer;
   private readonly bufFLoad: GPUBuffer;
+  /** pigment coverage on the fine grid (the mass of particles that carry pigment) */
+  private readonly bufFCov: GPUBuffer;
+  /** stands in for coverage in the solver-grid raster, which shares the scatter but never writes it */
+  private readonly bufPCov: GPUBuffer;
   private readonly finA: GPUTexture;
   private readonly finB: GPUTexture;
   private readonly finC: GPUTexture;
@@ -259,6 +263,8 @@ export class GpuMpm implements GpuMpmSim {
     this.bufFMass = mk(fd.nodeCount);
     this.bufFLat = mk(7 * fd.nodeCount);
     this.bufFLoad = mk(fd.nodeCount);
+    this.bufFCov = mk(fd.nodeCount);
+    this.bufPCov = mk(4);
 
     this.uniformSlots = config.quality.substepsPerFrame + 1;
     this.bufParams = device.createBuffer({ size: UNIFORM_STRIDE * this.uniformSlots, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -389,7 +395,8 @@ export class GpuMpm implements GpuMpmSim {
       clearGrid: this.makeKernel('clearGrid', clearMod, 'clearGrid', clearRes),
       clearRaster: this.makeKernel('clearRaster', clearMod, 'clearRaster', clearRes),
       clearFine: this.makeKernel('clearFine', clearMod, 'clearFine',
-        [rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGVel), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad)]),
+        [rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGVel), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad),
+          rw(this.bufFCov)]),
       p2g: this.makeKernel('p2g', mod('p2g', p2gSrc), 'main',
         [ro(this.bufPos), ro(this.bufVel), ro(this.bufAff), ro(this.bufFlags), rw(this.bufGMass), rw(this.bufGMom)]),
       grid: this.makeKernel('grid', mod('grid', gridSrc), 'main', [ro(this.bufGMass), ro(this.bufGMom), rw(this.bufGVel), ro(this.bufPMass)]),
@@ -397,19 +404,19 @@ export class GpuMpm implements GpuMpmSim {
         [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), ro(this.bufFlags), ro(this.bufGVel),
           ro(this.bufGMass), rw(this.bufFoldInfo), ro(this.bufFold)]),
       raster: this.makeKernel('raster', rasterMod, 'main',
-        [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)]),
+        [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad), rw(this.bufPCov)]),
       disperse: this.makeKernel('disperse', mod('disperse', disperseSrc), 'main',
         [rw(this.bufPos), ro(this.bufC), rw(this.bufLat), ro(this.bufPMass), ro(this.bufPLat), ro(this.bufFlags), ro(this.bufPLoad)]),
       pack: this.makeKernel('pack', packMod, 'main',
         [ro(this.bufPMass), ro(this.bufPLat), { kind: 'storageTexture', view: volAView }, { kind: 'storageTexture', view: volBView }, ro(this.bufPLoad),
-          { kind: 'storageTexture', view: volCView }, { kind: 'storageTexture', view: finCView }]),
+          { kind: 'storageTexture', view: volCView }, { kind: 'storageTexture', view: finCView }, ro(this.bufPCov)]),
       // the colour raster: the same scatter and pack onto the finer grid, its accumulators bound
       // where the solver grid's are
       rasterFine: this.makeKernel('rasterFine', rasterMod, 'mainFine',
-        [ro(this.bufPos), ro(this.bufLat), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad)]),
+        [ro(this.bufPos), ro(this.bufLat), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad), rw(this.bufFCov)]),
       packFine: this.makeKernel('packFine', packMod, 'mainFine',
         [ro(this.bufFMass), ro(this.bufFLat), { kind: 'storageTexture', view: finAView }, { kind: 'storageTexture', view: finBView }, ro(this.bufFLoad),
-          { kind: 'storageTexture', view: volCView }, { kind: 'storageTexture', view: finCView }]),
+          { kind: 'storageTexture', view: volCView }, { kind: 'storageTexture', view: finCView }, ro(this.bufFCov)]),
       inject: this.makeKernel('inject', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
       probe: this.makeKernel('probe', injectMod, 'probeColumn', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
       injectAll: this.makeKernel('injectAll', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInjectAll }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
@@ -919,6 +926,6 @@ export class GpuMpm implements GpuMpmSim {
     this.finA.destroy();
     this.finB.destroy();
     this.finC.destroy();
-    for (const b of [this.bufFMass, this.bufFLat, this.bufFLoad]) b.destroy();
+    for (const b of [this.bufFMass, this.bufFLat, this.bufFLoad, this.bufFCov, this.bufPCov]) b.destroy();
   }
 }

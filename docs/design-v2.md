@@ -252,16 +252,27 @@ x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.2
   grid (`colourCellsPerUnit`: 64 at low, 80 at medium, 88 at high and ultra,
   the most whose 7-channel accumulator fits the default 128 MiB storage-binding limit;
   `colourGridDims`), into its own accumulators and three `rgba16float`
-  textures `finA = (load, lat0..2)`, `finB = (lat3..6)`, `finC = (mass)`,
-  load and mass normalised by `(h/hF)³/8` so a packed fine cell reads ≈ 1
-  and `finA.x / finC.x` is the load per unit mass. The renderer takes
+  textures `finA = (load, lat0..2)`, `finB = (lat3..6)`, `finC = (mass,
+  coverage)`, load, mass and coverage normalised by `(h/hF)³/8` so a packed
+  fine cell reads ≈ 1, `finA.x / finC.x` is the load per unit mass and
+  `finC.y / finC.x` is the covered mass fraction (0..1). **Coverage** is an
+  eighth accumulator `pcov` (i32, scale 2^20) that sums `wgt·pMass` only for
+  particles with `pos.w > COVERAGE_MIN_LOAD` (0.3): the load ratio alone
+  cannot tell a cell one-eighth masterbatch (the edge of a lamina) from one
+  evenly tinted, and the threshold sits below the load ≈ 1 that dispersion
+  relaxes a milled few-percent batch to, so a homogeneous mix is fully
+  covered while clear base and the faint trace a chunk sheds into it are
+  not. The solver-grid raster shares the scatter but skips coverage (its
+  binding is a 16-byte stand-in). The renderer takes
   pigment colour and load from these (§8) while the surface and the sample
   weights still come from `volA`: the sheet the nip makes is one or two
   solver cells thick, and a streak inside it was averaged into its cell
   before it was drawn; on the finer grid the colour's detail limit is the
   fine cell and, below that, the particle spacing. Costs one more raster
   pass per frame (per particle, so independent of the fine grid's size) and
-  the fine buffers and textures (about 95 MB at low, 280 MB at high); a
+  the fine buffers and textures (64 bytes per fine node: 40 in the i32
+  accumulators, coverage included, and 24 in the three textures; about
+  116 MB at low, 226 MB at medium, 300 MB at high and ultra); a
   device whose storage-binding limit cannot hold the 7-channel accumulator
   falls back to the solver grid with a console warning. The dispersion
   kernel keeps reading the solver-grid raster.
@@ -585,16 +596,26 @@ Single fullscreen ray-march pass (`src/render/shaders/raymarch.wgsl`):
    half a cell away along the surface (against speckle), no depth, so the
    colour is the top-most material's: a pigment skin over clear base reads
    as pigment, clear over buried pigment reads as clear, which is the
-   layering the particles carry through the nip; loads under 0.06 draw as
-   clear so the trace a chunk sheds into the base is invisible while a
-   milled few-percent batch (load ≈ 1) still reads solid. **Depth** (the
+   layering the particles carry through the nip. Surface mode draws pigment
+   by **coverage** `cov = finC.y / finC.x` (§3.5), averaged over the same
+   samples: `pigment = smoothstep(0.2, 0.5, cov + dither) · (1 − exp(−6 ·
+   load / max(cov, 0.05)))`, so a cell under 20% covered draws clear, one
+   over 50% draws at the load of its covered material (the clear share does
+   not dilute it), and the tight ramp keeps a lamina's edge sharp where the
+   mean load alone drew every cell a lamina touched near-opaque, a wash. The
+   dither is a per-fine-cell hash of ±0.08 on `cov`, which breaks the ramp
+   into cell-sized flecks that read as marbling rather than a gradient. This
+   replaces the old load floor (loads under 0.06 drew clear): the trace a
+   chunk sheds into the base is below the coverage threshold, so it is
+   uncovered and invisible, while a milled few-percent batch (every particle
+   at load ≈ 1) is fully covered and reads solid. **Depth** (the
    older look): five samples along −n behind the hit, weighted by `volA`
    density and a depth decay, which gives the bank a milky body but blends a
    skin with what is under it. In both, the latent and the pigment load come
    from the colour raster `finA/finB/finC` (§3.5), the pigment-load-weighted
    mix of the pigments only, decoded with `latentToRgb` → albedo
-   (sRGB-linearised for lighting); the mean pigment load per unit mass
-   `load = volC / density` gives the opacity
+   (sRGB-linearised for lighting); in depth mode the mean pigment load per
+   unit mass `load = finA.x / finC.x` gives the opacity
    `pigment = 1 − exp(−PIGMENT_OPACITY · load)` (`PIGMENT_OPACITY` = 6: a
    sheet 10% masterbatch by particles, load 0.6, is 97% opaque; the faint
    fringe a chunk sheds into the base, load 0.2, is 70%). The base

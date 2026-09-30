@@ -172,7 +172,7 @@ lays the same three bands on the bank.
 | `?drops=hansaYellow@3.m,phthaloBlue@5.l` | Start with those pigment chunks already dropped (pigment@slot.size; size s, m or l; a custom colour as six hex digits) |
 | `?gap=0.06&omega=2&preset=high&batch=1.5` | Start with mill settings changed: any drawer slider by its name (`omega`, `frictionRatio`, `gap`, `dispersion`, `gravity`, `backFriction`, `logFeed`), the quality preset and the batch size. Values are snapped to the slider's step and capped at its range. The drawer's **Copy start link** writes the session's drops plus every setting that differs from its default, so a whole setup restarts from one URL |
 | `?colour=48` | Experiment: the colour raster's resolution in cells per unit (16 to 128; `?colour=32` at low is the solver grid, the look before the colour raster) |
-| `?render=depth` | Colour mode: `surface` (default) draws the top-most material only, so a pigment skin reads as pigment and clear over buried pigment reads as clear; `depth` blends a few cells into the material, the older look. The drawer's **Surface colour** toggle switches it live |
+| `?render=depth` | Colour mode: `surface` (default) draws the top-most material only, so a pigment skin reads as pigment and clear over buried pigment reads as clear, and it draws pigment by coverage (how much of a fine cell's mass is pigment-carrying), so a thin lamina keeps a sharp edge instead of tinting its whole cell; `depth` blends a few cells into the material by mean pigment load, the older look. The drawer's **Surface colour** toggle switches it live |
 | `?experimental=1&omega=50` | Experimental mode: the caps come off. URL values are accepted as written (floored at each slider's minimum), the sliders stretch to 4× their normal top, and the drawer / mixer toggle **Experimental: lift the slider caps** does the same. The solver is not guaranteed stable up there |
 
 ## Quality presets
@@ -183,7 +183,13 @@ so a streak inside it was averaged into its cell before it was drawn. The
 solver grid still carries the mechanics and the surface; pigment colour and
 load are rastered again onto the finer grid each frame and sampled from there,
 so the detail limit for colour is the finer cell (3 mm at low instead of 6,
-2.3 mm at high) and, below that, the particle spacing.
+2.3 mm at high) and, below that, the particle spacing. The colour raster also
+counts each cell's **coverage**, the share of its mass carried by particles
+that hold pigment (load above 0.3, so an evenly milled batch counts as fully
+covered). In surface mode a cell under about 20% coverage draws clear and one
+over about 50% draws at the pigment's full strength, with a little per-cell
+dither between, so a chunk sheared into laminae thinner than a cell reads as
+marbling with sharp edges rather than a tinted wash.
 
 
 | Preset | Cells / unit | Grid (cells) | Colour raster | Particles at 1× batch | Substep `dt` | Substeps / frame | Target |

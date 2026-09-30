@@ -25,9 +25,9 @@ export interface RenderFrameInfo {
   readonly timeSeconds: number;
 }
 
-/** How the colour at a hit is taken (design §8): 'depth' integrates a few cells into the
- *  material; 'surface' takes the top-most material only, so a pigment skin over clear base
- *  reads as pigment and clear over buried pigment reads as clear. */
+/** How the colour at a hit is taken (design §8): 'depth' (default) integrates a few cells into
+ *  the material, the softer tie-dye look; 'surface' takes the top-most material only, so a pigment
+ *  skin over clear base reads as pigment and clear over buried pigment reads as clear. */
 export type RenderMode = 'depth' | 'surface';
 
 export interface Renderer {

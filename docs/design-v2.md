@@ -591,7 +591,9 @@ Single fullscreen ray-march pass (`src/render/shaders/raymarch.wgsl`):
    disagreement between the two widens the specular lobes so cell-scale
    noise reads as satin, not sparkle.
 3. Colour at the hit, in one of two modes (`Renderer.mode`, `?render=`,
-   the drawer's "Surface colour" toggle). **Surface** (default): three
+   the drawer's "Surface colour" toggle; depth is the default and surface
+   the opt-in: the blended look is the tie-dye effect the mill is for, and
+   surface's hard edges read as worse in use). **Surface**: three
    samples 0.6 colour-raster cells inside the hit, one at the hit and two
    half a cell away along the surface (against speckle), no depth, so the
    colour is the top-most material's: a pigment skin over clear base reads
@@ -609,9 +611,9 @@ Single fullscreen ray-march pass (`src/render/shaders/raymarch.wgsl`):
    chunk sheds into the base is below the coverage threshold, so it is
    uncovered and invisible, while a milled few-percent batch (every particle
    at load ≈ 1) is fully covered and reads solid. **Depth** (the
-   older look): five samples along −n behind the hit, weighted by `volA`
-   density and a depth decay, which gives the bank a milky body but blends a
-   skin with what is under it. In both, the latent and the pigment load come
+   default): five samples along −n behind the hit, weighted by `volA`
+   density and a depth decay, which gives the bank a milky body and blends a
+   skin with what is under it, the soft tie-dye look. In both, the latent and the pigment load come
    from the colour raster `finA/finB/finC` (§3.5), the pigment-load-weighted
    mix of the pigments only, decoded with `latentToRgb` → albedo
    (sRGB-linearised for lighting); in depth mode the mean pigment load per

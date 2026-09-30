@@ -72,8 +72,8 @@ export class RayMarchRenderer implements Renderer {
   readonly camera: CameraState = defaultCamera();
   /** density iso-surface threshold (fraction of rest density); debug-tunable via ?iso= */
   iso = ISO_THRESHOLD;
-  /** colour mode: the top-most material only, or a few cells into it (design §8) */
-  mode: RenderMode = 'surface';
+  /** colour mode: a few cells into the material (default), or the top-most material only (design §8) */
+  mode: RenderMode = 'depth';
   readonly lights: LightRig = defaultLightRig();
   /** Draw the translucent end-guide plates at x = 0 and x = L (design §8, optional). */
   endGuides = true;

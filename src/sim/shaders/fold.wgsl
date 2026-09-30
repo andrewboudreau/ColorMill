@@ -80,6 +80,12 @@ const DMAX : f32 = 0.5;         // depth covered by the slices (sim units); deep
 // the roll onto the coil takes WIND_HOP seconds.
 const WIND_CONTACT : f32 = 4.71238898;   // 1.5 pi
 const WIND_HOP : f32 = 0.3;
+// Doubling the roll: the barrels' axes end up this fraction of the sum of their radii apart
+// (each radius is its half's largest, reached at one angle only, so a little less than the sum
+// presses the barrels together as an operator would), and the swinging half's arc is flattened
+// by DOUBLE_FLAT so its far end clears the ceiling.
+const DOUBLE_GAP : f32 = 0.8;
+const DOUBLE_FLAT : f32 = 0.75;
 
 // Second operator move, "cut & fold" (P.fold.x = 2 / 3: first fold, cut at the
 // x = 0 / x = L end; 4 / 5: second fold, same ends), the one an operator makes
@@ -264,21 +270,23 @@ fn windPos(p0 : vec3<f32>, sRel : f32, t : f32) -> vec3<f32> {
     let r0 = windRadius(arcTotal(), 0u);
     let r1 = windRadius(arcTotal(), 1u);
     // double: the x >= L/2 half swings up and over about the roll's middle (a half turn about
-    // the z line through x = L/2 at height r0 + r1 over the crown) onto the top of the other half
+    // the z line through x = L/2, at the height that lands its axis `spacing` above the other
+    // half's) onto the top of the other half, its arc flattened by DOUBLE_FLAT
+    let spacing = DOUBLE_GAP * (r0 + r1);
     var q = onCoil;
     if (k == 1u) {
       let tau = clamp((t - tWind) / tDouble, 0.0, 1.0);
       let th = PI * tau * tau * (3.0 - 2.0 * tau);
-      let hinge = vec2<f32>(0.5 * L, crownY() + r0 + r1);
+      let hinge = vec2<f32>(0.5 * L, crownY() + 0.5 * (r0 + r1 + spacing));
       let d = q.xy - hinge;
-      q = vec3<f32>(hinge + vec2<f32>(d.x * cos(th) - d.y * sin(th), d.x * sin(th) + d.y * cos(th)), q.z);
+      q = vec3<f32>(hinge + vec2<f32>(d.x * cos(th) - d.y * sin(th), DOUBLE_FLAT * d.x * sin(th) + d.y * cos(th)), q.z);
     }
     if (t < tWind + tDouble) { return q; }
     // lift: the doubled roll swings up from the crown to the standing pose over the nip; its
     // axis is the line midway between the two barrels' axes, so the pair stands centred
     let tau = clamp((t - tWind - tDouble) / tLift, 0.0, 1.0);
     let s = tau * tau * (3.0 - 2.0 * tau);
-    let baseCoil = vec3<f32>(0.0, crownY() + r0 + 0.5 * (r0 + r1), P.front.y);
+    let baseCoil = vec3<f32>(0.0, crownY() + r0 + 0.5 * spacing, P.front.y);
     let baseStand = vec3<f32>(0.5 * L, tables[HDR + 1u], P.fold2.w);
     return mix(baseCoil, baseStand, s) + liftFrame(0.5 * PI * s) * (q - baseCoil);
   }
@@ -492,7 +500,7 @@ fn tables_(@builtin(local_invocation_id) lid : vec3<u32>) {
     // Never squash it against the ceiling.
     let tilt = P.fold3.z;
     let rLog = max(rMax.x, rMax.y);
-    let endDrop = rLog * sin(tilt) + 0.5 * (rMax.x + rMax.y) * sin(tilt) * sin(tilt);
+    let endDrop = rLog * sin(tilt) + 0.5 * DOUBLE_GAP * (rMax.x + rMax.y) * sin(tilt) * sin(tilt);
     var baseY = pileTop() + endDrop + P.fold3.y;
     let logLen = 0.5 * L;
     baseY = min(baseY, P.fold3.w - logLen * cos(tilt) - endDrop - h);

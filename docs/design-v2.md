@@ -486,9 +486,12 @@ roll axis. Modelled as a scripted kinematic move:
    crown as its outer radius grows. About 1.9 s at the default speed.
 4. **Double** (`DOUBLE_SECONDS` = 0.5 s): the full-width roll is folded in
    half: the `x ≥ L/2` half swings up and over about the roll's middle (a
-   half turn about the z line through `x = L/2` at `r0 + r1` above the
-   crown) onto the top of the other half, so the roll is `L/2` long and two
-   barrels one on the other, every `x` position in its cross-section.
+   half turn about the z line through `x = L/2`, its arc flattened by
+   `DOUBLE_FLAT` = 0.75 to clear the ceiling) onto the top of the other
+   half, the barrels' axes `DOUBLE_GAP` = 0.8 of the sum of their radii apart
+   (each radius is its half's largest, so a little less presses them
+   together), so the roll is `L/2` long and two barrels one on the other,
+   every `x` position in its cross-section.
 5. **Lift** (`LIFT_SECONDS` = 0.6 s): the doubled roll swings up as a rigid
    body from the crown to the standing pose: a rotation through π/2 about the
    horizontal `n = (0, −sin tilt, cos tilt)` takes the roll's axis `x̂` (the

@@ -46,6 +46,12 @@ const preset = query.get('quality') === 'low' ? QUALITY_PRESETS.low : QUALITY_PR
 const sheetCells = Number(query.get('sheet') || 3);
 /** amplitude of per-node density noise (emulates MPM particle-count fluctuation) */
 const noiseAmp = Number(query.get('noise') || 0);
+/** ?skin=<cells>: the sheet's outermost cells carry no pigment (clear base over a pigment core), the
+ *  layered case the surface colour mode is for (a skin thinner than ~1.5 cells is below what the
+ *  trilinear samples can separate); ?render=depth|surface picks the mode */
+const skinCells = Number(query.get('skin') || 0);
+const clearSkin = skinCells > 0;
+const renderMode = query.get('render') === 'depth' ? 'depth' : 'surface';
 
 function toHalf(f: number): number {
   // IEEE 754 binary16 with round-to-nearest-even
@@ -122,6 +128,7 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
         const dB = Math.hypot(y - back.axisY, z - back.axisZ);
         const dF = Math.hypot(y - front.axisY, z - front.axisZ);
         sd = Math.max(sd, R - dB, R - dF);
+        const sdBank = sd;
         // sheet wrapped around the front roller (slightly wavy thickness), clipped in x
         const wobble = 1 + 0.025 * Math.sin(x * 9.0 + Math.atan2(y - front.axisY, z - front.axisZ) * 2.0);
         const sheetR = R + sheetT * wobble;
@@ -140,8 +147,10 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
         const idx = ((k * ny + j) * nx + i) * 4;
         if (dens > 0) {
           const lat = latentAt(x);
-          // every band is pure opaque pigment (masterbatch load) so the colour checks see solid colour
-          cc[idx] = toHalf(dens * PIGMENT_LOAD);
+          // every band is pure opaque pigment (masterbatch load) so the colour checks see solid colour;
+          // with a clear skin the sheet's outer cell is base (no load) over a pigment core
+          const inSkin = clearSkin && sheet <= 0.5 * edge && dF > sheetR - skinCells * h && sdBank > 0.5 * edge;   // the sheet only, not the bank
+          cc[idx] = toHalf(inSkin ? 0 : dens * PIGMENT_LOAD);
           a[idx] = toHalf(dens);
           a[idx + 1] = toHalf(lat[0]);
           a[idx + 2] = toHalf(lat[1]);
@@ -212,6 +221,7 @@ async function main(): Promise<void> {
 
   device.pushErrorScope('validation');
   const renderer = new RayMarchRenderer(ctx, canvas);
+  renderer.mode = renderMode;
   const dims = gridDims(preset);
   const t0 = performance.now();
   const volumes = buildVolumes(device, dims);
@@ -310,6 +320,8 @@ async function main(): Promise<void> {
   const api = {
     renderer,
     dims,
+    mode: renderMode,
+    clearSkin,
     bands: BANDS.map((b) => b.name),
     samplePoints: samplePoints(dims),
     project,

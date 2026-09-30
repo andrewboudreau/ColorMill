@@ -24,7 +24,7 @@ struct Uniforms {
   fillColor: vec4f,
   rimDir: vec4f,
   rimColor: vec4f,
-  misc: vec4f,        // resolution.xy, exposure, flags (bit0 = volumes bound, bit1 = target is sRGB-encoded already)
+  misc: vec4f,        // resolution.xy, exposure, flags (bit0 = volumes bound, bit1 = target is sRGB-encoded already, bit2 = surface colour mode)
   mip: vec4f,         // coarse max-density mip dims (cx, cy, cz), w = block edge in texels
   guides: vec4f,      // end-guide plates: bank top y, bank half depth (z), plate thickness, enabled
   fine: vec4f,        // colour raster (design §3.5): node counts (nxF, nyF, nzF), w = its cell size hF
@@ -50,6 +50,14 @@ struct Uniforms {
 // rises with its pigment load per unit mass (0 = clear base, PIGMENT_LOAD = pure masterbatch);
 // a few percent of masterbatch already colours the sheet solidly, as it does on a real mill.
 const PIGMENT_OPACITY: f32 = 6.0;
+// Surface colour mode (design §8): the colour of the top-most material only, sampled this many
+// colour-raster cells inside the hit (just at the outermost particles), with two sideways
+// samples half a cell away so a single texel does not speckle; loads below the floor draw as
+// clear, so the trace a chunk sheds into the base is invisible while a milled few-percent
+// batch (load ~1) still reads solid.
+const SURFACE_DEPTH: f32 = 0.6;
+const SURFACE_SPREAD: f32 = 0.5;
+const SURFACE_LOAD_FLOOR: f32 = 0.06;
 
 const PI: f32 = 3.14159265358979;
 const INF: f32 = 1e30;
@@ -719,13 +727,27 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     var csum = 0.0;
     var dsum = 0.0;
     var load = 0.0;
-    for (var k = 0; k < 5; k++) {
-      let depth = (0.5 + 0.8 * f32(k)) * h;
-      let q = p - n * depth;
+    // surface mode: three samples just inside the hit, spread along the surface, no depth;
+    // depth mode: five samples down the normal with a depth decay
+    let surfaceMode = (flags & 4u) != 0u;
+    let hF = U.fine.w;
+    let tx = normalize(cross(n, select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(n.y) > 0.9)));
+    let ty = cross(n, tx);
+    let nSamples = select(5, 3, surfaceMode);
+    for (var k = 0; k < nSamples; k++) {
+      var q: vec3f;
+      var decay = 1.0;
+      if (surfaceMode) {
+        let side = select(select(ty, tx, k == 1), vec3f(0.0), k == 0) * (SURFACE_SPREAD * hF);
+        q = p - n * (SURFACE_DEPTH * hF) + side;
+      } else {
+        q = p - n * ((0.5 + 0.8 * f32(k)) * h);
+        decay = exp(-0.45 * f32(k));
+      }
       // the sample's weight comes from the solver-grid density (the surface the march found);
       // its pigment comes from the colour raster, which resolves streaks the solver grid cannot
       let a = textureSampleLevel(volA, volSampler, volUvw(q), 0.0);
-      let w = smoothstep(0.15, 0.6, a.x) * exp(-0.45 * f32(k));
+      let w = smoothstep(0.15, 0.6, a.x) * decay;
       if (w <= 1e-5) { continue; }
       let fq = fineUvw(q);
       let fa = textureSampleLevel(finA, volSampler, fq, 0.0);
@@ -748,7 +770,8 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     let thickness = sheetThickness(p, n);
     // an opaque colourant in a clear medium: its share of the mass sets how much of
     // the light it captures; even a few percent of masterbatch reads solid
-    let pigment = 1.0 - exp(-PIGMENT_OPACITY * load);
+    let loadEff = select(load, max(load - SURFACE_LOAD_FLOOR, 0.0), surfaceMode);
+    let pigment = 1.0 - exp(-PIGMENT_OPACITY * loadEff);
     // clear base: little diffuse (a clear material has almost no body colour), the
     // look comes from specular and what shows through; pigment restores albedo
     let surface = shadePutty(p, n, v, mix(vec3f(0.58, 0.62, 0.64), albedo, pigment), ao, thickness, sn.rough);

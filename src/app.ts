@@ -208,6 +208,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     onQuality: (p) => { adaptive = false; presetPinned = true; void rebuildSim(p, batch); },
     onBatch: (b) => { void rebuildSim(preset, b); },
     onAutoOrbit: (on) => { autoOrbit = on; },
+    onSurfaceColour: (on) => { if (renderer) renderer.mode = on ? 'surface' : 'depth'; },
     onExperimental: (on) => {
       experimental = on;
       // back under the caps: pull every slider value into range
@@ -576,6 +577,10 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     if (offscreen) renderer.setPresentation?.(false);
     const isoQuery = parseFloat(query.get('iso') ?? '');
     if (Number.isFinite(isoQuery) && isoQuery > 0.05 && isoQuery < 1) renderer.iso = isoQuery;   // debug: iso-surface threshold
+    // colour mode (?render=depth|surface; the drawer's toggle changes it live)
+    const renderQuery = query.get('render');
+    if (renderQuery === 'depth' || renderQuery === 'surface') renderer.mode = renderQuery;
+    panel.setSurfaceColour(renderer.mode !== 'depth');
     renderer.setVolumes(sim.volumes);
   } catch (e) {
     reportError('Could not build the renderer', e);

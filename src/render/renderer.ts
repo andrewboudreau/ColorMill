@@ -13,7 +13,7 @@ import { configureCanvas } from '../gpu/device';
 import { GEOMETRY, bankTopY, rollerPoses } from '../config/mill';
 import type { RenderVolumes } from '../sim/types';
 import { assignCamera, cameraBasis, defaultCamera } from './camera';
-import type { CameraState, RenderFrameInfo, Renderer } from './types';
+import type { RenderMode, CameraState, RenderFrameInfo, Renderer } from './types';
 import mixboxSrc from './shaders/mixbox.wgsl?raw';
 import raymarchSrc from './shaders/raymarch.wgsl?raw';
 
@@ -72,6 +72,8 @@ export class RayMarchRenderer implements Renderer {
   readonly camera: CameraState = defaultCamera();
   /** density iso-surface threshold (fraction of rest density); debug-tunable via ?iso= */
   iso = ISO_THRESHOLD;
+  /** colour mode: the top-most material only, or a few cells into it (design §8) */
+  mode: RenderMode = 'surface';
   readonly lights: LightRig = defaultLightRig();
   /** Draw the translucent end-guide plates at x = 0 and x = L (design §8, optional). */
   endGuides = true;
@@ -263,6 +265,7 @@ export class RayMarchRenderer implements Renderer {
     let flags = 0;
     if (vol) flags |= 1;
     if (this.format.endsWith('-srgb')) flags |= 2;
+    if (this.mode === 'surface') flags |= 4;
 
     set4(0, basis.origin[0], basis.origin[1], basis.origin[2], basis.tanHalfFovY);
     set4(1, basis.right[0], basis.right[1], basis.right[2], basis.aspect);

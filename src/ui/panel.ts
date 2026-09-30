@@ -16,6 +16,8 @@ export interface PanelCallbacks {
   /** batch size multiplier (rebuilds the bank) */
   onBatch(batch: number): void;
   onAutoOrbit(on: boolean): void;
+  /** colour from the top-most material only (surface mode) rather than a few cells into it */
+  onSurfaceColour(on: boolean): void;
   /** experimental mode: the sliders' upper caps lifted (link.ts EXPERIMENTAL_SCALE) */
   onExperimental(on: boolean): void;
   /** "Copy start link": a URL that reproduces this session's pigment drops */
@@ -62,6 +64,7 @@ export class Panel {
   private readonly quality: HTMLSelectElement;
   private readonly batch: HTMLSelectElement;
   private readonly orbit: HTMLInputElement;
+  private readonly surface: HTMLInputElement;
   private readonly experimental: HTMLInputElement;
   private readonly stats: Record<string, HTMLElement> = {};
   private open: boolean;
@@ -192,6 +195,18 @@ export class Panel {
     otext.textContent = 'Auto-orbit';
     ofield.append(this.orbit, otext);
     csec.appendChild(ofield);
+    const sfield = document.createElement('label');
+    sfield.className = 'cm-field cm-field-check';
+    this.surface = document.createElement('input');
+    this.surface.type = 'checkbox';
+    this.surface.name = 'surfaceColour';
+    this.surface.checked = true;
+    this.surface.addEventListener('change', () => this.cb.onSurfaceColour(this.surface.checked));
+    const stext = document.createElement('span');
+    stext.textContent = 'Surface colour';
+    stext.title = 'Colour from the top-most material only: a pigment skin reads as pigment, clear over buried pigment reads as clear. Off: blend a few cells into the material (the older look).';
+    sfield.append(this.surface, stext);
+    csec.appendChild(sfield);
     const chint = document.createElement('p');
     chint.className = 'cm-muted';
     chint.textContent = 'Drag to orbit · wheel or pinch to zoom · double-tap to reset the view';
@@ -276,6 +291,10 @@ export class Panel {
 
   setAutoOrbit(on: boolean): void {
     this.orbit.checked = on;
+  }
+
+  setSurfaceColour(on: boolean): void {
+    this.surface.checked = on;
   }
 
   /** Stretch (or restore) the sliders' tops; a value already past the cap keeps its slider wide enough. */

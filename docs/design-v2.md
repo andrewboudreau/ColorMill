@@ -579,10 +579,20 @@ Single fullscreen ray-march pass (`src/render/shaders/raymarch.wgsl`):
    (±1.5 texels) and a tight central difference (±0.8 texel); the
    disagreement between the two widens the specular lobes so cell-scale
    noise reads as satin, not sparkle.
-3. Colour at the hit: five samples along −n behind the hit, weighted by
-   `volA` density and depth; the latent and the pigment load come from the
-   colour raster `finA/finB/finC` (§3.5), the pigment-load-weighted mix of
-   the pigments only, decoded with `latentToRgb` → albedo
+3. Colour at the hit, in one of two modes (`Renderer.mode`, `?render=`,
+   the drawer's "Surface colour" toggle). **Surface** (default): three
+   samples 0.6 colour-raster cells inside the hit, one at the hit and two
+   half a cell away along the surface (against speckle), no depth, so the
+   colour is the top-most material's: a pigment skin over clear base reads
+   as pigment, clear over buried pigment reads as clear, which is the
+   layering the particles carry through the nip; loads under 0.06 draw as
+   clear so the trace a chunk sheds into the base is invisible while a
+   milled few-percent batch (load ≈ 1) still reads solid. **Depth** (the
+   older look): five samples along −n behind the hit, weighted by `volA`
+   density and a depth decay, which gives the bank a milky body but blends a
+   skin with what is under it. In both, the latent and the pigment load come
+   from the colour raster `finA/finB/finC` (§3.5), the pigment-load-weighted
+   mix of the pigments only, decoded with `latentToRgb` → albedo
    (sRGB-linearised for lighting); the mean pigment load per unit mass
    `load = volC / density` gives the opacity
    `pigment = 1 − exp(−PIGMENT_OPACITY · load)` (`PIGMENT_OPACITY` = 6: a

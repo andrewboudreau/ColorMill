@@ -200,11 +200,11 @@ export class Panel {
     this.surface = document.createElement('input');
     this.surface.type = 'checkbox';
     this.surface.name = 'surfaceColour';
-    this.surface.checked = true;
+    this.surface.checked = false;
     this.surface.addEventListener('change', () => this.cb.onSurfaceColour(this.surface.checked));
     const stext = document.createElement('span');
     stext.textContent = 'Surface colour';
-    stext.title = 'Colour from the top-most material only: a pigment skin reads as pigment, clear over buried pigment reads as clear. Off: blend a few cells into the material (the older look).';
+    stext.title = 'Colour from the top-most material only: a pigment skin reads as pigment, clear over buried pigment reads as clear, edges are hard. Off (default): blend a few cells into the material, which gives the softer tie-dye look.';
     sfield.append(this.surface, stext);
     csec.appendChild(sfield);
     const chint = document.createElement('p');

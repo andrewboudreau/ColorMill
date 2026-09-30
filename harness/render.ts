@@ -65,7 +65,7 @@ function laminaeCover(x: number, h: number): number {
   const upTo = (t: number): number => Math.floor(t / (2 * W)) * W + Math.min(t - Math.floor(t / (2 * W)) * 2 * W, W);
   return (upTo(x + 0.5 * h) - upTo(x - 0.5 * h)) / h;
 }
-const renderMode = query.get('render') === 'depth' ? 'depth' : 'surface';
+const renderMode = query.get('render') === 'surface' ? 'surface' : 'depth';   // depth is the app's default too
 
 function toHalf(f: number): number {
   // IEEE 754 binary16 with round-to-nearest-even

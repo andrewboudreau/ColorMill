@@ -13,7 +13,7 @@
  * xyz-interleaved ParticleSnapshot layout.
  */
 import {
-  PIGMENT_POOL_FRACTION,
+  DEFAULT_PARAMS, PIGMENT_POOL_FRACTION,
   GEOMETRY, bankTopY, colourGridDims, gridDims, lameParameters, rollerPoses, seedBankPositions,
   type GridDims, type MillConfig, type MillParams, type QualitySettings
 } from '../config/mill';
@@ -40,14 +40,41 @@ export const PARTICLE_WG = 128;
 export const GRID_WG = 4;
 /** Uniform ring stride (>= minUniformBufferOffsetAlignment). */
 const UNIFORM_STRIDE = 256;
-/** Operator move (design §6): roll the sheet into a log (FOLD_ROLL_SECONDS), then
- * put it back: dropped whole onto the nip (params.logFeed = 0) or lowered in
- * end-first at params.logFeed units/s. */
+/** Operator move (design §6): roll the material off the mill into a log (peel and wind,
+ * then lift: rollSeconds(omega)), then put it back: dropped whole onto the nip
+ * (params.logFeed = 0) or lowered in end-first at params.logFeed units/s. */
 /** Pigment load of a masterbatch chunk (mirrors PIGMENT_LOAD in common.wgsl). The clear base
  * carries load 0: pigment is an opaque colourant in a transparent medium, so a node's colour
  * is the Mixbox mix of the pigments present and its load per unit mass sets the opacity. */
 export const PIGMENT_LOAD = 12.0;
-export const FOLD_ROLL_SECONDS = 1.2;
+/** Peel and wind (mirrors WIND_* in fold.wgsl): the coil winds on the crown of the front roll
+ * (WIND_CONTACT, the angle around the front axis from the nip in the direction of rotation), so
+ * the sheet from the nip exit round to the crown, 1.5 pi R of arc, is wound in; the bank beyond the
+ * crown is the core and gathers at once. The wind runs at the roll's own surface speed, or faster
+ * so it takes at most WIND_MAX_SECONDS; a hop from the roll onto the coil takes WIND_HOP_SECONDS;
+ * the finished coil then swings up to the standing pose in LIFT_SECONDS. */
+export const WIND_CONTACT = 1.5 * Math.PI;
+export const WIND_MAX_SECONDS = 2.5;
+export const WIND_HOP_SECONDS = 0.3;
+export const LIFT_SECONDS = 0.6;
+/** Arc of sheet the wind takes in: from the nip exit round to the crown. */
+export function windArc(): number {
+  return WIND_CONTACT * GEOMETRY.radius;
+}
+/** Wind speed along the arc for a roll speed omega (rad/s): the roll's surface speed, floored so the wind never takes longer than WIND_MAX_SECONDS. */
+export function windSpeed(omega: number): number {
+  return Math.max(Math.abs(omega) * GEOMETRY.radius, windArc() / WIND_MAX_SECONDS);
+}
+/** Length of the wind phase at roll speed omega: the last arc reaches the crown, then its hop. */
+export function windSeconds(omega: number): number {
+  return windArc() / windSpeed(omega) + WIND_HOP_SECONDS;
+}
+/** Length of the whole roll phase (wind, then lift) at roll speed omega; the log stands over the nip after it. */
+export function rollSeconds(omega: number): number {
+  return windSeconds(omega) + LIFT_SECONDS;
+}
+/** The roll phase at the default roll speed (≈ 2.5 s). */
+export const FOLD_ROLL_SECONDS = rollSeconds(DEFAULT_PARAMS.omega);
 /** The design's original lowering speed (sim units / s along the log axis); FOLD_DURATION is the move's length at it. */
 export const FOLD_FEED_SPEED = 0.15;
 export const FOLD_TILT = 0.42;                // log axis tilt from vertical toward the viewer (rad)
@@ -57,9 +84,10 @@ export const FOLD_SLICES = 32;
 /** Total script length for a given feed: roll, then either let the whole log go (a
  * substep later) or lower it (the material folded in half: L/2 long, plus the
  * tilted end face of a log up to ~0.7 units across) through the nip. */
-export function foldDuration(logFeed: number): number {
-  if (!(logFeed > 0)) return FOLD_ROLL_SECONDS + 0.02;
-  return FOLD_ROLL_SECONDS + (0.5 * GEOMETRY.length + 0.6) / logFeed + 0.3;
+export function foldDuration(logFeed: number, omega: number = DEFAULT_PARAMS.omega): number {
+  const roll = rollSeconds(omega);
+  if (!(logFeed > 0)) return roll + 0.02;
+  return roll + (0.5 * GEOMETRY.length + 0.6) / logFeed + 0.3;
 }
 /** Script length of the lowered-in move at FOLD_FEED_SPEED (≈ 10.5 s). */
 export const FOLD_DURATION = foldDuration(FOLD_FEED_SPEED);
@@ -211,6 +239,11 @@ export class GpuMpm implements GpuMpmSim {
    *  slider change mid-move cannot change its length under it) */
   private foldFeed = 0;
   private foldMode: FoldMode = 0;
+  /** cut & roll timing, captured when the move starts (the roll speed may change during it) */
+  private foldWindSpeed = windSpeed(DEFAULT_PARAMS.omega);
+  private foldWindSeconds = windSeconds(DEFAULT_PARAMS.omega);
+  private foldRollSeconds = FOLD_ROLL_SECONDS;
+  private foldTotalSeconds = foldDuration(0);
 
   private readbackStaging: GPUBuffer | null = null;
   private destroyed = false;
@@ -504,7 +537,7 @@ export class GpuMpm implements GpuMpmSim {
     f.set([front.axisY, front.axisZ, front.omegaX, GEOMETRY.radius], o + 16);
     f.set([mu, lambda, this.config.material.thetaC, this.config.material.thetaS], o + 20);
     f.set([pVol, pMass, pMass / (pVol * MATERIAL_DENSITY), p.dispersion], o + 24);
-    f.set([foldActive ? this.foldMode : 0, foldT, FOLD_ROLL_SECONDS, this.foldFeed], o + 28);
+    f.set([foldActive ? this.foldMode : 0, foldT, this.foldRollSeconds, this.foldFeed], o + 28);
     // fold: the live bank top is reduced on the GPU (fold.wgsl); fold2.x is only the fallback
     const yMax = GEOMETRY.domain[1] - 3 * h;
     const bankTopFallback = Math.min(bankTopY(this.batch, this.config.params), yMax);
@@ -521,6 +554,8 @@ export class GpuMpm implements GpuMpmSim {
     const ratio = h / fd.h;
     u[o + 44] = fd.nx; u[o + 45] = fd.ny; u[o + 46] = fd.nz; u[o + 47] = 0;
     f.set([fd.h, 1 / fd.h, (ratio * ratio * ratio) / 8, 0], o + 48);
+    // cut & roll: peel and wind, then lift (fold.wgsl)
+    f.set([this.foldWindSpeed, this.foldWindSeconds, LIFT_SECONDS, 0], o + 52);
   }
 
   // ---------------------------------------------------------------------------
@@ -590,7 +625,7 @@ export class GpuMpm implements GpuMpmSim {
     // uniform ring: one slot per substep (fold script state differs per substep)
     let foldActive = this.foldActive || this.foldPending;
     let foldT = this.foldPending ? 0 : this.foldTime;
-    const duration = this.foldMode === 1 ? foldDuration(this.foldFeed) : FLOP_DURATION;
+    const duration = this.foldMode === 1 ? this.foldTotalSeconds : FLOP_DURATION;
     const finishAt: number[] = [];
     for (let s = 0; s < substeps; s++) {
       this.writeParams(s, foldT, foldActive);
@@ -829,7 +864,16 @@ export class GpuMpm implements GpuMpmSim {
     if (this.destroyed || this.operatorBusy) return;
     this.foldMode = 1;
     this.foldFeed = Math.max(this.params.logFeed, 0);
+    const omega = this.params.omega;
+    this.foldWindSpeed = windSpeed(omega);
+    this.foldWindSeconds = windSeconds(omega);
+    this.foldRollSeconds = rollSeconds(omega);
+    this.foldTotalSeconds = foldDuration(this.foldFeed, omega);
     this.foldPending = true;
+  }
+
+  get operatorRollSeconds(): number {
+    return this.foldRollSeconds;
   }
 
   cutAndFlop(side: 'left' | 'right'): void {

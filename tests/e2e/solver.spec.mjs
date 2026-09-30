@@ -255,13 +255,34 @@ export default async function run() {
 
     // --- optional: cut & roll ---------------------------------------------
     if (doFold) {
-      // 1. the default: the log is dropped whole right after the roll. A substep
-      // after FOLD_ROLL_SECONDS nothing is held, everything stays inside the
-      // domain and outside the rolls, and the log has not exploded (max |v|
-      // bounded, material still spans many y cells while it stands)
-      const drop = await page.evaluate(async ([n, h]) => {
+      // 1. the default: the log is dropped whole right after the roll (peel and wind, then
+      // lift: operatorRollSeconds at this roll speed). A substep after that nothing is held,
+      // everything stays inside the domain and outside the rolls, and the log has not
+      // exploded (max |v| bounded, material still spans many y cells while it stands)
+      const rollSec = await page.evaluate(() => {
         window.__solver.sim.params.logFeed = 0;
         window.__solver.sim.cutAndFold();
+        return window.__solver.sim.operatorRollSeconds;
+      });
+      // mid-wind: everything is held and inside the domain (the sheet rides the roll, the
+      // coil grows on the crown), and nothing has been let go early
+      const wind = await page.evaluate(async (n) => {
+        await window.__solver.stepFrames(n);
+        const s = await window.__solver.snapshot();
+        let kin = 0, bad = 0, maxV = 0;
+        for (let p = 0; p < s.count; p++) {
+          if (s.flags[p] & 1) kin++;
+          for (let c = 0; c < 3; c++) if (!Number.isFinite(s.positions[3 * p + c])) bad++;
+          maxV = Math.max(maxV, Math.hypot(s.velocities[3 * p], s.velocities[3 * p + 1], s.velocities[3 * p + 2]));
+        }
+        return { kin, bad, maxV, count: s.count, positions: Array.from(s.positions), velocities: Array.from(s.velocities), latents: Array.from(s.latents), deformation: Array.from(s.deformation), flags: Array.from(s.flags), error: window.__solver.error };
+      }, framesFor(0.5 * rollSec));
+      const aWind = analyse(wind, dims);
+      console.log(`  cut & roll (mid-wind, ${(0.5 * rollSec).toFixed(2)} s of ${rollSec.toFixed(2)}): ${wind.kin} held of ${wind.count}, max |v| ${wind.maxV.toFixed(2)}; ${JSON.stringify({ bad: aWind.bad, outside: aWind.outside, inRoller: aWind.inRoller })}`);
+      assert(!wind.error && wind.bad === 0, 'no WebGPU errors mid-wind: ' + wind.error);
+      assert(wind.kin === wind.count, `everything is still held mid-wind (${wind.kin} of ${wind.count})`);
+      assert(aWind.outside === 0 && aWind.inRoller === 0, 'nothing leaves the domain or enters a roll while it winds');
+      const drop = await page.evaluate(async ([n, h]) => {
         await window.__solver.stepFrames(n);
         const s = await window.__solver.snapshot();
         let kin = 0, maxV = 0;
@@ -272,7 +293,7 @@ export default async function run() {
           yCells.add(Math.floor(s.positions[3 * p + 1] / h));
         }
         return { kin, maxV, yCells: yCells.size, count: s.count, positions: Array.from(s.positions), velocities: Array.from(s.velocities), latents: Array.from(s.latents), deformation: Array.from(s.deformation), flags: Array.from(s.flags), busy: window.__solver.sim.operatorBusy, error: window.__solver.error };
-      }, [framesFor(1.2 + 0.4), dims.h]);
+      }, [framesFor(0.5 * rollSec + 0.4), dims.h]);
       const aDrop = analyse(drop, dims);
       console.log(`  cut & roll (drop): ${drop.kin} held of ${drop.count} 0.4 s after the roll, max |v| ${drop.maxV.toFixed(2)}, ${drop.yCells} y cells; ${JSON.stringify({ bad: aDrop.bad, outside: aDrop.outside, inRoller: aDrop.inRoller, busy: drop.busy })}`);
       assert(!drop.error, 'no WebGPU errors during the dropped cut & roll: ' + drop.error);
@@ -304,7 +325,7 @@ export default async function run() {
       // area-preserving spiral (no node carries more than ~48 particles' mass), it
       // spans many y cells, and material is being released progressively (fewer
       // kinematic particles than mid-move, but not yet zero)
-      const foldFrames = framesFor(1.2 + 1.0); // FOLD_ROLL_SECONDS + 1 s of feeding (0.4 units of the 0.75 log plus its end face)
+      const foldFrames = framesFor(rollSec + 1.0); // the roll phase + 1 s of feeding (0.4 units of the 0.75 log plus its end face)
       const rel = await page.evaluate(async ([n, idx, h]) => {
         await window.__solver.stepFrames(n);
         const s = await window.__solver.snapshot();

@@ -464,11 +464,32 @@ roll axis. Modelled as a scripted kinematic move:
    raster, the same as the sheet it came from). The header stores the log's
    radius and base: the lower end face rests just above the roll tops (nothing
    is left on the mill), never squashed against the ceiling.
-3. **Roll** (`FOLD_ROLL_SECONDS` = 1.2 s): each particle flies from where it
-   was to its place in the standing log (smoothstep). The log stands tilted
-   `FOLD_TILT` (0.42 rad) from vertical toward the viewer, axis
-   `a = (0, cos, sin)`, over the nip at `x = L/2`.
-4. **Put it back** (`params.logFeed`, the "Log feed" slider, 0 to 0.6 units/s;
+3. **Peel and wind** (`windSeconds(omega)`): the operator rolls the material
+   off the mill rather than the log appearing in place. A coil sits on the
+   crown of the front roll (`WIND_CONTACT` = 3π/2 around the front axis from
+   the nip, axis along the roll, at `x` 0 to `L/2`: the width fold is applied
+   as material joins it). The bank and whatever is beyond the crown gather
+   into its core at once (a `WIND_HOP_SECONDS` = 0.3 s hop). The rest of the
+   sheet rides the roll toward the crown at the wind speed, the roll's own
+   surface speed `omega·R` floored so the 1.5πR of arc from the nip exit to
+   the crown takes at most `WIND_MAX_SECONDS` = 2.5 s (the operator pulls
+   faster than a crawling roll delivers; strays off the roll wait where they
+   are), and as its arc reaches the crown it hops onto the coil at its tabled
+   radius and winding angle. The sheet joins at the coil's bottom, so the
+   coil spins as it winds (rolling without slipping: the angle of a wound
+   particle is π + Φ(arc wound so far) − φ(its own arc)) and rises on the
+   crown as its outer radius grows. About 1.9 s at the default speed.
+4. **Lift** (`LIFT_SECONDS` = 0.6 s): the finished coil swings up as a rigid
+   body from the crown to the standing pose: a rotation through π/2 about the
+   horizontal `n = (0, −sin tilt, cos tilt)` takes the coil's axis `x̂` to the
+   log axis `a` (in the plane of both), while its base slides from `x = 0`
+   on the crown to the log's base over the nip at `x = L/2`. The log stands
+   tilted `FOLD_TILT` (0.42 rad) from vertical toward the viewer, axis
+   `a = (0, cos, sin)`. `rollSeconds(omega)` = wind + lift (`FOLD_ROLL_SECONDS`
+   is its value at the default speed, ≈ 2.5 s); the spec reads it from
+   `operatorRollSeconds`. The held particles' velocities are the move's own
+   over the last substep.
+5. **Put it back** (`params.logFeed`, the "Log feed" slider, 0 to 0.6 units/s;
    captured when the move starts). **Drop** (`logFeed` = 0, the default): the
    substep after the roll ends, every held particle is released where it
    stands (`v = 0`, `C = 0`, `F = I`); the log stands on the nip and gravity

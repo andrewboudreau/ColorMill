@@ -113,6 +113,9 @@ export interface GpuMpmSim {
   cutAndFlop(side: 'left' | 'right'): void;
   /** true while an operator move (cut & roll or cut & fold) is running */
   readonly operatorBusy: boolean;
+  /** Length of the current (or last) cut & roll's roll phase in sim seconds: the material is wound off
+   *  the roll and the log swung up over the nip; after it the log is dropped or lowered in (design §6). */
+  readonly operatorRollSeconds: number;
   /** Read particle state back to the CPU (slow; tests and diagnostics only). */
   readParticles(): Promise<ParticleSnapshot>;
   /** Read the packed density volume (volA red channel) back as float32, node-major (i fastest). */

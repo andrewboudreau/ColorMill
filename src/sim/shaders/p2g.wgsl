@@ -55,3 +55,55 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
     }
   }
 }
+
+// Drawn cut (cut.wgsl): a particle with a side label (flag bits 2-3) scatters its
+// mass and momentum a second time into its side's channel, exactly as above, so
+// grid.wgsl `side` can form "everything except the other side" by an exact
+// integer subtraction. Dispatched only while a cut is live; the main scatter
+// above is unchanged and still takes every particle.
+// gside per node: [8n + 4c] mass, [8n + 4c + 1..3] momentum, for side c + 1 (c = 0, 1).
+@group(0) @binding(7) var<storage, read_write> gside : array<atomic<i32>>;
+
+@compute @workgroup_size(128)
+fn side(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
+  let p = particleIndex(gid, nwg);
+  if (p >= P.grid.w) { return; }
+  let f = flags[p];
+  if ((f & 1u) != 0u) { return; }
+  let sd = (f >> 2u) & 3u;
+  if (sd != 1u && sd != 2u) { return; }
+  let ch = 4u * (sd - 1u);
+
+  let h = P.hdt.x;
+  let invh = P.hdt.y;
+  let pMass = P.part.y;
+
+  let x = pos[p].xyz;
+  let v = vel[p].xyz;
+  let affine = loadAffine(p);
+
+  let gx = x * invh;
+  let base = vec3<i32>(floor(gx - 0.5));
+  let fx = gx - vec3<f32>(base);
+  let wx = quadWeights(fx.x);
+  let wy = quadWeights(fx.y);
+  let wz = quadWeights(fx.z);
+  let mv = pMass * v;
+
+  for (var k = 0; k < 3; k++) {
+    for (var j = 0; j < 3; j++) {
+      for (var i = 0; i < 3; i++) {
+        let off = vec3<i32>(i, j, k);
+        let dpos = (vec3<f32>(off) - fx) * h;
+        let wgt = wx[i] * wy[j] * wz[k];
+        let n = nodeIndexI(base + off);
+        let mom = wgt * (mv + affine * dpos);
+        let b = 8u * n + ch;
+        atomicAdd(&gside[b], encodeFixed(wgt * pMass, MASS_SCALE));
+        atomicAdd(&gside[b + 1u], encodeFixed(mom.x, MOM_SCALE));
+        atomicAdd(&gside[b + 2u], encodeFixed(mom.y, MOM_SCALE));
+        atomicAdd(&gside[b + 3u], encodeFixed(mom.z, MOM_SCALE));
+      }
+    }
+  }
+}

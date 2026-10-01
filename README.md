@@ -166,6 +166,7 @@ lays the same three bands on the bank.
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
 | **Cut & fold** / `C` | Cut the sheet across from the end to the middle and fold it like a flag for a turn of the roll: each square's corner triangle over the diagonal, the doubled triangle lifted into the hands onto a growing bundle, then the bundle set down on the other half (ends alternate) |
 | **Cut & roll** / `F` | Cut everything off, roll it into a log and drop it back on the nip (or lower it in: **Log feed** slider) |
+| **Knife** / `K`, or Shift-drag | Prototype: drag a line across the sheet on the front roll to tear it there; the kerf opens as a gap, the two sides are separate bodies for the solver, and the cut knits back in the nip (design §6c; `__colormill.sim.cutAlong(points)` takes the line in sheet coordinates) |
 | **Clear pigment** | Reset every particle to clear silicone |
 | **Reset** / `R` | Re-seed the bank |
 | **Pause** / `Space` | Pause / resume |

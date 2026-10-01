@@ -18,7 +18,7 @@ import {
   type GridDims, type MillConfig, type MillParams, type QualitySettings
 } from '../config/mill';
 import type {
-  GpuMpmSim, GpuMpmSimOptions, Latent, ParticleSnapshot, RenderVolumes, SimStats
+  CutOptions, GpuMpmSim, GpuMpmSimOptions, Latent, ParticleSnapshot, RenderVolumes, SimStats
 } from './types';
 import commonSrc from './shaders/common.wgsl?raw';
 import clearSrc from './shaders/clear.wgsl?raw';
@@ -31,6 +31,8 @@ import packSrc from './shaders/pack.wgsl?raw';
 import injectSrc from './shaders/inject.wgsl?raw';
 import resetSrc from './shaders/reset.wgsl?raw';
 import foldSrc from './shaders/fold.wgsl?raw';
+import cutSrc from './shaders/cut.wgsl?raw';
+import { CUT_BAND_CELLS, CUT_KERF_CELLS, CUT_MAX_POINTS, CUT_SECONDS, simplifyPolyline, type SheetPoint } from './cut';
 
 /** Titanium White base latent (src/sim/mixbox.c MB_WHITE). */
 export const WHITE_LATENT: Latent = [0, 0, 0, 1, 0.00481862, 0.00021851, 0.00295198];
@@ -203,7 +205,12 @@ export class GpuMpm implements GpuMpmSim {
   // grid
   private readonly bufGMass: GPUBuffer;
   private readonly bufGMom: GPUBuffer;
+  /** grid velocity: the shared field, then (while a drawn cut is live) side 1's and side 2's (grid.wgsl `side`) */
   private readonly bufGVel: GPUBuffer;
+  /** drawn cut: per node the two sides' own mass + momentum (8 i32), zeroed by grid.wgsl `side` after use */
+  private readonly bufGSide: GPUBuffer;
+  /** drawn cut: the polyline and widths (cut.wgsl CutParams) */
+  private readonly bufCut: GPUBuffer;
   private readonly bufPMass: GPUBuffer;
   private readonly bufPLat: GPUBuffer;
   private readonly bufPLoad: GPUBuffer;
@@ -259,6 +266,10 @@ export class GpuMpm implements GpuMpmSim {
   private foldRollSeconds = FOLD_ROLL_SECONDS;
   private foldTotalSeconds = foldDuration(0);
 
+  // drawn cut (cut.wgsl): live while the two sides are separate bodies, until cutEnd (sim seconds)
+  private cutLive = false;
+  private cutEnd = 0;
+
   private readbackStaging: GPUBuffer | null = null;
   private destroyed = false;
 
@@ -303,7 +314,8 @@ export class GpuMpm implements GpuMpmSim {
     this.bufFoldTables = mk(FOLD_TABLE_STRIDE * FOLD_BINS + 8 + 2 * FOLD_BINS * (FOLD_SLICES + 1));
     this.bufGMass = mk(d.nodeCount);
     this.bufGMom = mk(3 * d.nodeCount);
-    this.bufGVel = mk(4 * d.nodeCount);
+    this.bufGVel = mk(3 * 4 * d.nodeCount);
+    this.bufGSide = mk(8 * d.nodeCount);
     this.bufPMass = mk(d.nodeCount);
     this.bufPLat = mk(7 * d.nodeCount);
     this.bufPLoad = mk(d.nodeCount);
@@ -319,6 +331,7 @@ export class GpuMpm implements GpuMpmSim {
     this.paramsU32 = new Uint32Array(this.paramsData.buffer);
     this.bufInject = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bufInjectAll = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.bufCut = device.createBuffer({ label: 'GpuMpm-cut', size: 48 + 16 * CUT_MAX_POINTS, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bufProbe = device.createBuffer({ label: 'GpuMpm-probe', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
 
     const texUsage = GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC;
@@ -437,6 +450,10 @@ export class GpuMpm implements GpuMpmSim {
     const finCView = this.finC.createView({ dimension: '3d' });
     const rasterMod = mod('raster', rasterSrc);
     const packMod = mod('pack', packSrc);
+    const p2gMod = mod('p2g', p2gSrc);
+    const gridMod = mod('grid', gridSrc);
+    const cutMod = mod('cut', cutSrc);
+    const cutRes: Resource[] = [{ kind: 'uniform', buffer: this.bufCut }, rw(this.bufPos), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags)];
 
     return {
       clearGrid: this.makeKernel('clearGrid', clearMod, 'clearGrid', clearRes),
@@ -444,9 +461,17 @@ export class GpuMpm implements GpuMpmSim {
       clearFine: this.makeKernel('clearFine', clearMod, 'clearFine',
         [rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGVel), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad),
           rw(this.bufFCov)]),
-      p2g: this.makeKernel('p2g', mod('p2g', p2gSrc), 'main',
+      p2g: this.makeKernel('p2g', p2gMod, 'main',
         [ro(this.bufPos), ro(this.bufVel), ro(this.bufAff), ro(this.bufFlags), rw(this.bufGMass), rw(this.bufGMom)]),
-      grid: this.makeKernel('grid', mod('grid', gridSrc), 'main', [ro(this.bufGMass), ro(this.bufGMom), rw(this.bufGVel), ro(this.bufPMass)]),
+      grid: this.makeKernel('grid', gridMod, 'main', [ro(this.bufGMass), ro(this.bufGMom), rw(this.bufGVel), ro(this.bufPMass)]),
+      // drawn cut: the two sides' own scatter and fields (dispatched only while a cut is live)
+      p2gSide: this.makeKernel('p2gSide', p2gMod, 'side',
+        [ro(this.bufPos), ro(this.bufVel), ro(this.bufAff), ro(this.bufFlags), rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGSide)]),
+      gridSide: this.makeKernel('gridSide', gridMod, 'side',
+        [ro(this.bufGMass), ro(this.bufGMom), rw(this.bufGVel), ro(this.bufPMass), rw(this.bufGSide)]),
+      cutMark: this.makeKernel('cutMark', cutMod, 'cut_', cutRes),
+      cutHeal: this.makeKernel('cutHeal', cutMod, 'heal_', cutRes),
+      cutClear: this.makeKernel('cutClear', cutMod, 'clear_', cutRes),
       g2p: this.makeKernel('g2p', mod('g2p', g2pSrc), 'main',
         [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), ro(this.bufFlags), ro(this.bufGVel),
           ro(this.bufGMass), rw(this.bufFoldInfo), ro(this.bufFold)]),
@@ -679,7 +704,9 @@ export class GpuMpm implements GpuMpmSim {
       if (this.foldActive) this.dispatchParticles(pass, k.foldMove, s);
       this.dispatchGrid(pass, k.clearGrid, s);
       this.dispatchParticles(pass, k.p2g, s);
+      if (this.cutLive) this.dispatchParticles(pass, k.p2gSide, s);
       this.dispatchGrid(pass, k.grid, s);
+      if (this.cutLive) this.dispatchGrid(pass, k.gridSide, s);
       this.dispatchParticles(pass, k.g2p, s);
       if (this.foldActive) {
         this.foldTime += q.dt;
@@ -705,6 +732,12 @@ export class GpuMpm implements GpuMpmSim {
           }
         }
       }
+    }
+    if (this.cutLive) {
+      // the nip knits the cut back together; the whole tear expires CUT_SECONDS after it was drawn
+      const ended = this.statsData.simTime + q.dt * substeps >= this.cutEnd;
+      this.dispatchParticles(pass, ended ? k.cutClear : k.cutHeal, frameSlot);
+      if (ended) this.cutLive = false;
     }
     this.encodeFrameKernels(pass, frameSlot, true);
     pass.end();
@@ -748,6 +781,7 @@ export class GpuMpm implements GpuMpmSim {
     this.foldPending = false;
     this.foldActive = false;
     this.foldTime = 0;
+    this.cutLive = false;   // the reset kernel zeroes every flag, side labels included
     this.statsData.simTime = 0;
     this.statsData.rollerAngleFront = 0;
     this.statsData.rollerAngleBack = 0;
@@ -889,6 +923,7 @@ export class GpuMpm implements GpuMpmSim {
 
   cutAndFold(): void {
     if (this.destroyed || this.operatorBusy) return;
+    this.clearCut();   // the operator takes the material as one body
     this.foldMode = 1;
     this.foldFeed = Math.max(this.params.logFeed, 0);
     const omega = this.params.omega;
@@ -905,10 +940,66 @@ export class GpuMpm implements GpuMpmSim {
 
   cutAndFlop(side: 'left' | 'right'): void {
     if (this.destroyed || this.operatorBusy) return;
+    this.clearCut();
     this.foldMode = side === 'left' ? 2 : 3;
     this.bundleSquare = 0;
     this.flopSeconds = FLOP_SECONDS;
     this.foldPending = true;
+  }
+
+  /**
+   * Cut the sheet on the front roll along a polyline in sheet coordinates (src/sim/cut.ts: x along
+   * the roll, s around the front roll from the crown, positive down the front face). The particles
+   * in a band around the line are labelled by side and the solver treats the two sides as separate
+   * bodies (cut.wgsl); the knife's kerf is pushed aside onto the lips so the cut shows as an open
+   * gap. The tear lasts CUT_SECONDS (each particle knits back sooner if it passes through the nip);
+   * a new cut replaces the old one. Returns the polyline actually used (simplified, at most
+   * CUT_MAX_POINTS points), or [] when there was nothing to cut (or an operator move is running).
+   */
+  cutAlong(points: readonly SheetPoint[], opts: CutOptions = {}): SheetPoint[] {
+    if (this.destroyed || this.operatorBusy) return [];
+    const h = this.dims.h;
+    const pts = simplifyPolyline(points, 0.25 * h, CUT_MAX_POINTS);
+    if (pts.length < 2) return [];
+    const kerf = Math.max(0, opts.kerfCells ?? CUT_KERF_CELLS) * h;
+    const band = kerf + CUT_BAND_CELLS * h;
+    const gap = this.params.gap;
+    // the kerf's material is laid on top of the lip: about a sheet thickness (the sheet comes off the
+    // nip somewhat thicker than the gap)
+    const lift = opts.liftCells !== undefined ? opts.liftCells * h : Math.max(1.3 * gap, h);
+    const depth = opts.depth ?? 3 * gap + h;
+    const data = new ArrayBuffer(48 + 16 * CUT_MAX_POINTS);
+    const u = new Uint32Array(data);
+    const f = new Float32Array(data);
+    u[0] = pts.length;
+    f.set([band, kerf, lift, depth], 4);
+    let cum = 0;
+    for (let i = 0; i < pts.length; i++) {
+      if (i > 0) cum += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      f.set([pts[i][0], pts[i][1], cum, 0], 12 + 4 * i);
+    }
+    f[8] = cum;
+    this.device.queue.writeBuffer(this.bufCut, 0, data);
+    this.writeParams(0, 0);
+    this.device.queue.writeBuffer(this.bufParams, 0, this.paramsData, 0, UNIFORM_STRIDE / 4);
+    this.runParticleKernel(this.kernels.cutMark);
+    this.cutLive = true;
+    this.cutEnd = this.statsData.simTime + Math.max(opts.seconds ?? CUT_SECONDS, 0);
+    return pts;
+  }
+
+  /** Forget a live cut: every particle is one body again. */
+  clearCut(): void {
+    if (this.destroyed || !this.cutLive) return;
+    this.cutLive = false;
+    this.writeParams(0, 0);
+    this.device.queue.writeBuffer(this.bufParams, 0, this.paramsData, 0, UNIFORM_STRIDE / 4);
+    this.runParticleKernel(this.kernels.cutClear);
+  }
+
+  /** true while a drawn cut keeps its two sides apart */
+  get cutActive(): boolean {
+    return this.cutLive;
   }
 
   get operatorBusy(): boolean {
@@ -986,7 +1077,7 @@ export class GpuMpm implements GpuMpmSim {
     if (this.destroyed) return;
     this.destroyed = true;
     for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufFold, this.bufFoldInfo, this.bufFoldTables,
-      this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll, this.bufProbe, this.bufPLoad]) {
+      this.bufGMass, this.bufGMom, this.bufGVel, this.bufGSide, this.bufCut, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll, this.bufProbe, this.bufPLoad]) {
       b.destroy();
     }
     this.readbackStaging?.destroy();

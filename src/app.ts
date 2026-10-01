@@ -23,10 +23,13 @@ import {
   type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
+import { rayThroughNdc } from './render/camera';
+import { rayToSheet, type SheetPoint } from './sim/cut';
 import type { CameraState, Renderer } from './render/types';
-import type { DebugApi, GpuMpmSim, Latent, ParticleSnapshot, SimStats } from './sim/types';
+import type { CutOptions, DebugApi, GpuMpmSim, Latent, ParticleSnapshot, SimStats } from './sim/types';
 import { Hud } from './ui/hud';
 import { installKeyboard } from './ui/keys';
+import { installKnife } from './ui/knife';
 import { installOrbitControls, type OrbitControls } from './ui/orbit';
 import { Overlay } from './ui/overlay';
 import { Palette } from './ui/palette';
@@ -338,6 +341,35 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     flopSide = flopSide === 'left' ? 'right' : 'left';
   });
 
+  // the knife (src/ui/knife.ts): armed by the Knife button / K, or Shift held for one drag; a drag
+  // on the sheet then draws a cut (GpuMpmSim.cutAlong) instead of orbiting
+  let knifeArmed = false;
+  const setKnife = (on: boolean): void => {
+    knifeArmed = on;
+    palette.setKnife(on);
+    root.classList.toggle('cm-knife-armed', on);
+    if (on) hud.showHint('Knife: drag across the sheet on the front roll to cut it (K or the Knife button to put it away; Shift-drag cuts without arming)', 4000);
+  };
+  /** A point in normalised device coords ([-1, 1], y up) projected onto the sheet on the front roll. */
+  const ndcToSheet = (x: number, y: number): SheetPoint | null => {
+    if (!sim || !renderer) return null;
+    const aspect = canvas.width > 0 && canvas.height > 0 ? canvas.width / canvas.height : (canvas.clientWidth || 1) / (canvas.clientHeight || 1);
+    const ray = rayThroughNdc(renderer.camera, aspect, x, y);
+    return rayToSheet(ray.origin, ray.dir, sim.params);
+  };
+  const cutSheet = (points: readonly SheetPoint[], opts?: CutOptions): SheetPoint[] => {
+    if (!sim) return [];
+    if (sim.operatorBusy) { hud.showHint('The operator is busy: cut again when the move is done', 2500); return []; }
+    try {
+      const used = sim.cutAlong(points, opts);
+      if (used.length >= 2) hud.showHint('Cut: the sheet is torn along the line (it knits back in the nip)', 2500);
+      return used;
+    } catch (e) {
+      reportError('cut failed', e);
+      return [];
+    }
+  };
+
   const palette = new Palette(root, {
     onPigment: (key) => {
       const p = findPigment(key);
@@ -356,7 +388,8 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     onCutFold: () => withSim('cutAndFold failed', (s) => s.cutAndFold()),
     onClear: () => withSim('clearPigment failed', (s) => s.clearPigment()),
     onReset: () => withSim('reset failed', (s) => { s.reset(); dropLog.length = 0; hud.setError(null); }),
-    onTogglePause: togglePause
+    onTogglePause: togglePause,
+    onKnife: () => setKnife(!knifeArmed)
   }, undefined, dropSlot, chunkSize);
 
   const nudge = (key: 'omega' | 'gap', dir: 1 | -1): void => {
@@ -378,7 +411,8 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       hud.showHint(`Pigment drops at slot ${dropSlot + 1} of ${DROP_SLOTS} (left to right along the roll)`, 2500);
     },
     chunkSize: (d) => { setChunkSize(chunkSize + d); chunkHint(); },
-    togglePanel: () => panel.toggle()
+    togglePanel: () => panel.toggle(),
+    knife: () => setKnife(!knifeArmed)
   });
 
   // --- stats --------------------------------------------------------------------
@@ -597,6 +631,15 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   }
   panel.setParams(sim.params);
   palette.setPaused(sim.paused);
+  const knife = installKnife(root, canvas, {
+    armed: (e) => knifeArmed || e.shiftKey,
+    toSheet: (cx, cy) => {
+      const r = canvas.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return null;
+      return ndcToSheet(((cx - r.left) / r.width) * 2 - 1, 1 - ((cy - r.top) / r.height) * 2);
+    },
+    onCut: (pts) => { cutSheet(pts); }
+  });
 
   // --- debug api ------------------------------------------------------------------------
   const api: DebugApi = {
@@ -623,6 +666,12 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     startLink,
     applyDrops,
     setQuality,
+    screenToSheet: ndcToSheet,
+    cutScreen(ndc, opts) {
+      const pts: SheetPoint[] = [];
+      for (const [x, y] of ndc) { const p = ndcToSheet(x, y); if (p) pts.push(p); }
+      return cutSheet(pts, opts);
+    },
     async screenshot() {
       const r = renderer as Renderer;
       if (!r.renderToPixels) throw new Error('renderer has no offscreen readback');
@@ -675,6 +724,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       rafId = 0;
       document.removeEventListener('visibilitychange', onVisibility);
       removeKeys();
+      knife.destroy();
       orbit?.destroy();
       detachControls?.();
       if (window.__colormill === api) delete window.__colormill;

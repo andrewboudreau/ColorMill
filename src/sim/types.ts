@@ -26,6 +26,18 @@ export interface SimStats {
   readonly rollerAngleBack: number;
 }
 
+/** Options for GpuMpmSim.cutAlong (src/sim/cut.ts has the defaults). */
+export interface CutOptions {
+  /** half-width of the knife's kerf in solver cells (default CUT_KERF_CELLS); 0 parts the sheet without opening a gap */
+  readonly kerfCells?: number;
+  /** how far the kerf's material is lifted onto the lips, in cells (default about a sheet thickness) */
+  readonly liftCells?: number;
+  /** deepest material cut, off the front roll's surface (default 3 gap + h: the sheet, not the bank) */
+  readonly depth?: number;
+  /** sim seconds the tear lasts (default CUT_SECONDS) */
+  readonly seconds?: number;
+}
+
 /** CPU readback of particle state (for tests / diagnostics). */
 export interface ParticleSnapshot {
   readonly count: number;
@@ -112,6 +124,19 @@ export interface GpuMpmSim {
    *  flag and lift the doubled triangle into the operator's hands, then set the bundle down on the nip on
    *  the other half (design §6b). No-op if a move is running. */
   cutAndFlop(side: 'left' | 'right'): void;
+  /**
+   * Draw a cut: tear the sheet on the front roll along a polyline in sheet coordinates
+   * ([x along the roll, s = R * angle around the front axis from the crown, positive down the
+   * front face]; src/sim/cut.ts). The two sides become separate bodies for the solver and the
+   * knife's kerf opens as a gap; the tear knits back in the nip and expires after CUT_SECONDS.
+   * A new cut replaces a live one. Returns the polyline used ([] if nothing was cut, e.g. while
+   * an operator move runs). Particle flag bits 2-3 carry the side (1 left of the line, 2 right).
+   */
+  cutAlong(points: readonly (readonly [number, number])[], opts?: CutOptions): (readonly [number, number])[];
+  /** Forget a live cut (the sides are one body again). Operator moves do this when they start. */
+  clearCut(): void;
+  /** true while a drawn cut keeps its two sides apart */
+  readonly cutActive: boolean;
   /** true while an operator move (cut & roll or cut & fold) is running */
   readonly operatorBusy: boolean;
   /** Length of the current (or last) cut & roll's roll phase in sim seconds: the material is wound off
@@ -155,6 +180,12 @@ export interface DebugApi {
   applyDrops(drops: readonly Drop[]): Promise<void>;
   /** Switch preset (rebuilds the sim), resolves when ready */
   setQuality(preset: 'low' | 'medium' | 'high' | 'ultra'): Promise<void>;
+  /** Project a point on screen (normalised device coords, [-1, 1], y up) onto the sheet on the front roll:
+   *  [x, s] sheet coordinates (src/sim/cut.ts), or null where the view ray misses the roll. */
+  screenToSheet(x: number, y: number): readonly [number, number] | null;
+  /** Draw a cut as the knife gesture does: a polyline on screen (normalised device coords) projected onto the
+   *  sheet and handed to sim.cutAlong. Returns the sheet polyline used ([] if nothing was cut). */
+  cutScreen(ndc: readonly (readonly [number, number])[], opts?: CutOptions): (readonly [number, number])[];
   /** Render the current frame offscreen and return RGBA8 pixels (works where canvas presentation does not). */
   screenshot(): Promise<{ width: number; height: number; data: Uint8Array }>;
   /** Report whether the app finished initialising */

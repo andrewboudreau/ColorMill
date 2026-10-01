@@ -4,21 +4,10 @@
 @group(0) @binding(3) var<storage, read_write> gvel : array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read> pmass : array<i32>;   // last frame's render raster (density = pmass / 8)
 
-@compute @workgroup_size(4, 4, 4)
-fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
-  if (gid.x >= P.grid.x || gid.y >= P.grid.y || gid.z >= P.grid.z) { return; }
-  let n = nodeIndex(gid.x, gid.y, gid.z);
-  let m = decodeFixed(gmass[n], MASS_SCALE);
-  if (m <= 0.0) { return; }   // gvel was zeroed by clearGrid
-
-  let h = P.hdt.x;
-  let dt = P.hdt.z;
-  let g = P.hdt.w;
-  let mom = vec3<f32>(decodeFixed(gmom[3u * n], MOM_SCALE), decodeFixed(gmom[3u * n + 1u], MOM_SCALE), decodeFixed(gmom[3u * n + 2u], MOM_SCALE));
-  var v = mom / m;
-  v.y -= dt * g;
-
-  let p = vec3<f32>(f32(gid.x), f32(gid.y), f32(gid.z)) * h;
+/// The mill's boundary conditions (design §3.3) for the node n at p, applied to the
+/// velocity v the material's momentum gives it (gravity already added).
+fn applyBoundaries(vIn : vec3<f32>, p : vec3<f32>, n : u32) -> vec3<f32> {
+  var v = vIn;
   let R = P.front.w;
 
   // 1. front roller. The sheet is carried around by a sticky band (full no-slip,
@@ -89,6 +78,62 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     v.x *= max(0.0, 1.0 - P.bands.w);
     v.z *= max(0.0, 1.0 - P.bands.w);
   }
+  return v;
+}
 
-  gvel[n] = vec4<f32>(v, 0.0);
+@compute @workgroup_size(4, 4, 4)
+fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
+  if (gid.x >= P.grid.x || gid.y >= P.grid.y || gid.z >= P.grid.z) { return; }
+  let n = nodeIndex(gid.x, gid.y, gid.z);
+  let m = decodeFixed(gmass[n], MASS_SCALE);
+  if (m <= 0.0) { return; }   // gvel was zeroed by clearGrid
+
+  let h = P.hdt.x;
+  let dt = P.hdt.z;
+  let g = P.hdt.w;
+  let mom = vec3<f32>(decodeFixed(gmom[3u * n], MOM_SCALE), decodeFixed(gmom[3u * n + 1u], MOM_SCALE), decodeFixed(gmom[3u * n + 2u], MOM_SCALE));
+  var v = mom / m;
+  v.y -= dt * g;
+
+  let p = vec3<f32>(f32(gid.x), f32(gid.y), f32(gid.z)) * h;
+  gvel[n] = vec4<f32>(applyBoundaries(v, p, n), 0.0);
+}
+
+// Drawn cut (cut.wgsl): the velocity each side of a tear sees. Side c's particles
+// gather "everything except the other side": (momentum all - momentum other) /
+// (mass all - mass other), formed by exact integer subtraction of the other side's
+// own scatter (p2g.wgsl `side`), with the same gravity and boundary conditions.
+// Stored after the shared field in gvel: [c * nodeCount + n] for c = 1, 2 (zero at
+// nodes the side does not reach). The side accumulators are zeroed here after use,
+// so no clear pass is needed. Dispatched only while a cut is live.
+@group(0) @binding(5) var<storage, read_write> gside : array<i32>;
+
+@compute @workgroup_size(4, 4, 4)
+fn side(@builtin(global_invocation_id) gid : vec3<u32>) {
+  if (gid.x >= P.grid.x || gid.y >= P.grid.y || gid.z >= P.grid.z) { return; }
+  let n = nodeIndex(gid.x, gid.y, gid.z);
+  let nodes = P.grid.x * P.grid.y * P.grid.z;
+  let b = 8u * n;
+  let dt = P.hdt.z;
+  let g = P.hdt.w;
+  let p = vec3<f32>(f32(gid.x), f32(gid.y), f32(gid.z)) * P.hdt.x;
+  for (var c = 0u; c < 2u; c++) {
+    let mine = b + 4u * c;
+    let other = b + 4u * (1u - c);
+    var v = vec3<f32>(0.0);
+    if (gside[mine] != 0) {
+      let m = decodeFixed(gmass[n] - gside[other], MASS_SCALE);
+      if (m > 0.0) {
+        let mom = vec3<f32>(
+          decodeFixed(gmom[3u * n] - gside[other + 1u], MOM_SCALE),
+          decodeFixed(gmom[3u * n + 1u] - gside[other + 2u], MOM_SCALE),
+          decodeFixed(gmom[3u * n + 2u] - gside[other + 3u], MOM_SCALE));
+        v = mom / m;
+        v.y -= dt * g;
+        v = applyBoundaries(v, p, n);
+      }
+    }
+    gvel[(c + 1u) * nodes + n] = vec4<f32>(v, 0.0);
+  }
+  for (var i = 0u; i < 8u; i++) { gside[b + i] = 0; }
 }

@@ -21,6 +21,8 @@ export interface PaletteCallbacks {
   onClear(): void;
   onReset(): void;
   onTogglePause(): void;
+  /** arm / disarm the knife: a drag on the sheet draws a cut instead of orbiting */
+  onKnife?(): void;
 }
 
 export class Palette {
@@ -29,6 +31,7 @@ export class Palette {
   private readonly pauseButton: HTMLButtonElement;
   private readonly foldButton: HTMLButtonElement;
   private readonly flopButton: HTMLButtonElement;
+  private readonly knifeButton: HTMLButtonElement | null = null;
   private readonly swatches = new Map<string, HTMLButtonElement>();
   private readonly slotButtons: HTMLButtonElement[] = [];
   private readonly sizeButtons: HTMLButtonElement[] = [];
@@ -144,6 +147,12 @@ export class Palette {
     actions.className = 'cm-actions';
     this.foldButton = this.button(actions, 'Cut & roll', 'F', () => this.cb.onCutFold());
     this.flopButton = this.button(actions, 'Cut & fold', 'C', () => this.cb.onCutFlop());
+    if (this.cb.onKnife) {
+      const onKnife = this.cb.onKnife;
+      this.knifeButton = this.button(actions, 'Knife', 'K, or Shift-drag', () => onKnife());
+      this.knifeButton.classList.add('cm-btn-knife');
+      this.knifeButton.setAttribute('aria-pressed', 'false');
+    }
     this.button(actions, 'Clear pigment', undefined, () => this.cb.onClear());
     this.button(actions, 'Reset', 'R', () => this.cb.onReset());
     this.pauseButton = this.button(actions, 'Pause', 'Space', () => this.cb.onTogglePause());
@@ -217,6 +226,11 @@ export class Palette {
     this.pauseButton.textContent = paused ? 'Play' : 'Pause';
     this.pauseButton.setAttribute('aria-pressed', String(paused));
     this.pauseButton.title = `${paused ? 'Play' : 'Pause'} (Space)`;
+  }
+
+  /** Show the knife as armed (a drag cuts) or not. */
+  setKnife(on: boolean): void {
+    this.knifeButton?.setAttribute('aria-pressed', String(on));
   }
 
   setFoldBusy(busy: boolean): void {

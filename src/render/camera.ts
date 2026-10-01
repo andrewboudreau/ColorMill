@@ -123,6 +123,22 @@ export function projectPoint(c: CameraState, aspect: number, p: Vec3): { x: numb
   return { x: x / (z * b.tanHalfFovY * b.aspect), y: y / (z * b.tanHalfFovY), depth: z };
 }
 
+/**
+ * The view ray through a point in normalised device coords ([-1, 1], y up): the inverse of
+ * projectPoint, built from the same basis the ray-march shader uses. `dir` is unit length.
+ */
+export function rayThroughNdc(c: CameraState, aspect: number, x: number, y: number): { origin: Vec3; dir: Vec3 } {
+  const b = cameraBasis(c, aspect);
+  const sx = x * b.tanHalfFovY * b.aspect;
+  const sy = y * b.tanHalfFovY;
+  const dir = normalize([
+    b.forward[0] + b.right[0] * sx + b.up[0] * sy,
+    b.forward[1] + b.right[1] * sx + b.up[1] * sy,
+    b.forward[2] + b.right[2] * sx + b.up[2] * sy
+  ]);
+  return { origin: b.origin, dir };
+}
+
 /** Orbit by pixel deltas (used by the drag handler; exposed for tests). */
 export function orbitBy(c: CameraState, dxPixels: number, dyPixels: number, heightPixels: number): CameraState {
   const k = 2.2 / Math.max(1, heightPixels);

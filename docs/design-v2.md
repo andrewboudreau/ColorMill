@@ -110,7 +110,7 @@ readback helper `GpuMpmSim.readParticles()` must return the layout in
 | `C` | mat3 | APIC affine velocity (row-major, `C[i][j] = ∂v_i/∂x_j`) |
 | `F` | mat3 | elastic deformation gradient (row-major) |
 | `latent` | 7 floats | Mixbox latent of the particle's pigment mix |
-| `flags` | 1 float (bit field as int) | bit0 = kinematic (under operator control), unused otherwise |
+| `flags` | 1 float (bit field as int) | bit0 = kinematic (under operator control), bit1 = parked in the cut & fold bundle, bits 2–3 = side of a drawn cut (§6c) |
 | pad | to 32 floats |
 
 All particles have equal mass `pMass = 1` and equal rest volume
@@ -606,6 +606,65 @@ back and forth across the middle, which is where a real mill's lateral
 mixing comes from. Cut & roll remains the move that reaches from one end of
 the roll to the other.
 
+### 6c. Drawn cut (prototype: a tear along a line the user draws)
+
+The first step toward letting the user handle the sheet instead of watching
+scripted moves: drag a line across the sheet on the front roll and the sheet
+is torn along it. Exposed as `GpuMpmSim.cutAlong(points, opts?)` with the
+polyline in **sheet coordinates** (`src/sim/cut.ts`): `x` along the roll and
+`s = R·atan2(dz, dy)` around the front axis from the crown, positive down the
+front face (the front face at axis height is `s ≈ 0.5`, the bottom of the
+roll `s ≈ 1.0`; the roll carries the front face toward smaller `s`). The app
+draws it with the **knife** (the Knife button or `K`, or Shift-drag): the
+stroke's screen points are cast as view rays (`rayThroughNdc`, the inverse of
+`projectPoint`) onto the cylinder at the sheet's mid-thickness (`R + gap/2`)
+and converted to sheet coordinates (`rayToSheet`). The debug API has
+`screenToSheet(ndcX, ndcY)` and `cutScreen(ndcPoints)` for headless driving
+(`scripts/cut-demo.mjs`). The knife claims one pointer only, so a second
+pointer stays free for a later "grab".
+
+The solver keeps one velocity field per node, so a tear needs the grid to see
+the two sides as two bodies:
+
+- **Side labels.** `cut.wgsl cut_` labels every particle within `C.w.x` (the
+  kerf plus `CUT_BAND_CELLS` = 3.5 cells) of the line, and no deeper than
+  `3 gap + h` off the roll (the sheet, not the bank), with flag bits 2–3:
+  side 1 left of the direction of travel, side 2 right. Only segments whose
+  perpendicular foot covers the particle count, so there is no tear past the
+  ends of the line (the tip).
+- **Two extra channels.** While a cut is live, labelled particles scatter a
+  second time into their side's own mass/momentum accumulator
+  (`p2g.wgsl side`, 8 i32 per node). `grid.wgsl side` forms, per side, the
+  velocity of *everything except the other side*:
+  `(mom_all − mom_other) / (m_all − m_other)` (exact integer subtraction of
+  the fixed-point sums), adds gravity and applies the same boundary
+  conditions (`applyBoundaries`, shared with the main grid kernel). The two
+  side fields are stored after the shared one in `gvel`, and `g2p` gathers
+  a labelled particle's velocity and APIC matrix from its side's field.
+  No momentum and no stress crosses the seam; unlabelled material (beyond
+  the band, past the tip, the bank) is in both sides' fields and still
+  couples to both, which is why the band is wide enough (more than three
+  cells beyond the kerf) that no unlabelled particle's stencil touches both
+  sides near the seam. With no cut drawn, nothing is labelled, the extra
+  kernels are not dispatched and every particle gathers the shared field as
+  before.
+- **The kerf.** A knife has a width, and a tear in a sheet that is carried
+  rigidly by the tack band (§3.3) does not open on its own. Inside the kerf
+  (`CUT_KERF_CELLS` = 1.5 cells each side of the line, tapered to nothing
+  over two kerf widths at each end) a particle is mirrored across the kerf
+  edge onto its own side's lip and laid on top of it (lifted by about a
+  sheet thickness), restarted unstressed (`F = I`, `C = 0`). Nothing is lost
+  or invented; the cut shows as an open gap with raised edges.
+- **Healing.** Putty knits when pressed together: `heal_` clears the label of
+  every particle passing through the nip (once per frame), and the whole cut
+  expires `CUT_SECONDS` = 4 s after it was drawn (`clear_`). A new cut
+  replaces a live one; the operator moves clear it when they start.
+
+Cost while live: one more particle scatter and one more grid pass per
+substep. Memory always: `gvel` is three fields instead of one and the side
+accumulators are 8 i32 per node (about 116 MB more at `high`; a sparse
+window around the cut would do).
+
 ---
 
 ## 7. Time stepping and presets
@@ -743,7 +802,8 @@ src/gpu/device.ts               WebGPU init + capability report + fallback messa
 src/config/mill.ts              MillConfig, presets, geometry helpers (pure, tested)
 src/sim/types.ts                shared interfaces (GpuMpmSim API, snapshots, stats)
 src/sim/mpm.ts                  GpuMpmSim implementation
-src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, raster, disperse, pack, inject, fold
+src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, raster, disperse, pack, inject, fold, cut
+src/sim/cut.ts                  drawn cut: sheet coordinates, screen ray -> sheet, polyline helpers (pure, tested)
 src/render/renderer.ts          Renderer (ray-march), src/render/camera.ts
 src/render/shaders/raymarch.wgsl, mixbox.wgsl
 src/color/pigments.ts           palette latents + latentToRgb (TS mirror, tested)

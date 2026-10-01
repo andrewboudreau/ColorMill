@@ -1,7 +1,7 @@
 /**
  * Keyboard shortcuts (design §9): Space pause, R reset, F cut & roll, C cut & fold,
  * 1–8 pigments, arrows speed (up/down) and nip gap (left/right), [ and ]
- * move the pigment drop slot, - and = step the chunk size, P toggles the settings drawer. Keys are ignored while a form control has focus.
+ * move the pigment drop slot, - and = step the chunk size, P toggles the settings drawer, K arms the knife. Keys are ignored while a form control has focus.
  */
 
 export interface KeyActions {
@@ -20,6 +20,8 @@ export interface KeyActions {
   /** step the pigment chunk size down (-1) or up (+1) */
   chunkSize(direction: 1 | -1): void;
   togglePanel(): void;
+  /** K: arm / disarm the knife (a drag on the sheet draws a cut) */
+  knife?(): void;
 }
 
 function isEditable(target: EventTarget | null): boolean {
@@ -41,6 +43,7 @@ export function installKeyboard(target: Window | HTMLElement, a: KeyActions): ()
       case 'f': case 'F': a.cutFold(); break;
       case 'c': case 'C': a.cutFlop(); break;
       case 'p': case 'P': a.togglePanel(); break;
+      case 'k': case 'K': if (a.knife) a.knife(); else handled = false; break;
       case 'ArrowUp': a.speed(1); break;
       case 'ArrowDown': a.speed(-1); break;
       case 'ArrowRight': a.gap(1); break;

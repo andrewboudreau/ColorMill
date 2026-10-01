@@ -7,7 +7,7 @@
 @group(0) @binding(4) var<storage, read_write> fbuf : array<f32>;
 @group(0) @binding(5) var<storage, read_write> abuf : array<f32>;   // P2G affine (read by p2g)
 @group(0) @binding(6) var<storage, read> flags : array<u32>;
-@group(0) @binding(7) var<storage, read> gvel : array<vec4<f32>>;
+@group(0) @binding(7) var<storage, read> gvel : array<vec4<f32>>;   // shared field, then side 1, side 2 of a drawn cut
 @group(0) @binding(8) var<storage, read> gmass : array<i32>;
 // cut & fold reductions: [0] = live pile top under the standing log (atomicMax on float bits)
 @group(0) @binding(9) var<storage, read_write> foldInfo : array<atomic<u32>>;
@@ -63,6 +63,10 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   let wx = quadWeights(fx.x);
   let wy = quadWeights(fx.y);
   let wz = quadWeights(fx.z);
+  // a particle on one side of a drawn cut (flag bits 2-3, cut.wgsl) gathers its side's
+  // field, stored after the shared one in gvel (grid.wgsl `side`); everyone else the shared one
+  let sd = (flags[p] >> 2u) & 3u;
+  let goff = select(0u, sd * P.grid.x * P.grid.y * P.grid.z, sd == 1u || sd == 2u);
 
   var v = vec3<f32>(0.0);
   var B = mat3x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
@@ -72,7 +76,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
         let off = vec3<i32>(i, j, k);
         let dpos = (vec3<f32>(off) - fx) * h;
         let wgt = wx[i] * wy[j] * wz[k];
-        let gv = gvel[nodeIndexI(base + off)].xyz;
+        let gv = gvel[goff + nodeIndexI(base + off)].xyz;
         v += wgt * gv;
         // outer(gv, dpos): column c = gv * dpos[c]  (B[r][c] = gv_r * dpos_c)
         B += wgt * mat3x3<f32>(gv * dpos.x, gv * dpos.y, gv * dpos.z);

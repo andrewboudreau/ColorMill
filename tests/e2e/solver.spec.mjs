@@ -312,6 +312,34 @@ export default async function run() {
       // let it settle and get pulled in before the second move
       await page.evaluate(async (n) => { await window.__solver.stepFrames(n); }, framesFor(1.0));
 
+      // 1b. the long roll (rollStyle 'long'): no fold in half, the full-length roll stands up as one at
+      // the steeper tilt and is dropped; a shorter roll phase, everything let go, nothing outside or in a roll
+      const longSec = await page.evaluate(() => {
+        window.__solver.sim.rollStyle = 'long';
+        window.__solver.sim.cutAndFold();
+        return window.__solver.sim.operatorRollSeconds;
+      });
+      const long = await page.evaluate(async ([n]) => {
+        await window.__solver.stepFrames(n);
+        const s = await window.__solver.snapshot();
+        let kin = 0, maxV = 0, ymax = -1;
+        for (let p = 0; p < s.count; p++) {
+          if (s.flags[p] & 1) kin++;
+          maxV = Math.max(maxV, Math.hypot(s.velocities[3 * p], s.velocities[3 * p + 1], s.velocities[3 * p + 2]));
+          ymax = Math.max(ymax, s.positions[3 * p + 1]);
+        }
+        window.__solver.sim.rollStyle = 'double';
+        return { kin, maxV, ymax, count: s.count, positions: Array.from(s.positions), velocities: Array.from(s.velocities), latents: Array.from(s.latents), deformation: Array.from(s.deformation), flags: Array.from(s.flags), busy: window.__solver.sim.operatorBusy, error: window.__solver.error };
+      }, [framesFor(longSec + 0.4)]);
+      const aLong = analyse(long, dims);
+      console.log(`  cut & roll (long, drop; roll ${longSec.toFixed(2)} s vs ${rollSec.toFixed(2)} doubled): ${long.kin} held of ${long.count} 0.4 s after the roll, max |v| ${long.maxV.toFixed(2)}, highest y ${long.ymax.toFixed(2)}; ${JSON.stringify({ bad: aLong.bad, outside: aLong.outside, inRoller: aLong.inRoller, busy: long.busy })}`);
+      assert(!long.error, 'no WebGPU errors during the long cut & roll: ' + long.error);
+      assert(longSec < rollSec, `the long roll skips the doubling (${longSec.toFixed(2)} s < ${rollSec.toFixed(2)} s)`);
+      assert(long.kin === 0 && !long.busy, `the long roll is let go whole right after the roll (${long.kin} still held)`);
+      assert(long.maxV < 6, `the long roll does not explode (max |v| ${long.maxV.toFixed(2)})`);
+      assert(aLong.bad === 0 && aLong.outside === 0 && aLong.inRoller === 0 && aLong.n === chunk.count, 'state sane after the long roll');
+      await page.evaluate(async (n) => { await window.__solver.stepFrames(n); }, framesFor(1.0));
+
       // 2. lowered in: released a slice at a time onto the live pile. Fed at 0.4 units/s
       // (the slider's upper range) so that a second of feeding after the roll has let
       // some of the log go past the tilted end face and the pile the drop left behind,

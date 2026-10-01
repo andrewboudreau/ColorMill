@@ -2,7 +2,7 @@
  * Shared interfaces between the GPU solver, the renderer, the UI and tests.
  * See docs/design-v2.md. Keep this file free of GPU code.
  */
-import type { GridDims, MillConfig, MillParams, QualitySettings } from '../config/mill';
+import type { GridDims, MillConfig, MillParams, QualitySettings, RollStyle } from '../config/mill';
 import type { Drop } from '../drops';
 
 /** A 7-float Mixbox latent. */
@@ -117,6 +117,9 @@ export interface GpuMpmSim {
   /** Length of the current (or last) cut & roll's roll phase in sim seconds: the material is wound off
    *  the roll and the log swung up over the nip; after it the log is dropped or lowered in (design §6). */
   readonly operatorRollSeconds: number;
+  /** How cut & roll puts the roll back: folded in half ('double', the default) or as one long roll
+   *  ('long'); read when the move starts. */
+  rollStyle: RollStyle;
   /** Read particle state back to the CPU (slow; tests and diagnostics only). */
   readParticles(): Promise<ParticleSnapshot>;
   /** Read the packed density volume (volA red channel) back as float32, node-major (i fastest). */

@@ -20,6 +20,8 @@ export interface PanelCallbacks {
   onSurfaceColour(on: boolean): void;
   /** experimental mode: the sliders' upper caps lifted (link.ts EXPERIMENTAL_SCALE) */
   onExperimental(on: boolean): void;
+  /** cut & roll keeps the roll long (no fold in half) and stands it up as one */
+  onLongRoll(on: boolean): void;
   /** "Copy start link": a URL that reproduces this session's pigment drops */
   onCopyStartLink(): void;
 }
@@ -43,6 +45,8 @@ export interface PanelInitial {
   readonly batch?: number;
   readonly autoOrbit: boolean;
   readonly experimental?: boolean;
+  /** cut & roll keeps the roll long */
+  readonly longRoll?: boolean;
   readonly open: boolean;
 }
 
@@ -66,6 +70,7 @@ export class Panel {
   private readonly orbit: HTMLInputElement;
   private readonly surface: HTMLInputElement;
   private readonly experimental: HTMLInputElement;
+  private readonly longRoll: HTMLInputElement;
   private readonly stats: Record<string, HTMLElement> = {};
   private open: boolean;
 
@@ -137,6 +142,18 @@ export class Panel {
     xtext.title = 'Sliders reach 4× their normal top and links accept any value. The solver is not guaranteed stable up there.';
     xfield.append(this.experimental, xtext);
     params.appendChild(xfield);
+    const lfield = document.createElement('label');
+    lfield.className = 'cm-field cm-field-check';
+    this.longRoll = document.createElement('input');
+    this.longRoll.type = 'checkbox';
+    this.longRoll.name = 'longRoll';
+    this.longRoll.checked = !!initial.longRoll;
+    this.longRoll.addEventListener('change', () => this.cb.onLongRoll(this.longRoll.checked));
+    const ltext = document.createElement('span');
+    ltext.textContent = 'Long roll: no fold before feeding';
+    ltext.title = 'Cut & roll stands the wound roll up at its full length and feeds it in as one, instead of folding it in half first. It leans further to fit and may reach the ceiling.';
+    lfield.append(this.longRoll, ltext);
+    params.appendChild(lfield);
 
     // --- quality --------------------------------------------------------------
     const qsec = this.section('Quality');
@@ -295,6 +312,10 @@ export class Panel {
 
   setSurfaceColour(on: boolean): void {
     this.surface.checked = on;
+  }
+
+  setLongRoll(on: boolean): void {
+    this.longRoll.checked = on;
   }
 
   /** Stretch (or restore) the sliders' tops; a value already past the cap keeps its slider wide enough. */

@@ -492,6 +492,12 @@ roll axis. Modelled as a scripted kinematic move:
    (each radius is its half's largest, so a little less presses them
    together), so the roll is `L/2` long and two barrels one on the other,
    every `x` position in its cross-section.
+   With `rollStyle` = 'long' (`?roll=long`, the drawer's "Long roll"; `P.fold4.z`
+   < 0) this step is skipped: the roll stays at its full length, its axis the
+   mean of the two halves' centre lines, and stands up as one at the steeper
+   `FOLD_TILT_LONG` = 0.85 rad so that 1.5 of roll clears the ceiling (top at
+   about 2.1, far end 1.9 toward the viewer); lowering it in takes the full
+   length at the feed speed.
 5. **Lift** (`LIFT_SECONDS` = 0.6 s): the doubled roll swings up as a rigid
    body from the crown to the standing pose: a rotation through π/2 about the
    horizontal `n = (0, −sin tilt, cos tilt)` takes the roll's axis `x̂` (the

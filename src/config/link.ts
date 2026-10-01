@@ -19,8 +19,7 @@
  */
 import { formatDrops, parseDrops, type Drop } from '../drops';
 import {
-  BATCH_LIMITS, DEFAULT_PARAMS, PARAM_LIMITS, QUALITY_PRESETS, omegaToRpm, type MillParams, type QualityPreset
-} from './mill';
+  BATCH_LIMITS, DEFAULT_PARAMS, PARAM_LIMITS, QUALITY_PRESETS, omegaToRpm, type MillParams, type QualityPreset, type RollStyle } from './mill';
 
 /** Mill parameters that a link may carry, in the order they are written (and shown in the drawer). */
 export const LINK_PARAM_KEYS: readonly (keyof MillParams)[] = [
@@ -52,6 +51,13 @@ export interface MillStart {
   preset?: QualityPreset;
   /** only the parameters that differ from DEFAULT_PARAMS */
   params: Partial<MillParams>;
+  /** cut & roll puts the roll back doubled (default) or as one long roll (?roll=long) */
+  roll?: RollStyle;
+}
+
+/** `?roll=long` for the long single roll; anything else is the doubled roll. */
+export function parseRollStyle(query: URLSearchParams): RollStyle {
+  return query.get('roll') === 'long' ? 'long' : 'double';
 }
 
 export function isPreset(v: unknown): v is QualityPreset {
@@ -120,7 +126,8 @@ export function parseMillStart(search: string | URLSearchParams): MillStart {
     drops: parseDrops(q.get('drops')),
     batch: clampBatch(parseFloat(q.get('batch') ?? '')),
     preset: isPreset(preset) ? preset : undefined,
-    params: parseMillParams(q, experimental)
+    params: parseMillParams(q, experimental),
+    roll: parseRollStyle(q)
   };
 }
 
@@ -145,6 +152,7 @@ export function formatMillQuery(start: Partial<MillStart>, extra: readonly (read
   if (drops) parts.push(`drops=${drops}`);
   if (start.batch !== undefined && Math.abs(start.batch - 1) > 1e-9) parts.push(`batch=${fmtNum(clampBatch(start.batch))}`);
   if (start.preset) parts.push(`preset=${start.preset}`);
+  if (start.roll === 'long') parts.push('roll=long');
   const p = start.params ?? {};
   for (const key of LINK_PARAM_KEYS) {
     const v = p[key];

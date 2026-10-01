@@ -661,9 +661,11 @@ the two sides as two bodies:
   replaces a live one; the operator moves clear it when they start.
 
 Cost while live: one more particle scatter and one more grid pass per
-substep. Memory always: `gvel` is three fields instead of one and the side
-accumulators are 8 i32 per node (about 116 MB more at `high`; a sparse
-window around the cut would do).
+substep. Memory: the first cut reallocates `gvel` to three fields and adds
+the side accumulators (8 i32 per node; together about 116 MB at `high`) and
+re-binds the kernels that use them (the pipelines are kept); a sim that is
+never cut carries none of it. A window around the cut instead of the whole
+grid would make it small.
 
 ---
 

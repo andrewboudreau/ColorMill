@@ -158,6 +158,12 @@ interface Kernel {
   readonly bindGroup: GPUBindGroup;
 }
 
+/** A compiled kernel's pipeline and layout, kept so its bind group can be rebuilt when a buffer is replaced. */
+interface CompiledKernel {
+  readonly pipeline: GPUComputePipeline;
+  readonly layout: GPUBindGroupLayout;
+}
+
 interface MutableStats {
   particleCount: number;
   particleCapacity: number;
@@ -205,10 +211,13 @@ export class GpuMpm implements GpuMpmSim {
   // grid
   private readonly bufGMass: GPUBuffer;
   private readonly bufGMom: GPUBuffer;
-  /** grid velocity: the shared field, then (while a drawn cut is live) side 1's and side 2's (grid.wgsl `side`) */
-  private readonly bufGVel: GPUBuffer;
-  /** drawn cut: per node the two sides' own mass + momentum (8 i32), zeroed by grid.wgsl `side` after use */
-  private readonly bufGSide: GPUBuffer;
+  /** grid velocity: the shared field; once a cut has been drawn, also side 1's and side 2's after it
+   *  (grid.wgsl `side`); it is reallocated three times as large by the first cutAlong (ensureCutBuffers) */
+  private bufGVel: GPUBuffer;
+  /** drawn cut: per node the two sides' own mass + momentum (8 i32), zeroed by grid.wgsl `side` after use;
+   *  a 16-byte stand-in until the first cut, so a sim that is never cut does not pay for it */
+  private bufGSide: GPUBuffer;
+  private cutBuffersReady = false;
   /** drawn cut: the polyline and widths (cut.wgsl CutParams) */
   private readonly bufCut: GPUBuffer;
   private readonly bufPMass: GPUBuffer;
@@ -239,8 +248,10 @@ export class GpuMpm implements GpuMpmSim {
   private readonly finC: GPUTexture;
   private readonly fineDispatch: [number, number, number];
 
-  private readonly kernels: Record<string, Kernel>;
+  private kernels: Record<string, Kernel>;
   private readonly modules: GPUShaderModule[] = [];
+  private readonly moduleCache = new Map<string, GPUShaderModule>();
+  private readonly compiled = new Map<string, CompiledKernel>();
   private particleDispatch: [number, number];
   private readonly gridDispatch: [number, number, number];
 
@@ -314,8 +325,8 @@ export class GpuMpm implements GpuMpmSim {
     this.bufFoldTables = mk(FOLD_TABLE_STRIDE * FOLD_BINS + 8 + 2 * FOLD_BINS * (FOLD_SLICES + 1));
     this.bufGMass = mk(d.nodeCount);
     this.bufGMom = mk(3 * d.nodeCount);
-    this.bufGVel = mk(3 * 4 * d.nodeCount);
-    this.bufGSide = mk(8 * d.nodeCount);
+    this.bufGVel = mk(4 * d.nodeCount);
+    this.bufGSide = mk(4);
     this.bufPMass = mk(d.nodeCount);
     this.bufPLat = mk(7 * d.nodeCount);
     this.bufPLoad = mk(d.nodeCount);
@@ -395,6 +406,7 @@ export class GpuMpm implements GpuMpmSim {
     }
   }
 
+  /** Build (or, when the kernel was compiled before, only re-bind) a compute kernel. */
   private makeKernel(name: string, module: GPUShaderModule, entryPoint: string, resources: Resource[]): Kernel {
     const device = this.device;
     const entries: GPUBindGroupLayoutEntry[] = [
@@ -416,21 +428,29 @@ export class GpuMpm implements GpuMpmSim {
         bindings.push({ binding, resource: r.view });
       }
     });
-    const bgl = device.createBindGroupLayout({ label: `${name}-bgl`, entries });
-    const pipeline = device.createComputePipeline({
-      label: name,
-      layout: device.createPipelineLayout({ bindGroupLayouts: [bgl] }),
-      compute: { module, entryPoint }
-    });
-    const bindGroup = device.createBindGroup({ label: `${name}-bg`, layout: bgl, entries: bindings });
-    return { name, pipeline, bindGroup };
+    let c = this.compiled.get(name);
+    if (!c) {
+      const layout = device.createBindGroupLayout({ label: `${name}-bgl`, entries });
+      const pipeline = device.createComputePipeline({
+        label: name,
+        layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
+        compute: { module, entryPoint }
+      });
+      c = { pipeline, layout };
+      this.compiled.set(name, c);
+    }
+    const bindGroup = device.createBindGroup({ label: `${name}-bg`, layout: c.layout, entries: bindings });
+    return { name, pipeline: c.pipeline, bindGroup };
   }
 
   private buildKernels(): Record<string, Kernel> {
     const device = this.device;
     const mod = (name: string, src: string): GPUShaderModule => {
+      const cached = this.moduleCache.get(name);
+      if (cached) return cached;
       const m = device.createShaderModule({ label: name, code: commonSrc + '\n' + src });
       this.modules.push(m);
+      this.moduleCache.set(name, m);
       return m;
     };
     const rw = (buffer: GPUBuffer): Resource => ({ kind: 'storage', buffer });
@@ -961,6 +981,7 @@ export class GpuMpm implements GpuMpmSim {
     const h = this.dims.h;
     const pts = simplifyPolyline(points, 0.25 * h, CUT_MAX_POINTS);
     if (pts.length < 2) return [];
+    this.ensureCutBuffers();
     const kerf = Math.max(0, opts.kerfCells ?? CUT_KERF_CELLS) * h;
     const band = kerf + CUT_BAND_CELLS * h;
     const gap = this.params.gap;
@@ -986,6 +1007,26 @@ export class GpuMpm implements GpuMpmSim {
     this.cutLive = true;
     this.cutEnd = this.statsData.simTime + Math.max(opts.seconds ?? CUT_SECONDS, 0);
     return pts;
+  }
+
+  /**
+   * The first cut allocates what the two sides need (the side accumulators, and room for two more
+   * velocity fields after the shared one) and re-binds the kernels that use them; the pipelines are
+   * kept. Until then a sim that is never cut carries none of it.
+   */
+  private ensureCutBuffers(): void {
+    if (this.cutBuffersReady) return;
+    const n = this.dims.nodeCount;
+    const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
+    const oldVel = this.bufGVel;
+    const oldSide = this.bufGSide;
+    this.bufGVel = this.device.createBuffer({ label: 'GpuMpm-gvel-cut', size: 3 * 16 * n, usage });
+    this.bufGSide = this.device.createBuffer({ label: 'GpuMpm-gside', size: 8 * 4 * n, usage });
+    this.kernels = this.buildKernels();
+    this.cutBuffersReady = true;
+    // destroy waits for the work already submitted with them
+    oldVel.destroy();
+    oldSide.destroy();
   }
 
   /** Forget a live cut: every particle is one body again. */

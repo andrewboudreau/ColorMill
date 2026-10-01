@@ -72,6 +72,9 @@ async function stats(page, poly, dtSinceCut) {
     const NB = 24;   // bins of 0.5 cell from -6 to +6 cells
     const hist = new Array(NB).fill(0);
     let total = 0, side1 = 0, side2 = 0, onSheet = 0;
+    // sanity: non-finite values, particles outside the domain or inside a roll, top speed (all / labelled)
+    let bad = 0, outside = 0, inRoll = 0, maxV = 0, maxVSide = 0;
+    const backZ = 0.75 - R - gap / 2;
     // sheet profile around the front roll, as it is NOW: particles and mean depth per 0.05 of arc s
     const PS = 0.05, P0 = -0.3, PN = 30;
     const prof = new Array(PN).fill(0), profDr = new Array(PN).fill(0);
@@ -84,6 +87,13 @@ async function stats(page, poly, dtSinceCut) {
       const sd = (f >> 2) & 3;
       if (sd === 1) side1++; else if (sd === 2) side2++;
       const x = snap.positions[3 * p], y = snap.positions[3 * p + 1], z = snap.positions[3 * p + 2];
+      const vx = snap.velocities[3 * p], vy = snap.velocities[3 * p + 1], vz = snap.velocities[3 * p + 2];
+      if (![x, y, z, vx, vy, vz].every(Number.isFinite)) { bad++; continue; }
+      if (x < 0 || y < 0 || z < 0 || x > 1.5 || y > 2.25 || z > 2.0) outside++;
+      if (Math.hypot(y - axisY, z - axisZ) < R - 1e-3 || Math.hypot(y - axisY, z - backZ) < R - 1e-3) inRoll++;
+      const sp = Math.hypot(vx, vy, vz);
+      maxV = Math.max(maxV, sp);
+      if (sd) maxVSide = Math.max(maxVSide, sp);
       const dy = y - axisY, dz = z - axisZ;
       const dr = Math.hypot(dy, dz) - R;
       if (dr < -0.5 * h || dr > depth) continue;
@@ -108,13 +118,14 @@ async function stats(page, poly, dtSinceCut) {
       if (b >= 0 && b < NB) { hist[b]++; total++; }
     }
     const profile = prof.map((n, i) => ({ s: +(P0 + (i + 0.5) * PS).toFixed(3), n, dr: n ? +(profDr[i] / n).toFixed(4) : 0 }));
-    return { hist, total, side1, side2, onSheet, count: snap.count, simTime: sim.stats.simTime, cutActive: sim.cutActive, h, profile };
+    return { hist, total, side1, side2, onSheet, count: snap.count, simTime: sim.stats.simTime, cutActive: sim.cutActive, h, profile,
+      sanity: { bad, outside, inRoll, maxV: +maxV.toFixed(3), maxVSide: +maxVSide.toFixed(3) } };
   }, [poly, dtSinceCut]);
 }
 
 function printHist(label, st) {
   const cells = st.hist.map((n, i) => `${((i / 2) - 6).toFixed(1).padStart(5)}:${String(n).padStart(4)}`);
-  log(`${label}: t=${st.simTime.toFixed(2)} s, sheet particles ${st.onSheet}, side labels ${st.side1}/${st.side2}, cut live ${st.cutActive}`);
+  log(`${label}: t=${st.simTime.toFixed(2)} s, sheet particles ${st.onSheet}, side labels ${st.side1}/${st.side2}, cut live ${st.cutActive}, sanity ${JSON.stringify(st.sanity)}`);
   log('  distance to the cut (cells) : particles');
   for (let i = 0; i < cells.length; i += 6) log('  ' + cells.slice(i, i + 6).join('  '));
   log('  sheet profile (s: particles per 0.05 of arc over x 0.1..1.4, mean depth):');
@@ -122,7 +133,7 @@ function printHist(label, st) {
   const inner = st.hist.slice(10, 14).reduce((a, b) => a + b, 0);   // |d| < 1 cell
   const outer = st.hist.slice(0, 4).reduce((a, b) => a + b, 0) + st.hist.slice(20, 24).reduce((a, b) => a + b, 0);   // 4..6 cells out
   log(`  |d| < 1 cell: ${inner} particles; 4-6 cells out (same total width): ${(outer / 2).toFixed(0)}  -> ratio ${(inner / Math.max(outer / 2, 1)).toFixed(2)}`);
-  return { inner, outer: outer / 2, hist: st.hist, profile: st.profile, side1: st.side1, side2: st.side2 };
+  return { inner, outer: outer / 2, hist: st.hist, profile: st.profile, side1: st.side1, side2: st.side2, sanity: st.sanity };
 }
 
 await withBrowser(async ({ page, baseUrl }) => {

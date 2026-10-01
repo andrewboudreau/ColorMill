@@ -32,9 +32,9 @@ without WebGPU.
   to it as a thin sheet and comes back over the top to rejoin the bank.
 - **Cut & fold, cut & roll.** A mill has no sideways transport of its own;
   the operator supplies it. Cut & fold cuts the sheet across at the crown,
-  pulls it off the roll into a flat tongue halved lengthwise, folds it the
-  way a flag is folded (a triangle rolling along the strip in three flips)
-  and sets the bundle down on the other half, alternating ends. Cut & roll
+  brings it off flat over the top of the mill folded in half lengthwise,
+  flag-folds it (a triangle flipping along the strip as it feeds in) and
+  drops the stack into the middle of the mill, alternating ends. Cut & roll
   takes
   everything off, rolls it
   into a log and feeds it back in end-first. ColorMill scripts both moves; a
@@ -96,14 +96,18 @@ pigment at all; a chunk's load spreads out as it is milled and the colour
 gets deeper where the load is higher.
 
 **Cut & fold** cuts the sheet across at the crown of the front roll and
-pulls everything past the cut (the sheet, about one turn of it, not the
-bank) off over the crown into a flat tongue that leans up and toward you,
-halving it lengthwise as it comes off. Then it folds the strip the way a
-flag is folded: a triangle rolls along it in three flips, the corner over
-the diagonal, the doubled triangle over the square's edge, the bundle over
-the next diagonal, each a page turn in the air. The finished bundle, a
-flat triangle eight sheets thick, is set down on the nip on the other
-half, where the rolls pull it in. **Cut & roll** takes
+brings everything past the cut (the sheet, about one turn of it, not the
+bank) off over the crown flat along the top of the mill, folded in half
+lengthwise as it comes so the strip is half the roll wide and two sheets
+thick (what reaches past the back roll drapes down its back). Then it
+folds the strip the way a flag is folded, on the mill: a triangle rolls
+along it toward the crown in three flips, the corner over the diagonal,
+the doubled triangle over the square's edge onto the next square, that
+over the next diagonal, each flip as soon as the strip it lands on is off
+the roll, each a page turn on the hinge. The finished stack, a flat
+triangle half the roll wide and eight sheets thick,
+is let go where it lies, over the nip, and the rolls pull it in. Which end
+is cut decides which side's material lands on top. **Cut & roll** takes
 everything on the mill and winds it off the roll into a volume-preserving log
 (bank kneaded into the core, sheet wrapped around it): a full-width coil on
 the crown of the front roll that the sheet rides up into at the roll's own
@@ -162,7 +166,7 @@ lays the same three bands on the bank.
 | Chunk-size dots (bottom bar) | Small, medium or large chunk for the next tap (also `-` / `=`, or `?chunk=s`, `m`, `l`) |
 | Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack) |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
-| **Cut & fold** / `C` | Cut the sheet across at the crown, pull it off into a tongue halved lengthwise, fold it like a flag in three flips of a triangle along the strip, and set the bundle down on the other half (ends alternate) |
+| **Cut & fold** / `C` | Cut the sheet across at the crown, bring it off flat over the top of the mill folded in half, flag-fold it in three flips of a triangle along the strip, and drop the stack into the middle of the mill (ends alternate) |
 | **Cut & roll** / `F` | Cut everything off, roll it into a log, fold the roll in half and drop it back on the nip (or lower it in: **Log feed** slider). **Long roll** (drawer checkbox, `?roll=long`) skips the fold and stands the full-length roll up as one, leaning further to fit |
 | **Clear pigment** | Reset every particle to clear silicone |
 | **Reset** / `R` | Re-seed the bank |

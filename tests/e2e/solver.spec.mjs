@@ -219,8 +219,9 @@ export default async function run() {
     assert(!chunk.error && chunk.bad === 0, 'chunk particles are finite: ' + chunk.error);
     assert(chunk.added > 500 && chunk.count === chunk.n0 + chunk.added && chunk.statCount === chunk.count, `chunk added particles consistently (${JSON.stringify(chunk)})`);
 
-    // --- cut & fold (the flag fold): the sheet past the cut at the crown is pulled off into a tongue, halved,
-    // folded in three flips of a triangle along the strip, and the bundle set down on the nip on the right half ---
+    // --- cut & fold (the flag fold): the sheet past the cut at the crown comes off flat over the top of the
+    // mill folded in half, is flag-folded in three flips of a triangle along the strip, and the stack is let go
+    // where it lies, over the nip ---
     const flagT = await page.evaluate(() => { window.__solver.sim.cutAndFlop('left'); return window.__solver.sim.operatorFlagTimes; });
     const flop = await page.evaluate(async ([nStart, nFold0, nEnd, nMax]) => {
       await window.__solver.stepFrames(4);
@@ -228,32 +229,40 @@ export default async function run() {
       const idx = [];
       let sumX0 = 0;
       for (let p = 0; p < s.count; p++) if (s.flags[p] & 1) { idx.push(p); sumX0 += s.positions[3 * p]; }
-      // the first flip is over: the strip's first square is off the roll in the tongue, up and in front of the crown
+      // the first flip is over: the strip's first square is off the roll, flat on top of the mill behind the crown
       await window.__solver.stepFrames(nFold0 - 4);
       const m = await window.__solver.snapshot();
-      let kinM = 0, above = 0, inFront = 0;
-      const crownY = 0.55 + 0.32, faceZ = 0.75 + 0.32 + 0.02 + 0.32;
-      for (let p = 0; p < m.count; p++) if (m.flags[p] & 1) { kinM++; if (m.positions[3 * p + 1] > crownY + 0.3) above++; if (m.positions[3 * p + 2] > faceZ) inFront++; }
+      let kinM = 0, onTop = 0, inFront = 0, high = 0;
+      const crownY = 0.55 + 0.32, axisZ = 0.75 + 0.32 + 0.02, faceZ = axisZ + 0.32;
+      for (let p = 0; p < m.count; p++) if (m.flags[p] & 1) {
+        kinM++;
+        const y = m.positions[3 * p + 1], z = m.positions[3 * p + 2];
+        if (y > crownY - 0.05 && z < axisZ + 0.05) onTop++;
+        if (z > faceZ) inFront++;
+        if (y > crownY + 1.0) high++;
+      }
       // the rest of the press: wait until the operator is done
       let steps = 0;
       while (window.__solver.sim.operatorBusy && steps < nMax) { await window.__solver.stepFrames(10); steps += 10; }
       const e = await window.__solver.snapshot();
-      let kin = 0, sumX1 = 0, sumY1 = 0;
+      let kin = 0, sumX1 = 0, sumY1 = 0, sumZ1 = 0;
       for (let p = 0; p < e.count; p++) if (e.flags[p] & 1) kin++;
-      for (const p of idx) { sumX1 += e.positions[3 * p]; sumY1 += e.positions[3 * p + 1]; }
-      return { lifted: idx.length, count: s.count, meanX0: sumX0 / idx.length, kinM, above, inFront, steps, busy: window.__solver.sim.operatorBusy, kin, meanX1: sumX1 / idx.length, meanY1: sumY1 / idx.length,
+      for (const p of idx) { sumX1 += e.positions[3 * p]; sumY1 += e.positions[3 * p + 1]; sumZ1 += e.positions[3 * p + 2]; }
+      return { lifted: idx.length, count: s.count, meanX0: sumX0 / idx.length, kinM, onTop, inFront, high, steps, busy: window.__solver.sim.operatorBusy, kin, meanX1: sumX1 / idx.length, meanY1: sumY1 / idx.length, meanZ1: sumZ1 / idx.length,
         positions: Array.from(e.positions), velocities: Array.from(e.velocities), latents: Array.from(e.latents), deformation: Array.from(e.deformation), flags: Array.from(e.flags), error: window.__solver.error };
-    }, [4, framesFor(flagT.folds[0] + 0.4 + 0.05), framesFor(flagT.end), framesFor(flagT.end + 2)]);
+    }, [4, framesFor(flagT.folds[0] + flagT.flip + 0.05), framesFor(flagT.end), framesFor(flagT.end + 2)]);
     const aFlop = analyse(flop, dims);
-    console.log(`  cut & fold (flips at ${flagT.folds.map((t) => t.toFixed(2)).join(' / ')} s, set-down ${flagT.setDown.toFixed(2)}, end ${flagT.end.toFixed(2)}): took ${flop.lifted} of ${flop.count} (mean x ${flop.meanX0.toFixed(3)}); after the first flip ${flop.kinM} held, ${flop.above} above the crown, ${flop.inFront} in front of the face; done after ${flop.steps} more frames: mean x ${flop.meanX1.toFixed(3)}, y ${flop.meanY1.toFixed(3)}; ${flop.kin} still held; ${JSON.stringify({ bad: aFlop.bad, outside: aFlop.outside, inRoller: aFlop.inRoller })}`);
+    console.log(`  cut & fold (flips at ${flagT.folds.map((t) => t.toFixed(2)).join(' / ')} s, ${flagT.flip.toFixed(2)} s each, end ${flagT.end.toFixed(2)}): took ${flop.lifted} of ${flop.count} (mean x ${flop.meanX0.toFixed(3)}); after the first flip ${flop.kinM} held, ${flop.onTop} on top of the mill, ${flop.inFront} in front of the face, ${flop.high} high; done after ${flop.steps} more frames: mean x ${flop.meanX1.toFixed(3)}, y ${flop.meanY1.toFixed(3)}, z ${flop.meanZ1.toFixed(3)}; ${flop.kin} still held; ${JSON.stringify({ bad: aFlop.bad, outside: aFlop.outside, inRoller: aFlop.inRoller })}`);
     assert(!flop.error, 'no WebGPU errors during cut & fold: ' + flop.error);
     assert(flop.lifted > 0.15 * flop.count && flop.lifted < 0.9 * flop.count, `the flag fold takes the sheet past the cut (${flop.lifted} of ${flop.count})`);
     assert(flop.kinM === flop.lifted, `everything taken is still held after the first flip (${flop.kinM} of ${flop.lifted})`);
-    assert(flop.above > 0.1 * flop.lifted, `the tongue is up over the crown after the first flip (${flop.above} of ${flop.lifted} above it)`);
-    assert(flop.inFront > 0.05 * flop.lifted, `the tongue leans out in front of the face (${flop.inFront} of ${flop.lifted} past it)`);
+    assert(flop.onTop > 0.15 * flop.lifted, `the strip lies on top of the mill behind the crown after the first flip (${flop.onTop} of ${flop.lifted})`);
+    assert(flop.inFront < 0.02 * flop.lifted, `nothing stands out in front of the face (${flop.inFront} of ${flop.lifted} past it)`);
+    assert(flop.high < 0.05 * flop.lifted, `the strip does not stand up in the air (${flop.high} of ${flop.lifted} a metre over the crown)`);
     assert(!flop.busy && flop.kin === 0, `everything is released once the press is over (${flop.kin} still held, busy ${flop.busy})`);
-    assert(flop.meanX1 > 0.75, `the bundle is set down on the right half (mean x ${flop.meanX0.toFixed(3)} -> ${flop.meanX1.toFixed(3)})`);
-    assert(flop.meanY1 > 0.8 && flop.meanY1 < 1.7, `the bundle sits on the nip (mean y ${flop.meanY1.toFixed(3)})`);
+    assert(flop.meanX1 > 0.45 && flop.meanX1 < 1.05, `the stack is centred on the roll (mean x ${flop.meanX0.toFixed(3)} -> ${flop.meanX1.toFixed(3)})`);
+    assert(flop.meanZ1 > 0.5 && flop.meanZ1 < 1.15, `the stack lies over the nip behind the crown (mean z ${flop.meanZ1.toFixed(3)})`);
+    assert(flop.meanY1 > 0.8 && flop.meanY1 < 2.0, `the stack sits on the mill (mean y ${flop.meanY1.toFixed(3)})`);
     assert(aFlop.bad === 0 && aFlop.outside === 0 && aFlop.inRoller === 0 && aFlop.n === chunk.count, 'state sane after cut & fold');
 
     // --- optional: cut & roll ---------------------------------------------

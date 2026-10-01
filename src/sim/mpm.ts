@@ -99,33 +99,49 @@ export function foldDuration(logFeed: number, omega: number = DEFAULT_PARAMS.ome
 }
 /** Script length of the lowered-in move at FOLD_FEED_SPEED (≈ 10.5 s). */
 export const FOLD_DURATION = foldDuration(FOLD_FEED_SPEED);
-/** Cut & fold (fold.wgsl, design §6b), done the way a flag is folded: the sheet past the cut at
- * the crown (1.5 pi R of it, the wind's arc) is pulled off the roll at the wind speed into a flat
- * tongue, halved lengthwise as it comes off, and a triangle rolls along the strip in three flips
- * of FLAG_FLIP_SECONDS each: the corner over the diagonal once the first square is off, then the
- * bundle over the square's bottom edge and over the next diagonal once the whole strip is off.
- * The bundle is then carried onto the nip on the other half in FLAG_SET_SECONDS. */
-export const FLAG_FLIP_SECONDS = 0.4;
-export const FLAG_SET_SECONDS = 0.5;
+/** Cut & fold (fold.wgsl, design §6b), done the way a flag is folded, on the mill: the sheet past
+ * the cut at the crown (1.5 pi R of it, the wind's arc) comes off the roll at the wind speed flat
+ * along the top of the mill heading back over the nip (draping down the back roll's back where it
+ * reaches past its crown), folded lengthwise into FLAG_BANDS as it comes, and a triangle rolls
+ * along the strip toward the crown as it feeds in: 2 * FLAG_SQUARES - 1
+ * flips, each as soon as the strip it lands on is off the roll and the flip before is over, each
+ * flagFlipSeconds long (a fraction of the time a square takes to come off, capped). The finished
+ * stack lies over the nip and is let go there FLAG_HOLD_SECONDS after the last flip. */
+export const FLAG_BANDS = 2;
+export const FLAG_SQUARES = 2;
+export const FLAG_FLIP_MAX_SECONDS = 0.5;
+export const FLAG_FLIP_FRACTION = 0.45;
+export const FLAG_HOLD_SECONDS = 0.2;
+/** How long each flip takes at roll speed omega: FLAG_FLIP_FRACTION of a square's feed time, at most FLAG_FLIP_MAX_SECONDS. */
+export function flagFlipSeconds(omega: number): number {
+  const square = GEOMETRY.length / FLAG_BANDS;
+  return Math.min(FLAG_FLIP_MAX_SECONDS, (FLAG_FLIP_FRACTION * square) / windSpeed(omega));
+}
 /** The flag fold's timeline at roll speed omega (sim seconds from the start of the move). */
 export interface FlagTimes {
   /** the wind speed the sheet comes off at */
   readonly speed: number;
-  /** when each of the three flips starts */
-  readonly folds: readonly [number, number, number];
-  /** when the bundle is carried onto the nip */
-  readonly setDown: number;
+  /** each flip's length */
+  readonly flip: number;
+  /** when each flip starts (2 * FLAG_SQUARES - 1 of them) */
+  readonly folds: readonly number[];
   /** when everything is released */
   readonly end: number;
 }
+/** Mirrors flagStart() in fold.wgsl: flip k starts once the strip it lands on is off the roll (q + 1 squares
+ * for the diagonal of square q, q + 2 for its bottom edge onto the next) and the flip before it is over. */
 export function flagTimes(omega: number): FlagTimes {
   const speed = windSpeed(omega);
-  const square = 0.5 * GEOMETRY.length;
-  const t0 = square / speed;                                            // square 0 is off the roll
-  const t1 = Math.max(t0 + FLAG_FLIP_SECONDS, windArc() / speed);       // the whole strip is off
-  const t2 = t1 + FLAG_FLIP_SECONDS;
-  const setDown = t2 + FLAG_FLIP_SECONDS;
-  return { speed, folds: [t0, t1, t2], setDown, end: setDown + FLAG_SET_SECONDS };
+  const flip = flagFlipSeconds(omega);
+  const square = GEOMETRY.length / FLAG_BANDS;
+  const folds: number[] = [];
+  let t = 0;
+  for (let k = 0; k < 2 * FLAG_SQUARES - 1; k++) {
+    const squaresOff = (k >> 1) + 1 + (k & 1);
+    t = Math.max(k > 0 ? t + flip : 0, (squaresOff * square) / speed);
+    folds.push(t);
+  }
+  return { speed, flip, folds, end: folds[folds.length - 1] + flip + FLAG_HOLD_SECONDS };
 }
 /** Operator-move modes carried in P.fold.x: 1 = cut & roll (log); 2 / 3 = cut & fold (the flag
  * fold) with the cut at the x = 0 / x = L end. */
@@ -572,7 +588,7 @@ export class GpuMpm implements GpuMpmSim {
     f.set([mu, lambda, this.config.material.thetaC, this.config.material.thetaS], o + 20);
     f.set([pVol, pMass, pMass / (pVol * MATERIAL_DENSITY), p.dispersion], o + 24);
     if (this.foldMode === 1) f.set([foldActive ? 1 : 0, foldT, this.foldRollSeconds, this.foldFeed], o + 28);
-    else f.set([foldActive ? this.foldMode : 0, foldT, this.flag.setDown, FLAG_FLIP_SECONDS], o + 28);
+    else f.set([foldActive ? this.foldMode : 0, foldT, this.flag.flip, 0], o + 28);
     // fold: the live bank top is reduced on the GPU (fold.wgsl); fold2.x is only the fallback
     const yMax = GEOMETRY.domain[1] - 3 * h;
     const bankTopFallback = Math.min(bankTopY(this.batch, this.config.params), yMax);
@@ -592,7 +608,7 @@ export class GpuMpm implements GpuMpmSim {
     // cut & roll: peel and wind, double, lift; cut & fold: the bundle's square (fold.wgsl)
     // (a negative double time keeps the roll long: no fold in half); cut & fold: the wind speed and the three flips
     if (this.foldMode === 1) f.set([this.foldWindSpeed, this.foldWindSeconds, this.foldLong ? -1 : DOUBLE_SECONDS, LIFT_SECONDS], o + 52);
-    else f.set([this.flag.speed, this.flag.folds[0], this.flag.folds[1], this.flag.folds[2]], o + 52);
+    else f.set([this.flag.speed, 0, 0, 0], o + 52);
   }
 
   // ---------------------------------------------------------------------------

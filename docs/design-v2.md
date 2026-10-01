@@ -26,7 +26,7 @@ gap — we exaggerate the gap so it is resolvable on the grid).
 | Symbol | Value | Meaning |
 | --- | --- | --- |
 | `L` | 1.5 | Roller (and domain) length along x |
-| `domain` | (1.5, 2.25, 2.0) | Domain size (x, y, z); origin at (0,0,0); the headroom holds the operator's standing log and dropped pigment chunks, the depth in front of the front roll the cut & fold flap's swing |
+| `domain` | (1.5, 2.25, 2.0) | Domain size (x, y, z); origin at (0,0,0); the headroom holds the operator's standing log, the flag fold's stack and dropped pigment chunks |
 | `R` | 0.32 | Roller radius |
 | `yc` | 0.55 | Height of both roller axes |
 | `zNip` | 0.75 | z of the nip centre (mid-plane between rollers) |
@@ -538,60 +538,75 @@ Nothing is placed inside existing material and no material is left behind. Expos
 
 The other move an operator makes, and the one most milling actually uses
 (reference footage: silicone colour mixing on a lab mill), done the way a
-flag is folded. The sheet is cut **across** at the crown of the front roll
-(`WIND_CONTACT`, as cut & roll's coil contact), and everything past the cut
-round to the nip exit is the flag: the sheet only (radial depth off the
-roll below `sheetDepth()` = 2.5 gap + h; the bank is deeper and stays),
-1.5πR ≈ 1.5 of it, the arc cut & roll winds in. A square of strip (W = L/2
-across and W along) is 134° of arc, so the strip cannot be folded one
-square onto the next on the roll the way a flat flag is; the operator
-pulls it off first:
+flag is folded, on the mill. The sheet is cut **across** at the crown of
+the front roll (`WIND_CONTACT`, as cut & roll's coil contact), and
+everything past the cut round to the nip exit is the flag: the sheet only
+(radial depth off the roll below `sheetDepth()` = 2.5 gap + h; the bank is
+deeper and stays), 1.5πR ≈ 1.5 of it, the arc cut & roll winds in. A
+square of strip is more arc than the roll has room for, so the strip is
+not folded on the roll; it comes off first, flat along the top of the
+mill, and is folded there, over the nip, where the finished stack is let
+go for the rolls to pull in, as the log is:
 
-1. **Tongue**: the sheet rides the roll to the crown at the wind speed
-   (`windSpeed(omega)`, as cut & roll) and comes off over the crown into a
-   flat tongue that leaves the crown up and toward the viewer at
-   `FLAG_ANGLE` = 60° (its far end, 1.5 out, reaches the ceiling and the
-   front of the domain at once, which is the most the box allows). As it
-   comes off it is **halved lengthwise**: the half away from the cut end
-   folds over onto the other, roll side up (a `FLAG_HOP` = 0.25 s hop that
-   crosses the roll), so the strip is W wide, two sheets thick and about
-   two squares long, in its own flat coordinates (u in from the cut end, v
-   along the strip from the free end, n out of the plane).
-2. **Three flips** (`FLAG_FLIP_SECONDS` = 0.4 s each, `flagTimes(omega)`):
-   a triangle rolls along the strip, flipping over one edge then the other
-   and taking in a fresh triangle of strip each time:
-   - fold 0, once square 0 is off the roll (`W / speed`): the corner at
-     the free end, u + v < W, over the square's diagonal u + v = W onto the
-     triangle below it;
-   - fold 1, once the whole strip is off (`1.5πR / speed`): the doubled
-     triangle over the square's bottom edge v = W onto the next square's
-     seam-side triangle u ≥ v − W;
-   - fold 2, right after: that bundle over the next square's diagonal
-     u = v − W onto the roll-end triangle beside it.
+1. **The strip** (`stripPoint`): the sheet rides the roll to the crown at
+   the wind speed (`windSpeed(omega)`, as cut & roll) and comes off over
+   the crown flat on top of the mill at crown height, heading back over
+   the nip (the strip's v runs from the free end, the cut, toward the
+   crown; its distance behind the crown is `sOff − v`, the strip's length
+   off the roll so far less v); what reaches past the back roll's crown
+   (0.68 behind the front one) drapes down the back of the back roll, n
+   radially out, since the strip is longer than the mill is deep. As it
+   comes it is **folded lengthwise in half** (`FLAG_BANDS` = 2): band b of
+   the width in from the cut end goes to ply b, mirrored when b is odd, in
+   a `FLAG_HOP` = 0.25 s hop from the crown that crosses the roll. So the
+   strip is Ws = L/2 = 0.75 wide, centred on the roll, two sheets thick
+   (`plyT()` = 2 `sheetT()`) and `FLAG_SQUARES` = 2 squares long (1.5πR /
+   Ws = 2.01), in its own flat coordinates (u in from the cut end, v along
+   the strip from the free end, n up).
+2. **Three flips** (2 `FLAG_SQUARES` − 1; `flagFlipSeconds(omega)` each,
+   `FLAG_FLIP_FRACTION` = 0.45 of a square's feed time, at most
+   `FLAG_FLIP_MAX_SECONDS` = 0.5 s; `flagTimes(omega)` / `flagStart(k)`):
+   a triangle rolls along the strip toward the crown as the strip feeds
+   in, taking in a fresh triangle of strip each time, so the growing
+   stack stays over the nip. Flip k starts as soon as the strip it lands
+   on is off the roll (q + 1 squares for the diagonal of square q, q + 2
+   for its bottom edge onto the next) and the flip before it is over:
+   - fold 0: the corner at the free end, u + v < Ws, over square 0's
+     diagonal u + v = Ws onto the triangle beside it;
+   - fold 1: the doubled triangle over square 0's bottom edge v = Ws onto
+     square 1's seam-side triangle u ≥ v − Ws;
+   - fold 2: that over square 1's diagonal u = v − Ws. The last bottom
+     edge has no square to land on. (Three bands and five flips were
+     tried: the eighteen-sheet stack stands a metre tall on a half-metre
+     triangle, a tower; `FLAG_BANDS` / `FLAG_SQUARES` are the knobs.)
    Each flip is a page turn on its hinge in the strip's coordinates: the
    in-plane offset −w → +w across the hinge, the height mirrored through
-   the bundle's top so it lands roll side up on one fresh ply (`plyT()` =
-   two sheets), the swing's reach out of the plane flattened by `FLAG_LIFT`
-   = 0.5 (the flap tips may touch the ceiling for a moment). The bundle
-   ends as a flat triangle W across and four plies (eight sheets) thick on
-   square 1, near the crown.
-3. **Set-down** (`FLAG_SET_SECONDS` = 0.5 s): the bundle is carried over
-   onto the other half of the roll (x → L − x) and set down centred on the
-   nip, its lowest ply just above the pile the nip is eating (`pileTop()`
-   or the roll tops), and released. About 2.9 s in all at the default
-   speed.
+   the stack's top so it lands roll side up on one fresh ply, the swing's
+   reach out of the plane flattened by `FLAG_LIFT` = 0.6. The stack never
+   leaves the top of the mill: the hinges and landings are within two
+   squares of the crown, and only the strip's free end, before fold 1
+   takes it, is draped over the back roll.
+3. **Release**: `FLAG_HOLD_SECONDS` = 0.2 s after the last flip the stack,
+   a flat triangle Ws across and four plies (eight sheets) thick lying
+   over the nip behind the crown, is released where it is, at rest with
+   F = I, and the rolls pull it in. About 2.5 s in all at the default
+   speed (`flagTimes(omega).end`; a crawling roll is pulled at the wind
+   speed's floor, so the press still ends).
 
-One selection, one move script, one release. `P.fold` = (mode, t, set-down
-start, flip length), `P.fold4` = (wind speed, the three flip starts); the
-sim exposes `operatorFlagTimes`. Ends alternate between presses.
+One selection, one move script, one release. `P.fold` = (mode, t, flip
+length, 0), `P.fold4` = (wind speed, 0, 0, 0); the sim exposes
+`operatorFlagTimes` (speed, flip, folds[3], end). Ends alternate between
+presses: the band nearest the cut end is the bottom ply, so which end is
+cut decides which side of the roll's material lands on top.
 `GpuMpmSim.cutAndFlop(side)` starts the press; UI button "Cut & fold" (C).
 No knife is drawn: the pull starts when the button is pressed.
 
-One press folds about a turn of the sheet into an eight-sheet triangle and
-lays it on the other half; alternating ends walks material back and forth
-across the middle, which is where a real mill's lateral mixing comes from.
-Cut & roll remains the move that reaches from one end of the roll to the
-other.
+One press folds about a turn of the sheet into an eight-sheet triangle
+half the roll wide and drops it into the middle of the mill;
+alternating ends swaps which side ends up on top, and the rolls spread the
+stack back out across the width, which is where a real mill's lateral
+mixing comes from. Cut & roll remains the move that reaches from one end
+of the roll to the other.
 
 ---
 

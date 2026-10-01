@@ -553,14 +553,17 @@ go for the rolls to pull in, as the log is:
    the crown flat on top of the mill at crown height, heading back over
    the nip (the strip's v runs from the free end, the cut, toward the
    crown; its distance behind the crown is `sOff − v`, the strip's length
-   off the roll so far less v). As it comes it is **folded lengthwise into
-   `FLAG_BANDS` = 3** bands: band b of the width in from the cut end goes
-   to ply b, mirrored when b is odd, in a `FLAG_HOP` = 0.25 s hop from the
-   crown. So the strip is Ws = L/3 = 0.5 wide, centred on the roll, three
-   sheets thick (`plyT()` = 3 `sheetT()`) and `FLAG_SQUARES` = 3 squares
-   long (1.5πR / Ws = 3.02), in its own flat coordinates (u in from the
-   cut end, v along the strip from the free end, n up).
-2. **Five flips** (2 `FLAG_SQUARES` − 1; `flagFlipSeconds(omega)` each,
+   off the roll so far less v); what reaches past the back roll's crown
+   (0.68 behind the front one) drapes down the back of the back roll, n
+   radially out, since the strip is longer than the mill is deep. As it
+   comes it is **folded lengthwise in half** (`FLAG_BANDS` = 2): band b of
+   the width in from the cut end goes to ply b, mirrored when b is odd, in
+   a `FLAG_HOP` = 0.25 s hop from the crown that crosses the roll. So the
+   strip is Ws = L/2 = 0.75 wide, centred on the roll, two sheets thick
+   (`plyT()` = 2 `sheetT()`) and `FLAG_SQUARES` = 2 squares long (1.5πR /
+   Ws = 2.01), in its own flat coordinates (u in from the cut end, v along
+   the strip from the free end, n up).
+2. **Three flips** (2 `FLAG_SQUARES` − 1; `flagFlipSeconds(omega)` each,
    `FLAG_FLIP_FRACTION` = 0.45 of a square's feed time, at most
    `FLAG_FLIP_MAX_SECONDS` = 0.5 s; `flagTimes(omega)` / `flagStart(k)`):
    a triangle rolls along the strip toward the crown as the strip feeds
@@ -572,33 +575,34 @@ go for the rolls to pull in, as the log is:
      diagonal u + v = Ws onto the triangle beside it;
    - fold 1: the doubled triangle over square 0's bottom edge v = Ws onto
      square 1's seam-side triangle u ≥ v − Ws;
-   - fold 2: that over square 1's diagonal u = v − Ws; fold 3: over its
-     bottom edge v = 2 Ws onto square 2; fold 4: over square 2's diagonal.
-     The last bottom edge has no square to land on.
+   - fold 2: that over square 1's diagonal u = v − Ws. The last bottom
+     edge has no square to land on. (Three bands and five flips were
+     tried: the eighteen-sheet stack stands a metre tall on a half-metre
+     triangle, a tower; `FLAG_BANDS` / `FLAG_SQUARES` are the knobs.)
    Each flip is a page turn on its hinge in the strip's coordinates: the
    in-plane offset −w → +w across the hinge, the height mirrored through
    the stack's top so it lands roll side up on one fresh ply, the swing's
    reach out of the plane flattened by `FLAG_LIFT` = 0.6. The stack never
-   leaves the top of the mill: the strip's far end is at most one square
-   behind the crown when the flips start (Ws + the 0.6 s hop's reach,
-   well inside the 1.09 between the crown and the back wall).
+   leaves the top of the mill: the hinges and landings are within two
+   squares of the crown, and only the strip's free end, before fold 1
+   takes it, is draped over the back roll.
 3. **Release**: `FLAG_HOLD_SECONDS` = 0.2 s after the last flip the stack,
-   a flat triangle Ws across and six plies (eighteen sheets) thick lying
+   a flat triangle Ws across and four plies (eight sheets) thick lying
    over the nip behind the crown, is released where it is, at rest with
-   F = I, and the rolls pull it in. About 2.3 s in all at the default
+   F = I, and the rolls pull it in. About 2.5 s in all at the default
    speed (`flagTimes(omega).end`; a crawling roll is pulled at the wind
    speed's floor, so the press still ends).
 
 One selection, one move script, one release. `P.fold` = (mode, t, flip
 length, 0), `P.fold4` = (wind speed, 0, 0, 0); the sim exposes
-`operatorFlagTimes` (speed, flip, folds[5], end). Ends alternate between
+`operatorFlagTimes` (speed, flip, folds[3], end). Ends alternate between
 presses: the band nearest the cut end is the bottom ply, so which end is
 cut decides which side of the roll's material lands on top.
 `GpuMpmSim.cutAndFlop(side)` starts the press; UI button "Cut & fold" (C).
 No knife is drawn: the pull starts when the button is pressed.
 
-One press folds about a turn of the sheet into an eighteen-sheet triangle
-a third of the roll wide and drops it into the middle of the mill;
+One press folds about a turn of the sheet into an eight-sheet triangle
+half the roll wide and drops it into the middle of the mill;
 alternating ends swaps which side ends up on top, and the rolls spread the
 stack back out across the width, which is where a real mill's lateral
 mixing comes from. Cut & roll remains the move that reaches from one end

@@ -101,13 +101,14 @@ export function foldDuration(logFeed: number, omega: number = DEFAULT_PARAMS.ome
 export const FOLD_DURATION = foldDuration(FOLD_FEED_SPEED);
 /** Cut & fold (fold.wgsl, design §6b), done the way a flag is folded, on the mill: the sheet past
  * the cut at the crown (1.5 pi R of it, the wind's arc) comes off the roll at the wind speed flat
- * along the top of the mill heading back over the nip, folded lengthwise into FLAG_BANDS as it
- * comes, and a triangle rolls along the strip toward the crown as it feeds in: 2 * FLAG_SQUARES - 1
+ * along the top of the mill heading back over the nip (draping down the back roll's back where it
+ * reaches past its crown), folded lengthwise into FLAG_BANDS as it comes, and a triangle rolls
+ * along the strip toward the crown as it feeds in: 2 * FLAG_SQUARES - 1
  * flips, each as soon as the strip it lands on is off the roll and the flip before is over, each
  * flagFlipSeconds long (a fraction of the time a square takes to come off, capped). The finished
  * stack lies over the nip and is let go there FLAG_HOLD_SECONDS after the last flip. */
-export const FLAG_BANDS = 3;
-export const FLAG_SQUARES = 3;
+export const FLAG_BANDS = 2;
+export const FLAG_SQUARES = 2;
 export const FLAG_FLIP_MAX_SECONDS = 0.5;
 export const FLAG_FLIP_FRACTION = 0.45;
 export const FLAG_HOLD_SECONDS = 0.2;

@@ -220,7 +220,7 @@ export default async function run() {
     assert(chunk.added > 500 && chunk.count === chunk.n0 + chunk.added && chunk.statCount === chunk.count, `chunk added particles consistently (${JSON.stringify(chunk)})`);
 
     // --- cut & fold (the flag fold): the sheet past the cut at the crown comes off flat over the top of the
-    // mill folded in thirds, is flag-folded in five flips of a triangle along the strip, and the stack is let go
+    // mill folded in half, is flag-folded in three flips of a triangle along the strip, and the stack is let go
     // where it lies, over the nip ---
     const flagT = await page.evaluate(() => { window.__solver.sim.cutAndFlop('left'); return window.__solver.sim.operatorFlagTimes; });
     const flop = await page.evaluate(async ([nStart, nFold0, nEnd, nMax]) => {

@@ -80,23 +80,22 @@ describe('peel and wind timing', () => {
 });
 
 describe('flag fold timing', () => {
-  it('flips as soon as the strip each flip lands on is off the roll, five flips, then lets the stack go', () => {
+  it('flips as soon as the strip each flip lands on is off the roll, 2 * squares - 1 flips, then lets the stack go', () => {
     const omega = DEFAULT_PARAMS.omega;
     const f = flagTimes(omega);
     const square = GEOMETRY.length / FLAG_BANDS;
     expect(f.speed).toBeCloseTo(windSpeed(omega), 9);
     expect(f.flip).toBeCloseTo(Math.min(FLAG_FLIP_MAX_SECONDS, (FLAG_FLIP_FRACTION * square) / f.speed), 9);
     expect(f.folds).toHaveLength(2 * FLAG_SQUARES - 1);
-    // the diagonal of square 0 once square 0 is off; its bottom edge once square 1 is off; and so on
+    // the diagonal of square q once q + 1 squares are off; its bottom edge once q + 2 are; never before the flip before ends
     expect(f.folds[0]).toBeCloseTo(square / f.speed, 9);
-    expect(f.folds[1]).toBeCloseTo(Math.max(f.folds[0] + f.flip, (2 * square) / f.speed), 9);
-    expect(f.folds[2]).toBeCloseTo(Math.max(f.folds[1] + f.flip, (2 * square) / f.speed), 9);
-    expect(f.folds[3]).toBeCloseTo(Math.max(f.folds[2] + f.flip, (3 * square) / f.speed), 9);
-    expect(f.folds[4]).toBeCloseTo(Math.max(f.folds[3] + f.flip, (3 * square) / f.speed), 9);
-    for (let k = 1; k < f.folds.length; k++) expect(f.folds[k]).toBeGreaterThanOrEqual(f.folds[k - 1] + f.flip - 1e-9);
-    expect(f.end).toBeCloseTo(f.folds[4] + f.flip + FLAG_HOLD_SECONDS, 9);
-    // the strip is a hair over three squares (1.5 pi R = 1.508 vs 1.5), so it is all off before the last flip ends
-    expect(f.folds[4] + f.flip).toBeGreaterThan(windArc() / f.speed);
+    for (let k = 1; k < f.folds.length; k++) {
+      const squaresOff = (k >> 1) + 1 + (k & 1);
+      expect(f.folds[k]).toBeCloseTo(Math.max(f.folds[k - 1] + f.flip, (squaresOff * square) / f.speed), 9);
+    }
+    expect(f.end).toBeCloseTo(f.folds[f.folds.length - 1] + f.flip + FLAG_HOLD_SECONDS, 9);
+    // the strip is a hair over FLAG_SQUARES squares (1.5 pi R = 1.508 vs 1.5), so it is all off before the last flip ends
+    expect(f.folds[f.folds.length - 1] + f.flip).toBeGreaterThan(windArc() / f.speed);
     expect(f.end).toBeGreaterThan(1.5);
     expect(f.end).toBeLessThan(4);
     // a crawling roll is pulled at the floor speed, so the press still ends

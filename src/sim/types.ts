@@ -108,8 +108,8 @@ export interface GpuMpmSim {
   /** Start the scripted operator move: cut the sheet off the front roll, roll it into a log, turn it and set it on the bank (design §6). No-op if one is running. */
   cutAndFold(): void;
   /** Start the other operator move: cut the sheet across at the crown of the front roll, let it come off flat
-   *  along the top of the mill folded lengthwise into thirds (band order from the `side` end, 'left' for x = 0),
-   *  fold it the way a flag is folded (a triangle rolling along the strip toward the crown in five flips, the
+   *  along the top of the mill folded lengthwise in half (the `side` end's half underneath, 'left' for x = 0),
+   *  fold it the way a flag is folded (a triangle rolling along the strip toward the crown in three flips, the
    *  stack staying over the nip) and let the stack go there (design §6b). No-op if a move is running. */
   cutAndFlop(side: 'left' | 'right'): void;
   /** The current (or last) cut & fold's timeline in sim seconds from its start: the flips, each one's length, the end. */

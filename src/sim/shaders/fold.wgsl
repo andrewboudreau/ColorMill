@@ -93,28 +93,29 @@ const DOUBLE_FLAT : f32 = 0.75;
 // the cut round to the nip exit (the sheet only: radial depth off the roll below sheetDepth(),
 // not the bank) is the flag, 1.5 pi R long. It rides the roll to the crown at the wind speed
 // (P.fold4.x, as cut & roll) and comes off over the crown flat along the top of the mill,
-// heading back over the nip, folded lengthwise into FLAG_BANDS thirds as it comes (band b of the
+// heading back over the nip, folded lengthwise in half (FLAG_BANDS) as it comes (band b of the
 // width in from the cut end goes to ply b, mirrored when b is odd, in a FLAG_HOP hop), so the
-// strip is Ws = L / FLAG_BANDS wide, three sheets thick, and three squares long, centred on the
-// roll. Then the flag fold, a triangle rolling along the strip toward the crown as the strip
-// feeds in, so the growing stack stays over the nip; each flip takes in a fresh triangle of
-// strip and happens as soon as the strip it lands on is off the roll (flagStart(k)):
+// strip is Ws = L / FLAG_BANDS wide, two sheets thick, and two squares long, centred on the
+// roll; what reaches past the back roll's crown drapes down its back (stripPoint). Then the
+// flag fold, a triangle rolling along the strip toward the crown as the strip feeds in, so the
+// growing stack stays over the nip; each flip takes in a fresh triangle of strip and happens
+// as soon as the strip it lands on is off the roll (flagStart(k)):
 //   fold 0: the corner at the free end over square 0's diagonal (u + v = Ws);
 //   fold 1: the doubled triangle over square 0's bottom edge (v = Ws) onto square 1;
-//   fold 2: that over square 1's diagonal (u = v - Ws); fold 3: over its bottom edge onto
-//   square 2; fold 4: over square 2's diagonal. The last bottom edge has no square to land on.
+//   fold 2: that over square 1's diagonal (u = v - Ws). The last bottom edge has no square
+//   to land on.
 // Each flip is a page turn on the hinge, in the strip's own flat coordinates (u in from the cut
 // end, v along the strip from the free end, n up): in-plane offset -w -> +w across the hinge,
 // height mirrored through the stack's top (roll side up), the swing's reach out of the plane
 // flattened by FLAG_LIFT, P.fold.z seconds each. After the last flip the stack, a flat
-// triangle Ws across and 3 * 6 sheets thick lying over the nip, is released where it is
+// triangle Ws across and 2 * 4 sheets thick lying over the nip, is released where it is
 // (FLAG_HOLD later), for the rolls to pull in, as the log is.
 // Kinematic script (one selection, one move, one release):
 //   select: the sheet past the cut, flagged, fold0 = (p0, arc from the bank end).
 //   move:   the ride, then the flat strip frame with the flag-fold coordinates.
 //   finish: release at rest with F = I.
-const FLAG_BANDS : f32 = 3.0;          // the sheet is folded lengthwise into this many bands as it comes off (mirrors mpm.ts)
-const FLAG_SQUARES : u32 = 3u;         // squares of strip in the flag: 1.5 pi R / (L / FLAG_BANDS) is 3.0 (mirrors mpm.ts)
+const FLAG_BANDS : f32 = 2.0;          // the sheet is folded lengthwise into this many bands as it comes off (mirrors mpm.ts)
+const FLAG_SQUARES : u32 = 2u;         // squares of strip in the flag: 1.5 pi R / (L / FLAG_BANDS) is 2.01 (mirrors mpm.ts)
 const FLAG_LIFT : f32 = 0.6;           // the flipping triangle's reach out of the strip plane, as a fraction of its in-plane one
 const FLAG_HOP : f32 = 0.25;           // seconds for a sheet element to settle into the strip as it leaves the crown
 const FLAG_HOLD : f32 = 0.2;           // seconds the finished stack is held before it is let go (mirrors mpm.ts)
@@ -548,10 +549,18 @@ fn flagCoords(u0 : f32, v0 : f32, n0 : f32, t : f32) -> vec3<f32> {
   return vec3<f32>(u, v, n);
 }
 
-/** A point of the flat strip on top of the mill: u across the strip (centred on the roll), w back
-    from the crown over the nip, n up from the crown level. */
+/** A point of the strip on top of the mill: u across the strip (centred on the roll), w back from
+    the crown over the nip, n up from the crown level. Past the back roll's crown the strip drapes
+    down the back of the back roll (it is longer than the mill is deep), n radially out. */
 fn stripPoint(u : f32, w : f32, n : f32) -> vec3<f32> {
-  return vec3<f32>(0.5 * (P.fold2.y - flagW()) + u, P.front.x + P.front.w + 0.5 * P.hdt.x + n, P.front.y - w);
+  let x = 0.5 * (P.fold2.y - flagW()) + u;
+  let wFlat = P.front.y - P.back.y;                      // the back roll's crown
+  if (w <= wFlat) {
+    return vec3<f32>(x, P.front.x + P.front.w + 0.5 * P.hdt.x + n, P.front.y - w);
+  }
+  let ang = (w - wFlat) / P.front.w;
+  let r = P.front.w + 0.5 * P.hdt.x + n;
+  return vec3<f32>(x, P.back.x + r * cos(ang), P.back.y - r * sin(ang));
 }
 
 /** Where a held sheet element is at time t of the flag fold (unclamped): riding the roll to the

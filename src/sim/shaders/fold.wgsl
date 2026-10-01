@@ -87,53 +87,38 @@ const WIND_HOP : f32 = 0.3;
 const DOUBLE_GAP : f32 = 0.8;
 const DOUBLE_FLAT : f32 = 0.75;
 
-// Second operator move, "cut & fold" (P.fold.x = 2 / 3 / 4 / 5 / 6 / 7: the fold kind
-// (P.fold.x - 2) / 2 and the end the cut starts from, x = 0 / x = L, in the low bit),
-// the one an operator makes most, done the way a flag is folded: cut the sheet ACROSS
-// on the front face of the front roll, from the roll end to the middle just below the
-// crown, so the half-width strip below the cut is free at the top and still joined to
-// the other half along the UNCUT SEAM at the middle. Then, for each of the squares of
-// strip the roll brings up under the cut (BUNDLE_SQUARES of them, about one turn):
-//   fold (kind 0, modes 2 / 3): the free top corner at the roll end is folded over
-//     the diagonal of the strip's top square (from the seam at the cut down to the
-//     roll end one strip-width lower), so the corner lands at the seam at the bottom
-//     of the square: a triangle flopped onto the triangle below it.
-//   lift (kind 1, modes 4 / 5, selected afresh, so it takes the doubled triangle and
-//     whatever the roll has brought up under it): that doubled triangle is lifted off
-//     the roll into the operator's hands out in front of the roll, laid flat on top of
-//     what is already there (square P.fold4.x of the bundle), and PARKED: held there
-//     (flag bit BUNDLE_FLAG, fold0 = its place) through the folds that follow.
-//   set-down (kind 2, modes 6 / 7, after the last square): the whole bundle, a flat
-//     triangle of 2 * BUNDLE_SQUARES plies, is carried over onto the other half of
-//     the roll and set down on the nip, where the rolls pull it in.
-// The fold is a page turn on a hinge drawn in the sheet's own coordinates (u in from
-// the cut end, s down from the cut; the sheet is developable, so the hinge is
-// straight there even though it is a helix on the roll): a particle turns about
-// its foot on the hinge in the plane of the hinge's in-sheet normal and the local
-// radial direction, through pi, keeping its depth below the flap's top as height
-// above the landing, and its swing's radial reach is flattened (FLOP_LIFT) so the
-// widest flap stays inside the domain. Kinematic script per step (P.fold.z = its length):
-//   select: the flap (this step's triangle, radial depth < flapDepth(), inside the
-//           strip's square, never a parked particle) is binned by arc (NB bins, slot 1)
-//           and depth (NS slices) and flagged; the sheet it lands on (the lower
-//           triangle) is binned the same way (slot 0), unflagged.
-//   tables: per arc bin the thickness of each (a high quantile of its depth).
-//   move:   the page turn / the flight into the hands / the carry to the nip; parked
-//           particles are held where they are.
-//   finish: release at rest with F = I (the fold), park (the lift), or release the
-//           whole bundle (the set-down).
-const FLOP_LIFT : f32 = 0.6;        // radial reach of the swing as a fraction of the lateral one (fits the domain in front of the roll)
-const FLOP_TOP_Q : f32 = 0.97;      // sheet thickness = this quantile of its particles' depth
-const FLAP_TH_MIN : f32 = 0.08;     // the cut runs across just in front of the crown line (rad down from the crown)
-// The bundle in the operator's hands (mirrors mpm.ts): out in front of the front roll, this far
-// above the crown level and beyond the face (the face is 0.59 from the front of the domain, so the
-// triangle's s is spread over BUNDLE_SPREAD of its length toward the viewer about a centre
-// BUNDLE_Z out), each square's doubled triangle BUNDLE_LAYER sheet thicknesses up.
-const BUNDLE_FLAG : u32 = 2u;
-const BUNDLE_Y : f32 = 0.3;
-const BUNDLE_Z : f32 = 0.27;
-const BUNDLE_SPREAD : f32 = 0.6;
-const BUNDLE_LAYER : f32 = 2.2;
+// Second operator move, "cut & fold" (P.fold.x = 2 / 3: the end the cut starts from, x = 0 /
+// x = L), the one an operator makes most, done the way a flag is folded. The sheet is cut
+// across at the crown of the front roll and everything past the cut round to the nip exit
+// (the sheet only: radial depth off the roll below sheetDepth(), not the bank) is the flag,
+// 1.5 pi R long. The operator pulls it off over the crown into a flat TONGUE that leaves the
+// crown up and toward the viewer at FLAG_ANGLE, halving it lengthwise as it comes off (the half
+// away from the cut end folds over onto the other, roll side up, in a FLAG_HOP hop), so the
+// strip is W = L / 2 wide, two sheets thick, and about two squares long. Then the flag fold:
+// a triangle rolls along the strip, flipping over one edge then the other, taking in a fresh
+// triangle of strip each time:
+//   fold 0 (at P.fold4.y, once square 0 is off the roll): the corner at the free end, u + v < W,
+//     over the square's diagonal u + v = W onto the triangle below it;
+//   fold 1 (at P.fold4.z, once the whole strip is off): the doubled triangle over the square's
+//     bottom edge v = W onto the next square (its seam-side triangle, u >= v - W);
+//   fold 2 (at P.fold4.w): that bundle over the next square's diagonal u = v - W onto the
+//     roll-end triangle beside it.
+// Each flip is a page turn on the hinge, in the strip's own flat coordinates (u in from the
+// cut end, v along the strip from the free end, n out of the strip plane): in-plane offset
+// -w -> +w across the hinge, height mirrored through the bundle's top (roll side up), the
+// swing's reach out of the plane flattened by FLAG_LIFT, P.fold.w seconds each. After the last
+// flip (P.fold.z) the bundle, a flat triangle W across and 2 * 4 sheets thick, is carried over
+// onto the other half of the roll and set down on the nip (FLAG_SET seconds), then released.
+// Kinematic script (one selection, one move, P.fold.z + FLAG_SET long):
+//   select: the sheet past the cut, flagged, fold0 = (p0, arc from the bank end).
+//   move:   riding the roll to the crown at the wind speed (P.fold4.x, as cut & roll), then the
+//           tongue frame with the flag-fold coordinates, then the carry to the nip.
+//   finish: release at rest with F = I.
+const FLAG_ANGLE : f32 = 1.0471976;    // 60 degrees: the tongue leaves the crown up and toward the viewer
+const FLAG_LIFT : f32 = 0.5;           // the flipping triangle's reach out of the strip plane, as a fraction of its in-plane one
+const FLAG_HOP : f32 = 0.25;           // seconds for a sheet element to settle into the tongue as it leaves the crown
+const FLAG_SET : f32 = 0.5;            // seconds to carry the bundle onto the nip (mirrors FLAG_SET_SECONDS in mpm.ts)
+const FLAG_SPREAD : f32 = 0.6;         // the set-down bundle's v spread about the nip, as a fraction
 const INFO_COUNT : u32 = 8u;
 const INFO_DEPTH : u32 = 8u + 2u * NB;
 const TS : u32 = 16u;           // floats per bin in tables
@@ -146,24 +131,15 @@ fn depthSlice(dr : f32) -> f32 { return f32(NS) * sqrt(max(dr, 0.0) / DMAX); }
 fn binWidth() -> f32 { return arcTotal() / f32(NB); }
 
 fn isFlop() -> bool { return P.fold.x > 1.5; }
-/** Which end the cut starts from (0: the x = 0 end, 1: the x = L end): modes 2 / 4 and 3 / 5. */
+/** Which end the cut starts from (0: the x = 0 end, 1: the x = L end): modes 2 / 3. */
 fn flopSide() -> u32 { return u32(round(P.fold.x)) & 1u; }
-/** Which step of cut & fold: 0 the fold over the diagonal, 1 the lift into the hands, 2 the set-down. */
-fn flopKind() -> u32 { return (u32(round(P.fold.x)) - 2u) >> 1u; }
-/** How deep off the roll the flap reaches: the sheet, with slack for a doubled one. */
-fn flapDepth() -> f32 { return 3.0 * P.fold2.z + P.hdt.x; }
-/** Width of the strip: half the roll; the top square of the strip is this long down the face too. */
+/** How deep off the roll the sheet reaches (what the flag fold takes; the bank is deeper). */
+fn sheetDepth() -> f32 { return 2.5 * P.fold2.z + P.hdt.x; }
+/** One sheet's thickness allowance in the bundle, and a ply of the halved strip (two sheets). */
+fn sheetT() -> f32 { return P.fold2.z + 0.5 * P.hdt.x; }
+fn plyT() -> f32 { return 2.0 * sheetT(); }
+/** Width of the strip: half the roll. */
 fn stripW() -> f32 { return 0.5 * P.fold2.y; }
-/** Angle down from the crown of the bottom of the strip's top square. */
-fn flapThMax() -> f32 { return FLAP_TH_MIN + stripW() / P.front.w; }
-fn flapBinWidth() -> f32 { return (flapThMax() - FLAP_TH_MIN) / f32(NB); }
-/** Thickness of the sheet at angle theta down the front face (linear between bins):
-    slot 1 the flap, slot 0 what it lands on. */
-fn sheetThick(theta : f32, slot : u32) -> f32 {
-  let fb = clamp((theta - FLAP_TH_MIN) / flapBinWidth() - 0.5, 0.0, f32(NB) - 1.0001);
-  let b = u32(fb);
-  return mix(tables[b * TS + slot], tables[(b + 1u) * TS + slot], fb - f32(b));
-}
 
 /** Top of what the nip is currently eating under the log (or the roll tops). */
 fn pileTop() -> f32 {
@@ -317,7 +293,7 @@ fn windPos(p0 : vec3<f32>, sRel : f32, t : f32) -> vec3<f32> {
   let dr = max(rollerDist(P.front.x, P.front.y, p0) - R, 0.0);
   let th0 = 2.0 * PI - sRel / R;
   var ride = p0;
-  if (dr < flapDepth()) {
+  if (dr < 3.0 * P.fold2.z + P.hdt.x) {
     let th = th0 + vW * min(t, tDep) / R;
     ride = vec3<f32>(p0.x, P.front.x, P.front.y) + (R + dr) * rhat(th);
   }
@@ -340,41 +316,19 @@ fn select_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgrou
   if (p >= P.grid.w) { return; }
   let x = pos[p].xyz;
   if (isFlop()) {
-    if ((flags[p] & 1u) != 0u || flopKind() == 2u) { return; }   // parked in the bundle; the set-down takes the bundle as is
-    let L = P.fold2.y;
-    let k = flopSide();
+    // the sheet past the cut at the crown, round to the nip exit: the flag
     let R = P.front.w;
-    let W = stripW();
-    // the sheet on the front face inside the strip's top square (and the other half beside it)
     let dy = x.y - P.front.x;
     let dz = x.z - P.front.y;
     let dr = sqrt(dy * dy + dz * dz) - R;
-    let th = atan2(dz, dy);   // 0 at the crown, pi/2 at the axis level in front
-    if (dr < 0.0 || dr > flapDepth() || th < FLAP_TH_MIN || th > flapThMax()) { return; }
-    let u = select(L - x.x, x.x, k == 0u);   // in from the cut end
-    let sArc = R * (th - FLAP_TH_MIN);       // down from the cut
-    let b = min(u32((th - FLAP_TH_MIN) / flapBinWidth()), NB - 1u);
-    let j = min(u32(dr / flapDepth() * f32(NS)), NS - 1u);
-    var flap = false;
-    var landing = false;
-    if (flopKind() == 1u) {
-      // the doubled lower triangle of the square is lifted into the hands
-      flap = u < W && u + sArc >= W;
-    } else {
-      // the free corner triangle goes over the diagonal onto the lower triangle
-      flap = u + sArc < W;
-      landing = u < W && u + sArc >= W;
-    }
-    if (flap) {
-      atomicAdd(&info[INFO_COUNT + NB + b], 1u);
-      atomicAdd(&info[INFO_DEPTH + (NB + b) * NS + j], 1u);
-      flags[p] = flags[p] | 1u;
-      fold0[p] = vec4<f32>(x, th);
-      atomicAdd(&info[3], 1u);
-    } else if (landing) {
-      atomicAdd(&info[INFO_COUNT + b], 1u);
-      atomicAdd(&info[INFO_DEPTH + b * NS + j], 1u);
-    }
+    if (dr < 0.0 || dr > sheetDepth()) { return; }
+    var th = atan2(-dy, -dz);
+    if (th < 0.0) { th += 2.0 * PI; }
+    let sRel = clamp(arcTotal() - th * R, 0.0, arcTotal());
+    if (sRel < contactArc()) { return; }   // beyond the crown: on its way into the nip, not cut
+    flags[p] = flags[p] | 1u;
+    fold0[p] = vec4<f32>(x, sRel);
+    atomicAdd(&info[3], 1u);
     return;
   }
   let R = P.front.w;
@@ -409,30 +363,7 @@ var<workgroup> wRho : array<f32, NB>;
 fn tables_(@builtin(local_invocation_id) lid : vec3<u32>) {
   let b = lid.x;
   if (isFlop()) {
-    // per arc bin and half (slot 1 the flap, slot 0 the receiving half): the sheet's thickness
-    // off the roll, FLOP_TOP_Q of the way up its depth (a few strays above do not count), at
-    // least a cell
-    for (var k = 0u; k < 2u; k++) {
-      var thick = P.hdt.x;
-      let n = atomicLoad(&info[INFO_COUNT + k * NB + b]);
-      if (n > 0u) {
-        let want = FLOP_TOP_Q * f32(n);
-        var acc = 0.0;
-        var j = 0u;
-        for (; j < NS; j++) {
-          let nj = f32(atomicLoad(&info[INFO_DEPTH + (k * NB + b) * NS + j]));
-          if (acc + nj >= want) {
-            thick = (f32(j) + (want - acc) / max(nj, 1.0)) * flapDepth() / f32(NS);
-            break;
-          }
-          acc += nj;
-        }
-        if (j == NS) { thick = flapDepth(); }
-        thick = max(thick, P.hdt.x);
-      }
-      tables[b * TS + k] = thick;
-    }
-    if (b == 0u) { tables[HDR + 3u] = f32(atomicLoad(&info[3])); }
+    if (b == 0u) { tables[HDR + 3u] = f32(atomicLoad(&info[3])); }   // the flag fold needs no tables
     return;
   }
   let h = P.hdt.x;
@@ -547,33 +478,107 @@ fn release(p : u32, v : vec3<f32>) {
     fbuf[b + c] = fr[c];
     abuf[b + c] = ar[c];
   }
-  flags[p] = flags[p] & ~(1u | BUNDLE_FLAG);
+  flags[p] = flags[p] & ~1u;
 }
 
-/** Where a lifted particle sits in the bundle in the operator's hands: at its own x, its depth off
-    the roll as height within its square's layer (roll side down), its arc down the cut spread
-    toward the viewer; layers stack up square by square (P.fold4.x). */
-fn bundlePos(p0 : vec3<f32>) -> vec3<f32> {
+/** The flag-fold coordinates (u in from the cut end, v along the strip from the free end, n out
+    of the strip plane) of a sheet element that started at (u0, v0, n0), at time t of the move:
+    each flip that has started reflects the bundle region it takes across its hinge, a page turn
+    while it runs. */
+fn flagCoords(u0 : f32, v0 : f32, n0 : f32, t : f32) -> vec3<f32> {
+  let W = stripW();
+  let ply = plyT();
+  let tFlip = max(P.fold.w, 1e-3);
+  var u = u0;
+  var v = v0;
+  var n = n0;
+  for (var k = 0u; k < 3u; k++) {
+    let tk = select(select(P.fold4.y, P.fold4.z, k == 1u), P.fold4.w, k == 2u);
+    if (t < tk) { break; }
+    var inR = false;
+    var hp = vec2<f32>(0.0);
+    var nrm = vec2<f32>(0.0, 1.0);
+    if (k == 0u) {
+      inR = u + v < W;                                     // the corner at the free end
+      hp = vec2<f32>(W, 0.0);
+      nrm = vec2<f32>(0.7071068, 0.7071068);               // over the diagonal u + v = W
+    } else if (k == 1u) {
+      inR = u + v >= W && v <= W;                          // the doubled triangle of square 0
+      hp = vec2<f32>(0.0, W);
+      nrm = vec2<f32>(0.0, 1.0);                           // over the bottom edge v = W
+    } else {
+      inR = v >= W && v <= 2.0 * W && u >= v - W;          // the bundle on square 1's seam side
+      hp = vec2<f32>(0.0, W);
+      nrm = vec2<f32>(-0.7071068, 0.7071068);              // over the diagonal u = v - W
+    }
+    if (!inR) { continue; }
+    let H = f32(k + 1u) * ply;                             // the bundle's height before this flip
+    let q = vec2<f32>(u, v) - hp;
+    let foot = vec2<f32>(u, v) - nrm * dot(q, nrm);
+    let w = max(-dot(q, nrm), 0.0);                        // in from the hinge, on the flap side
+    let d = H - n;                                         // below the bundle's top
+    let tau = clamp((t - tk) / tFlip, 0.0, 1.0);
+    let sm = tau * tau * (3.0 - 2.0 * tau);
+    let phi = PI * sm;
+    let lat = -w * cos(phi) + d * sin(phi);
+    let rad = FLAG_LIFT * w * sin(phi) - d * cos(phi);
+    let uv = foot + nrm * lat;
+    u = uv.x;
+    v = uv.y;
+    n = H + rad + (ply - H) * sm;                          // lands on one fresh ply, roll side up
+  }
+  return vec3<f32>(u, v, n);
+}
+
+/** A point of the tongue frame in the world: u across the strip (at the cut end's half of the
+    roll), w along the tongue from the crown, n out of its plane (up and back). */
+fn tonguePoint(u : f32, w : f32, n : f32) -> vec3<f32> {
+  let left = flopSide() == 0u;
+  let cA = cos(FLAG_ANGLE);
+  let sA = sin(FLAG_ANGLE);
+  return vec3<f32>(select(P.fold2.y - u, u, left), P.front.x + P.front.w + sA * w + cA * n, P.front.y + cA * w - sA * n);
+}
+
+/** Where a held sheet element is at time t of the flag fold (unclamped): riding the roll to the
+    crown, settling into the tongue, folded with the bundle, or carried onto the nip. */
+fn flagPos(p0 : vec3<f32>, sRel : f32, t : f32) -> vec3<f32> {
   let R = P.front.w;
-  let gap = P.fold2.z;
+  let L = P.fold2.y;
+  let W = stripW();
+  let vW = max(P.fold4.x, 1e-3);
+  let tSet = P.fold.z;
+  let sCon = contactArc();
+  let Ls = arcTotal() - sCon;
+  // the strip's own coordinates: u in from the cut end (both halves, the far one folded over),
+  // v along the strip from the free end (the cut), n the element's height in the halved strip
+  let u = min(p0.x, L - p0.x);
+  let folded = (p0.x >= 0.5 * L) == (flopSide() == 0u);   // the half away from the cut end
+  let v = sRel - sCon;
   let dy = p0.y - P.front.x;
   let dz = p0.z - P.front.y;
-  let dr = clamp(sqrt(dy * dy + dz * dz) - R, 0.0, 3.0 * gap);
-  let th = atan2(dz, dy);
-  let sArc = clamp(R * (th - FLAP_TH_MIN), 0.0, stripW());
-  let y = P.front.x + R + BUNDLE_Y + P.fold4.x * BUNDLE_LAYER * gap + dr;
-  let z = P.front.y + R + BUNDLE_Z + (sArc - 0.5 * stripW()) * BUNDLE_SPREAD;
-  return vec3<f32>(p0.x, y, z);
-}
-
-/** Where a parked particle (at pb in the hands) is set down: on the other half of the roll, the
-    bundle's lowest ply just above the pile the nip is eating (or the roll tops), centred on the nip. */
-fn setDownPos(pb : vec3<f32>) -> vec3<f32> {
-  let R = P.front.w;
-  let yB = P.front.x + R + BUNDLE_Y;
-  let zB = P.front.y + R + BUNDLE_Z;
+  let dr = clamp(sqrt(dy * dy + dz * dz) - R, 0.0, sheetT());
+  let n0 = select(dr, 2.0 * sheetT() - dr, folded);
+  // the ride: the sheet moves with the roll toward the crown until its arc has come off
+  let tOff = v / vW;
+  let th = 2.0 * PI - sRel / R + vW * min(t, tOff) / R;
+  let ride = vec3<f32>(p0.x, P.front.x, P.front.y) + (R + dr) * rhat(th);
+  if (t < tOff) { return ride; }
+  // in the tongue, folded as the flips come; the strip stops coming off once it is all off
+  let sOff = min(vW * t, Ls);
+  let c = flagCoords(u, v, n0, min(t, tSet));
+  let inTongue = tonguePoint(c.x, sOff - c.y, c.z);
+  if (t < tSet) {
+    // settle in: a hop from the crown, which for the folded half crosses the roll
+    let tau = clamp((t - tOff) / FLAG_HOP, 0.0, 1.0);
+    return mix(ride, inTongue, tau * tau * (3.0 - 2.0 * tau));
+  }
+  // set-down: the bundle is carried onto the nip on the other half, lowest ply just above the pile
   let yTop = max(pileTop(), P.front.x + R) + 1.5 * P.hdt.x;
-  return vec3<f32>(P.fold2.y - pb.x, yTop + (pb.y - yB), P.fold2.w + (pb.z - zB));
+  let xHere = select(L - c.x, c.x, flopSide() == 0u);
+  let dest = vec3<f32>(L - xHere, yTop + c.z, P.fold2.w + (c.y - 1.5 * W) * FLAG_SPREAD);
+  let src = tonguePoint(c.x, Ls - c.y, c.z);
+  let tau = clamp((t - tSet) / FLAG_SET, 0.0, 1.0);
+  return mix(src, dest, tau * tau * (3.0 - 2.0 * tau));
 }
 
 @compute @workgroup_size(128)
@@ -585,96 +590,16 @@ fn move_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
   let p0 = f0.xyz;
   let t = P.fold.y;
   if (isFlop()) {
-    let L = P.fold2.y;
-    let R = P.front.w;
-    let h = P.hdt.x;
-    let W = stripW();
-    let T = max(P.fold.z, 1e-3);
-    let lo = vec3<f32>(1.5 * h);
+    // the flag fold (flagPos); the velocity is the move's over the last substep
+    let lo = vec3<f32>(1.5 * P.hdt.x);
     let hi = vec3<f32>(P.domain.x, P.fold3.w, P.domain.z) - lo;
-    let kind = flopKind();
-    let parked = (flags[p] & BUNDLE_FLAG) != 0u;
-    if (kind == 2u) {
-      // set-down: the bundle is carried from the hands onto the nip on the other half
-      let tau = clamp(t / T, 0.0, 1.0);
-      let sm = tau * tau * (3.0 - 2.0 * tau);
-      let dsdt = 6.0 * tau * (1.0 - tau) / T;
-      let dest = setDownPos(p0);
-      let x = clamp(mix(p0, dest, sm), lo, hi);
-      pos[p] = vec4<f32>(x, pos[p].w);
-      if (t >= T) { release(p, vec3<f32>(0.0)); } else { vel[p] = vec4<f32>((dest - p0) * dsdt, 0.0); }
-      return;
-    }
-    if (parked) {
-      // in the hands: held where it is while the next square is folded and lifted
-      pos[p] = vec4<f32>(p0, pos[p].w);
-      vel[p] = vec4<f32>(0.0);
-      return;
-    }
-    if (kind == 1u) {
-      // lift: the doubled triangle flies off the roll into the hands, onto the bundle
-      let tau = clamp(t / T, 0.0, 1.0);
-      let sm = tau * tau * (3.0 - 2.0 * tau);
-      let dsdt = 6.0 * tau * (1.0 - tau) / T;
-      let dest = bundlePos(p0);
-      let x = clamp(mix(p0, dest, sm), lo, hi);
-      pos[p] = vec4<f32>(x, pos[p].w);
-      vel[p] = vec4<f32>((dest - p0) * dsdt, 0.0);
-      return;
-    }
-    // the fold: a page turn on a hinge drawn in the sheet's own coordinates
-    let th = f0.w;
-    let dy0 = p0.y - P.front.x;
-    let dz0 = p0.z - P.front.y;
-    let dr = max(sqrt(dy0 * dy0 + dz0 * dz0) - R, 0.0);
-    let left = flopSide() == 0u;
-    let u0 = select(L - p0.x, p0.x, left);
-    let s0 = R * (th - FLAP_TH_MIN);
-    // hinge: a point and the in-sheet normal pointing at the landing side: the diagonal u + s = W
-    let hp = vec2<f32>(W, 0.0);
-    let nrm = vec2<f32>(0.7071068, 0.7071068);
-    let q0 = vec2<f32>(u0, s0) - hp;
-    let foot = vec2<f32>(u0, s0) - nrm * dot(q0, nrm);
-    let w = max(-dot(q0, nrm), 0.0);             // distance in from the hinge, on the flap side
-    let thick = sheetThick(th, 1u);
-    // the landing point in sheet coordinates, and the thickness of what is there
-    let land = foot + nrm * w;
-    let thLand = clamp(FLAP_TH_MIN + land.y / R, FLAP_TH_MIN, flapThMax());
-    let recv = sheetThick(thLand, 0u);
-    // pivot: the top of the flap; the particle sits d below it
-    let rhoP = R + thick;
-    let d = rhoP - (R + dr);
-    let tau = clamp(t / T, 0.0, 1.0);
-    let u = tau * tau * (3.0 - 2.0 * tau);
-    let dudt = 6.0 * tau * (1.0 - tau) / T;
-    let phi = PI * u;
-    // in-sheet offset along the normal -w -> +w (mirrored across the hinge), radial -d -> +d
-    // (roll side up), the radial reach flattened by FLOP_LIFT; the landing sheet may be
-    // thicker or thinner than the flap, so the radial offset eases onto its top over the turn
-    let lat = -w * cos(phi) + d * sin(phi);
-    let rad = FLOP_LIFT * w * sin(phi) - d * cos(phi);
-    let dlat = (w * sin(phi) + d * cos(phi)) * PI;
-    let drad = (FLOP_LIFT * w * cos(phi) + d * sin(phi)) * PI;
-    let settle = recv + 0.5 * h - thick;
-    let rho = rhoP + rad + settle * u;
-    let us = foot + nrm * lat;                   // (u, s) now
-    let thNow = FLAP_TH_MIN + us.y / R;
-    let rhat = vec2<f32>(cos(thNow), sin(thNow));
-    let xNow = select(L - us.x, us.x, left);
-    let x = clamp(vec3<f32>(xNow, P.front.x + rho * rhat.x, P.front.y + rho * rhat.y), lo, hi);
-    // velocity: the in-sheet motion (u along x, s around the roll) plus the radial one
-    let dus = nrm * (dlat * dudt);
-    let vth = dus.y / R;                         // d(theta)/dt
-    let tang = vec2<f32>(-sin(thNow), cos(thNow));
-    let vrad = (drad + settle) * dudt;
-    let vyz = rhat * vrad + tang * (rho * vth);
-    let v = vec3<f32>(select(-dus.x, dus.x, left), vyz.x, vyz.y);
+    let dt = P.hdt.z;
+    let tPrev = max(t - dt, 0.0);
+    let x = clamp(flagPos(p0, f0.w, t), lo, hi);
+    let xPrev = clamp(flagPos(p0, f0.w, tPrev), lo, hi);
+    let v = select(vec3<f32>(0.0), (x - xPrev) / (t - tPrev), t > tPrev);
     pos[p] = vec4<f32>(x, pos[p].w);
-    if (t >= T) {
-      release(p, vec3<f32>(0.0));
-    } else {
-      vel[p] = vec4<f32>(v, 0.0);
-    }
+    vel[p] = vec4<f32>(v, 0.0);
     return;
   }
   let tRoll = P.fold.z;
@@ -718,17 +643,6 @@ fn finish_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgrou
   let p = particleIndex(gid, nwg);
   if (p >= P.grid.w) { return; }
   if ((flags[p] & 1u) == 0u) { return; }
-  if (isFlop()) {
-    let kind = flopKind();
-    if (kind == 1u) {
-      // park the lifted triangle in the hands: held there until the set-down
-      fold0[p] = vec4<f32>(pos[p].xyz, 0.0);
-      flags[p] = flags[p] | BUNDLE_FLAG;
-      return;
-    }
-    if (kind == 0u && (flags[p] & BUNDLE_FLAG) != 0u) { return; }   // the bundle stays in the hands
-    release(p, vec3<f32>(0.0));
-    return;
-  }
+  if (isFlop()) { release(p, vec3<f32>(0.0)); return; }
   release(p, -logAxis() * P.fold.w);
 }

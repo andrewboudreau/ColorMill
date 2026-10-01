@@ -107,11 +107,13 @@ export interface GpuMpmSim {
   clearPigment(): void;
   /** Start the scripted operator move: cut the sheet off the front roll, roll it into a log, turn it and set it on the bank (design §6). No-op if one is running. */
   cutAndFold(): void;
-  /** Start the other operator move: cut the sheet on the front roll from the `side` end (x = 0 for 'left')
-   *  toward the middle and, for about one turn of the roll, fold each square of strip it brings up like a
-   *  flag and lift the doubled triangle into the operator's hands, then set the bundle down on the nip on
-   *  the other half (design §6b). No-op if a move is running. */
+  /** Start the other operator move: cut the sheet across at the crown of the front roll, pull it off into a
+   *  flat tongue halved lengthwise (the cut end's half underneath, `side` = 'left' for x = 0), fold it the way
+   *  a flag is folded (three flips of a triangle along the strip) and set the bundle down on the nip on the
+   *  other half (design §6b). No-op if a move is running. */
   cutAndFlop(side: 'left' | 'right'): void;
+  /** The current (or last) cut & fold's timeline in sim seconds from its start: the three flips, the set-down, the end. */
+  readonly operatorFlagTimes: { readonly speed: number; readonly folds: readonly [number, number, number]; readonly setDown: number; readonly end: number };
   /** true while an operator move (cut & roll or cut & fold) is running */
   readonly operatorBusy: boolean;
   /** Length of the current (or last) cut & roll's roll phase in sim seconds: the material is wound off

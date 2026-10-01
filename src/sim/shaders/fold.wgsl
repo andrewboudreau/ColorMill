@@ -576,9 +576,9 @@ fn flagPos(p0 : vec3<f32>, sRel : f32, t : f32) -> vec3<f32> {
   let yTop = max(pileTop(), P.front.x + R) + 1.5 * P.hdt.x;
   let xHere = select(L - c.x, c.x, flopSide() == 0u);
   let dest = vec3<f32>(L - xHere, yTop + c.z, P.fold2.w + (c.y - 1.5 * W) * FLAG_SPREAD);
-  let from = tonguePoint(c.x, Ls - c.y, c.z);
+  let src = tonguePoint(c.x, Ls - c.y, c.z);
   let tau = clamp((t - tSet) / FLAG_SET, 0.0, 1.0);
-  return mix(from, dest, tau * tau * (3.0 - 2.0 * tau));
+  return mix(src, dest, tau * tau * (3.0 - 2.0 * tau));
 }
 
 @compute @workgroup_size(128)

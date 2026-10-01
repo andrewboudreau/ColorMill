@@ -17,7 +17,7 @@
 import './styles.css';
 import { BASE_LATENT, findPigment, rgbToLatentAsync } from './color/pigments';
 import { parseDrops, type Drop } from './drops';
-import { clampParam, formatMillQuery, parseExperimental, parseMillParams } from './config/link';
+import { clampParam, formatMillQuery, parseExperimental, parseMillParams, parseRollStyle } from './config/link';
 import {
   BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres,
   type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
@@ -159,6 +159,8 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   const initialDrops = parseDrops(query.get('drops'));
   // experimental mode (?experimental=1): slider caps lifted, URL values accepted as written
   let experimental = parseExperimental(query);
+  // cut & roll: the roll folded in half before feeding (default) or kept long (?roll=long)
+  let longRoll = parseRollStyle(query) === 'long';
   // mill parameters from the URL (?gap=0.06&omega=2 …; src/config/link.ts), the rest default
   const initialParams: MillParams = { ...DEFAULT_PARAMS, ...parseMillParams(query, experimental) };
   // the preset goes into the start link when it was chosen on purpose (URL or panel), not auto-selected
@@ -217,8 +219,9 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
         panel.setParams(sim.params);
       }
     },
+    onLongRoll: (on) => { longRoll = on; if (sim) sim.rollStyle = on ? 'long' : 'double'; },
     onCopyStartLink: () => copyStartLink()
-  }, { params: { ...initialParams }, preset, batch, autoOrbit, experimental, open: wideScreen });
+  }, { params: { ...initialParams }, preset, batch, autoOrbit, experimental, longRoll, open: wideScreen });
 
   // where along the roll a tap lands: one of DROP_SLOTS fixed positions, the
   // operator picks which (strip in the palette, [ and ], ?slot=)
@@ -305,7 +308,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   /** index.html URL that reproduces this session's start: the drop log, plus batch/preset when set. */
   const startLink = (): string => {
     // drops, batch, preset (when pinned) and every mill parameter that differs from its default
-    const q = formatMillQuery({ experimental, drops: dropLog, batch, preset: presetPinned ? preset : undefined, params: sim ? sim.params : initialParams });
+    const q = formatMillQuery({ experimental, drops: dropLog, batch, preset: presetPinned ? preset : undefined, params: sim ? sim.params : initialParams, roll: longRoll ? 'long' : 'double' });
     return `${location.origin}${location.pathname}${q ? `?${q}` : ''}`;
   };
 
@@ -525,6 +528,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     await nextPaint();
     try {
       const next = opts.makeSim(device, buildConfig(p, old.params, b));
+      next.rollStyle = longRoll ? 'long' : 'double';
       try {
         await next.ready;
       } catch (e) {
@@ -565,6 +569,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     sim = opts.makeSim(device, buildConfig(preset, initialParams));
     await sim.ready;
     sim.paused = startPaused;
+    sim.rollStyle = longRoll ? 'long' : 'double';
   } catch (e) {
     reportError('Could not build the simulation', e);
     overlay.showError('Could not start the simulation', errorMessage(e));

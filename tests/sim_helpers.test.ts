@@ -73,5 +73,8 @@ describe('peel and wind timing', () => {
     expect(rollSeconds(6)).toBeLessThan(rollSeconds(3));
     expect(foldDuration(0, 6)).toBeLessThan(foldDuration(0, 3));
     expect(foldDuration(0.3, 6)).toBeCloseTo(rollSeconds(6) + (0.75 + 0.6) / 0.3 + 0.3, 9);
+    // the long roll skips the doubling and is lowered in at its full length
+    expect(rollSeconds(omega, true)).toBeCloseTo(windSeconds(omega) + LIFT_SECONDS, 9);
+    expect(foldDuration(0.3, omega, true)).toBeCloseTo(rollSeconds(omega, true) + (1.5 + 0.6) / 0.3 + 0.3, 9);
   });
 });

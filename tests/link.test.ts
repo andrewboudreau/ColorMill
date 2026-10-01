@@ -46,11 +46,16 @@ describe('formatMillQuery / millLink', () => {
       drops: [{ pigment: 'hansaYellow', slot: 1, size: 'l' as const }, { pigment: '#ff8a00', slot: 4, size: 's' as const }],
       batch: 2,
       preset: 'low' as const,
-      params: { frictionRatio: 1.4, backFriction: 0.7 }
+      params: { frictionRatio: 1.4, backFriction: 0.7 },
+      roll: 'long' as const
     };
     const back = parseMillStart(`?${formatMillQuery(start)}`);
     expect(back).toEqual(start);
-    expect(parseMillStart('')).toEqual({ experimental: false, drops: [], batch: 1, preset: undefined, params: {} });
+    expect(parseMillStart('')).toEqual({ experimental: false, drops: [], batch: 1, preset: undefined, params: {}, roll: 'double' });
+    expect(parseMillStart('roll=long').roll).toBe('long');
+    expect(parseMillStart('roll=short').roll).toBe('double');
+    expect(formatMillQuery({ roll: 'long' })).toBe('roll=long');
+    expect(formatMillQuery({ roll: 'double' })).toBe('');
     expect(parseMillStart('?preset=insane&batch=x').preset).toBeUndefined();
   });
 

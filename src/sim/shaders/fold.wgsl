@@ -268,7 +268,8 @@ fn windPos(p0 : vec3<f32>, sRel : f32, t : f32) -> vec3<f32> {
   let L = P.fold2.y;
   let vW = max(P.fold4.x, 1e-3);
   let tWind = P.fold4.y;
-  let tDouble = max(P.fold4.z, 1e-3);
+  let doubled = P.fold4.z > 0.0;              // else the roll stays long: no fold in half
+  let tDouble = select(0.0, max(P.fold4.z, 1e-3), doubled);
   let tLift = max(P.fold4.w, 1e-3);
   let sCon = contactArc();
   let k = halfOf(p0);
@@ -290,7 +291,7 @@ fn windPos(p0 : vec3<f32>, sRel : f32, t : f32) -> vec3<f32> {
     // half's) onto the top of the other half, its arc flattened by DOUBLE_FLAT
     let spacing = DOUBLE_GAP * (r0 + r1);
     var q = onCoil;
-    if (k == 1u) {
+    if (doubled && k == 1u) {
       let tau = clamp((t - tWind) / tDouble, 0.0, 1.0);
       let th = PI * tau * tau * (3.0 - 2.0 * tau);
       let hinge = vec2<f32>(0.5 * L, crownY() + 0.5 * (r0 + r1 + spacing));
@@ -302,7 +303,9 @@ fn windPos(p0 : vec3<f32>, sRel : f32, t : f32) -> vec3<f32> {
     // axis is the line midway between the two barrels' axes, so the pair stands centred
     let tau = clamp((t - tWind - tDouble) / tLift, 0.0, 1.0);
     let s = tau * tau * (3.0 - 2.0 * tau);
-    let baseCoil = vec3<f32>(0.0, crownY() + r0 + 0.5 * spacing, P.front.y);
+    // the roll's axis: midway between the two barrels when doubled, the mean of the two halves'
+    // centre lines (each resting on the crown at its own radius) when kept long
+    let baseCoil = vec3<f32>(0.0, select(crownY() + 0.5 * (r0 + r1), crownY() + r0 + 0.5 * spacing, doubled), P.front.y);
     let baseStand = vec3<f32>(0.5 * L, tables[HDR + 1u], P.fold2.w);
     return mix(baseCoil, baseStand, s) + liftFrame(0.5 * PI * s) * (q - baseCoil);
   }
@@ -515,10 +518,11 @@ fn tables_(@builtin(local_invocation_id) lid : vec3<u32>) {
     // below its own centre, which sits half the barrels' spacing below the axis (times sin^2).
     // Never squash it against the ceiling.
     let tilt = P.fold3.z;
+    let doubled = P.fold4.z > 0.0;
     let rLog = max(rMax.x, rMax.y);
-    let endDrop = rLog * sin(tilt) + 0.5 * DOUBLE_GAP * (rMax.x + rMax.y) * sin(tilt) * sin(tilt);
+    let endDrop = rLog * sin(tilt) + select(0.0, 0.5 * DOUBLE_GAP * (rMax.x + rMax.y) * sin(tilt) * sin(tilt), doubled);
     var baseY = pileTop() + endDrop + P.fold3.y;
-    let logLen = 0.5 * L;
+    let logLen = select(L, 0.5 * L, doubled);   // the long roll stands at its full length
     baseY = min(baseY, P.fold3.w - logLen * cos(tilt) - endDrop - h);
     tables[HDR] = rLog;
     tables[HDR + 1u] = baseY;

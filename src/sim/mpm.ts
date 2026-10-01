@@ -15,7 +15,7 @@
 import {
   DEFAULT_PARAMS, PIGMENT_POOL_FRACTION,
   GEOMETRY, bankTopY, colourGridDims, gridDims, lameParameters, rollerPoses, seedBankPositions,
-  type GridDims, type MillConfig, type MillParams, type QualitySettings
+  type GridDims, type MillConfig, type MillParams, type QualitySettings, type RollStyle
 } from '../config/mill';
 import type {
   GpuMpmSim, GpuMpmSimOptions, Latent, ParticleSnapshot, RenderVolumes, SimStats
@@ -72,15 +72,19 @@ export function windSpeed(omega: number): number {
 export function windSeconds(omega: number): number {
   return windArc() / windSpeed(omega) + WIND_HOP_SECONDS;
 }
-/** Length of the whole roll phase (wind, double, lift) at roll speed omega; the log stands over the nip after it. */
-export function rollSeconds(omega: number): number {
-  return windSeconds(omega) + DOUBLE_SECONDS + LIFT_SECONDS;
+/** Length of the whole roll phase (wind, double unless the roll is kept long, lift) at roll speed omega;
+ * the log stands over the nip after it. */
+export function rollSeconds(omega: number, long = false): number {
+  return windSeconds(omega) + (long ? 0 : DOUBLE_SECONDS) + LIFT_SECONDS;
 }
 /** The roll phase at the default roll speed (≈ 2.5 s). */
 export const FOLD_ROLL_SECONDS = rollSeconds(DEFAULT_PARAMS.omega);
 /** The design's original lowering speed (sim units / s along the log axis); FOLD_DURATION is the move's length at it. */
 export const FOLD_FEED_SPEED = 0.15;
 export const FOLD_TILT = 0.42;                // log axis tilt from vertical toward the viewer (rad)
+/** The long single roll (rollStyle 'long') leans further so its full length clears the ceiling: 0.85 rad
+ * puts the top of a 1.5 roll at about 2.1 and its far end 1.9 toward the viewer. */
+export const FOLD_TILT_LONG = 0.85;
 /** Arc bins and depth slices of the fold's thickness histogram, and floats per bin in its tables (mirror NB / NS / TS in fold.wgsl). */
 export const FOLD_BINS = 128;
 export const FOLD_SLICES = 32;
@@ -88,10 +92,10 @@ export const FOLD_TABLE_STRIDE = 16;
 /** Total script length for a given feed: roll, then either let the whole log go (a
  * substep later) or lower it (the material folded in half: L/2 long, plus the
  * tilted end face of a log up to ~0.7 units across) through the nip. */
-export function foldDuration(logFeed: number, omega: number = DEFAULT_PARAMS.omega): number {
-  const roll = rollSeconds(omega);
+export function foldDuration(logFeed: number, omega: number = DEFAULT_PARAMS.omega, long = false): number {
+  const roll = rollSeconds(omega, long);
   if (!(logFeed > 0)) return roll + 0.02;
-  return roll + (0.5 * GEOMETRY.length + 0.6) / logFeed + 0.3;
+  return roll + ((long ? 1 : 0.5) * GEOMETRY.length + 0.6) / logFeed + 0.3;
 }
 /** Script length of the lowered-in move at FOLD_FEED_SPEED (≈ 10.5 s). */
 export const FOLD_DURATION = foldDuration(FOLD_FEED_SPEED);
@@ -253,6 +257,9 @@ export class GpuMpm implements GpuMpmSim {
   /** cut & fold: which square of the strip is being folded (0-based), and this step's length */
   private bundleSquare = 0;
   private flopSeconds = FLOP_SECONDS;
+  /** how cut & roll puts the roll back; read when the move starts */
+  rollStyle: RollStyle = 'double';
+  private foldLong = false;
   /** cut & roll timing, captured when the move starts (the roll speed may change during it) */
   private foldWindSpeed = windSpeed(DEFAULT_PARAMS.omega);
   private foldWindSeconds = windSeconds(DEFAULT_PARAMS.omega);
@@ -562,14 +569,15 @@ export class GpuMpm implements GpuMpmSim {
     // rides the roll instead of only its innermost layer (design §3.3).
     const tackBand = p.tackCells > 0 ? p.tackCells * h : p.gap + 1.0 * h;
     f.set([tackBand, 0.5 * h, 2 * h, 0.6], o + 36);
-    f.set([GEOMETRY.bankHalfDepth, 0.5 * h, FOLD_TILT, yMax], o + 40);
+    f.set([GEOMETRY.bankHalfDepth, 0.5 * h, this.foldMode === 1 && this.foldLong ? FOLD_TILT_LONG : FOLD_TILT, yMax], o + 40);
     // colour raster grid (design §3.5)
     const fd = this.fineDims;
     const ratio = h / fd.h;
     u[o + 44] = fd.nx; u[o + 45] = fd.ny; u[o + 46] = fd.nz; u[o + 47] = 0;
     f.set([fd.h, 1 / fd.h, (ratio * ratio * ratio) / 8, 0], o + 48);
     // cut & roll: peel and wind, double, lift; cut & fold: the bundle's square (fold.wgsl)
-    if (this.foldMode === 1) f.set([this.foldWindSpeed, this.foldWindSeconds, DOUBLE_SECONDS, LIFT_SECONDS], o + 52);
+    // (a negative double time keeps the roll long: no fold in half)
+    if (this.foldMode === 1) f.set([this.foldWindSpeed, this.foldWindSeconds, this.foldLong ? -1 : DOUBLE_SECONDS, LIFT_SECONDS], o + 52);
     else f.set([this.bundleSquare, 0, 0, 0], o + 52);
   }
 
@@ -892,10 +900,11 @@ export class GpuMpm implements GpuMpmSim {
     this.foldMode = 1;
     this.foldFeed = Math.max(this.params.logFeed, 0);
     const omega = this.params.omega;
+    this.foldLong = this.rollStyle === 'long';
     this.foldWindSpeed = windSpeed(omega);
     this.foldWindSeconds = windSeconds(omega);
-    this.foldRollSeconds = rollSeconds(omega);
-    this.foldTotalSeconds = foldDuration(this.foldFeed, omega);
+    this.foldRollSeconds = rollSeconds(omega, this.foldLong);
+    this.foldTotalSeconds = foldDuration(this.foldFeed, omega, this.foldLong);
     this.foldPending = true;
   }
 

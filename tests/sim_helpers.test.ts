@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DOUBLE_SECONDS, FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, LIFT_SECONDS, WHITE_LATENT, WIND_HOP_SECONDS, WIND_MAX_SECONDS, dispatchSize, foldDuration, foldProfile, halfToFloat, rollSeconds, windArc, windSeconds, windSpeed } from '../src/sim/mpm';
+import { DOUBLE_SECONDS, FLAG_FLIP_SECONDS, FLAG_SET_SECONDS, FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, LIFT_SECONDS, WHITE_LATENT, flagTimes, WIND_HOP_SECONDS, WIND_MAX_SECONDS, dispatchSize, foldDuration, foldProfile, halfToFloat, rollSeconds, windArc, windSeconds, windSpeed } from '../src/sim/mpm';
 import { DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS } from '../src/config/mill';
 
 describe('solver helpers', () => {
@@ -76,5 +76,23 @@ describe('peel and wind timing', () => {
     // the long roll skips the doubling and is lowered in at its full length
     expect(rollSeconds(omega, true)).toBeCloseTo(windSeconds(omega) + LIFT_SECONDS, 9);
     expect(foldDuration(0.3, omega, true)).toBeCloseTo(rollSeconds(omega, true) + (1.5 + 0.6) / 0.3 + 0.3, 9);
+  });
+});
+
+describe('flag fold timing', () => {
+  it('flips the corner once the first square is off, the rest once the strip is off, then sets the bundle down', () => {
+    const omega = DEFAULT_PARAMS.omega;
+    const f = flagTimes(omega);
+    const square = 0.5 * GEOMETRY.length;
+    expect(f.speed).toBeCloseTo(windSpeed(omega), 9);
+    expect(f.folds[0]).toBeCloseTo(square / f.speed, 9);
+    expect(f.folds[1]).toBeCloseTo(Math.max(f.folds[0] + FLAG_FLIP_SECONDS, windArc() / f.speed), 9);
+    expect(f.folds[2]).toBeCloseTo(f.folds[1] + FLAG_FLIP_SECONDS, 9);
+    expect(f.setDown).toBeCloseTo(f.folds[2] + FLAG_FLIP_SECONDS, 9);
+    expect(f.end).toBeCloseTo(f.setDown + FLAG_SET_SECONDS, 9);
+    expect(f.end).toBeGreaterThan(2);
+    expect(f.end).toBeLessThan(4);
+    // a crawling roll is pulled at the floor speed, so the press still ends
+    expect(flagTimes(0).end).toBeLessThan(6);
   });
 });

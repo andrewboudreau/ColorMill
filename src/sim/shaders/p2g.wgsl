@@ -9,6 +9,11 @@
 @group(0) @binding(5) var<storage, read_write> gmass : array<atomic<i32>>;
 @group(0) @binding(6) var<storage, read_write> gmom : array<atomic<i32>>;
 
+// A particle in the operator's hand (flags bit 1, fold.wgsl) is this many times heavier on the grid
+// than it is as putty, so the hand wins over the putty and the roll's drag where it touches and the
+// sheet it holds follows it instead of pulling it apart.
+const HAND_MASS : f32 = 4.0;
+
 fn loadAffine(p : u32) -> mat3x3<f32> {
   let b = p * 9u;
   return mat3x3<f32>(
@@ -21,15 +26,20 @@ fn loadAffine(p : u32) -> mat3x3<f32> {
 fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
   let p = particleIndex(gid, nwg);
   if (p >= P.grid.w) { return; }
-  if ((flags[p] & 1u) != 0u) { return; }   // kinematic: no grid coupling
+  let fl = flags[p];
+  // kinematic (under the operator's script): no grid coupling, unless it is in the hand, which
+  // scatters its mass and momentum (rigid: no C, no stress) so it drags the putty with it
+  let hand = (fl & 2u) != 0u;
+  if ((fl & 1u) != 0u && !hand) { return; }
 
   let h = P.hdt.x;
   let invh = P.hdt.y;
-  let pMass = P.part.y;
+  let pMass = select(P.part.y, HAND_MASS * P.part.y, hand);
 
   let x = pos[p].xyz;
   let v = vel[p].xyz;
-  let affine = loadAffine(p);
+  var affine = loadAffine(p);
+  if (hand) { affine = mat3x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0)); }
 
   let gx = x * invh;
   let base = vec3<i32>(floor(gx - 0.5));

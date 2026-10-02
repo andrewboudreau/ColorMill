@@ -26,7 +26,7 @@ gap — we exaggerate the gap so it is resolvable on the grid).
 | Symbol | Value | Meaning |
 | --- | --- | --- |
 | `L` | 1.5 | Roller (and domain) length along x |
-| `domain` | (1.5, 2.25, 2.0) | Domain size (x, y, z); origin at (0,0,0); the headroom holds the operator's standing log, the flag fold's stack and dropped pigment chunks |
+| `domain` | (1.5, 2.25, 2.0) | Domain size (x, y, z); origin at (0,0,0); the headroom holds the operator's standing log, the hand carrying the cut edge and dropped pigment chunks |
 | `R` | 0.32 | Roller radius |
 | `yc` | 0.55 | Height of both roller axes |
 | `zNip` | 0.75 | z of the nip centre (mid-plane between rollers) |
@@ -110,7 +110,7 @@ readback helper `GpuMpmSim.readParticles()` must return the layout in
 | `C` | mat3 | APIC affine velocity (row-major, `C[i][j] = ∂v_i/∂x_j`) |
 | `F` | mat3 | elastic deformation gradient (row-major) |
 | `latent` | 7 floats | Mixbox latent of the particle's pigment mix |
-| `flags` | 1 float (bit field as int) | bit0 = kinematic (under operator control), unused otherwise |
+| `flags` | 1 float (bit field as int) | bit0 = kinematic (under operator control); bit1 = in the operator's hand (kinematic, but scattered to the grid in P2G) |
 | pad | to 32 floats |
 
 All particles have equal mass `pMass = 1` and equal rest volume
@@ -154,7 +154,9 @@ for each of the 27 nodes (i,j,k) in base..base+2:
 ```
 
 Kinematic particles (flags bit0) are skipped here and in G2P velocity
-gather; they move on their own script (§6).
+gather; they move on their own script (§6). The exception is the hand
+(bit1, §6b): P2G scatters its mass (`HAND_MASS` = 4 times a particle's)
+and momentum, rigid, so it drags the putty with it; G2P still skips it.
 
 ### 3.3 Grid update
 For each node with `mass > 0`:
@@ -534,70 +536,62 @@ roll axis. Modelled as a scripted kinematic move:
 Nothing is placed inside existing material and no material is left behind. Exposed as
 `GpuMpmSim.cutAndFold()`; the UI button is "Cut & roll" (F).
 
-### 6b. Cut & fold (the flag fold)
+### 6b. Cut & fold (the hand)
 
 The other move an operator makes, and the one most milling actually uses
-(reference footage: silicone colour mixing on a lab mill), done the way a
-flag is folded, on the mill. The sheet is cut **across** at the crown of
-the front roll (`WIND_CONTACT`, as cut & roll's coil contact), and
-everything past the cut round to the nip exit is the flag: the sheet only
-(radial depth off the roll below `sheetDepth()` = 2.5 gap + h; the bank is
-deeper and stays), 1.5πR ≈ 1.5 of it, the arc cut & roll winds in. A
-square of strip is more arc than the roll has room for, so the strip is
-not folded on the roll; it comes off first, flat along the top of the
-mill, and is folded there, over the nip, where the finished stack is let
-go for the rolls to pull in, as the log is:
+(reference footage: silicone colour mixing on a lab mill). It is the one
+move here that the solver does rather than a script: the operator's hand
+is scripted, the sheet is not. The sheet is cut **across** at the crown
+of the front roll (`WIND_CONTACT`, as cut & roll's coil contact) and the
+hand takes the cut edge: the band of sheet `HAND_CELLS` = 3 cells deep
+along the arc just before the crown, the full width (the sheet only:
+radial depth off the roll below `sheetDepth()` = 2.5 gap + h; the bank is
+deeper and stays). Only that band is held.
 
-1. **The strip** (`stripPoint`): the sheet rides the roll to the crown at
-   the wind speed (`windSpeed(omega)`, as cut & roll) and comes off over
-   the crown flat on top of the mill at crown height, heading back over
-   the nip (the strip's v runs from the free end, the cut, toward the
-   crown; its distance behind the crown is `sOff − v`, the strip's length
-   off the roll so far less v); what reaches past the back roll's crown
-   (0.68 behind the front one) drapes down the back of the back roll, n
-   radially out, since the strip is longer than the mill is deep. As it
-   comes it is **folded lengthwise in half** (`FLAG_BANDS` = 2): band b of
-   the width in from the cut end goes to ply b, mirrored when b is odd, in
-   a `FLAG_HOP` = 0.25 s hop from the crown that crosses the roll. So the
-   strip is Ws = L/2 = 0.75 wide, centred on the roll, two sheets thick
-   (`plyT()` = 2 `sheetT()`) and `FLAG_SQUARES` = 2 squares long (1.5πR /
-   Ws = 2.01), in its own flat coordinates (u in from the cut end, v along
-   the strip from the free end, n up).
-2. **Three flips** (2 `FLAG_SQUARES` − 1; `flagFlipSeconds(omega)` each,
-   `FLAG_FLIP_FRACTION` = 0.45 of a square's feed time, at most
-   `FLAG_FLIP_MAX_SECONDS` = 0.5 s; `flagTimes(omega)` / `flagStart(k)`):
-   a triangle rolls along the strip toward the crown as the strip feeds
-   in, taking in a fresh triangle of strip each time, so the growing
-   stack stays over the nip. Flip k starts as soon as the strip it lands
-   on is off the roll (q + 1 squares for the diagonal of square q, q + 2
-   for its bottom edge onto the next) and the flip before it is over:
-   - fold 0: the corner at the free end, u + v < Ws, over square 0's
-     diagonal u + v = Ws onto the triangle beside it;
-   - fold 1: the doubled triangle over square 0's bottom edge v = Ws onto
-     square 1's seam-side triangle u ≥ v − Ws;
-   - fold 2: that over square 1's diagonal u = v − Ws. The last bottom
-     edge has no square to land on. (Three bands and five flips were
-     tried: the eighteen-sheet stack stands a metre tall on a half-metre
-     triangle, a tower; `FLAG_BANDS` / `FLAG_SQUARES` are the knobs.)
-   Each flip is a page turn on its hinge in the strip's coordinates: the
-   in-plane offset −w → +w across the hinge, the height mirrored through
-   the stack's top so it lands roll side up on one fresh ply, the swing's
-   reach out of the plane flattened by `FLAG_LIFT` = 0.6. The stack never
-   leaves the top of the mill: the hinges and landings are within two
-   squares of the crown, and only the strip's free end, before fold 1
-   takes it, is draped over the back roll.
-3. **Release**: `FLAG_HOLD_SECONDS` = 0.2 s after the last flip the stack,
-   a flat triangle Ws across and four plies (eight sheets) thick lying
-   over the nip behind the crown, is released where it is, at rest with
-   F = I, and the rolls pull it in. About 2.5 s in all at the default
-   speed (`flagTimes(omega).end`; a crawling roll is pulled at the wind
-   speed's floor, so the press still ends).
+A held particle in the hand carries flags bit 1 as well as bit 0. P2G
+scatters its mass and momentum to the grid as it does any particle's,
+`HAND_MASS` = 4 times heavier and rigid (no C, no stress), so where the
+hand touches the grid it wins over the putty and over the roll's drag,
+and the sheet it holds follows it instead of pulling it apart; G2P still
+skips it (the hand sets where it goes). That is the whole coupling: the
+band drags its neighbours through the grid nodes they share, those drag
+theirs, and the sheet peels off the roll.
 
-One selection, one move script, one release. `P.fold` = (mode, t, flip
-length, 0), `P.fold4` = (wind speed, 0, 0, 0); the sim exposes
-`operatorFlagTimes` (speed, flip, folds[3], end). Ends alternate between
-presses: the band nearest the cut end is the bottom ply, so which end is
-cut decides which side of the roll's material lands on top.
+1. **The lift** (`HAND_LIFT_SECONDS` = 0.3): the hand rises `HAND_LIFT`
+   = 0.3 off the crown (a smoothstep) while its speed back over the mill
+   ramps up (another smoothstep) from 0 to the roll's own surface speed
+   (`windSpeed(omega)`, as cut & roll). The roll keeps carrying the sheet
+   past the cut away at that speed while the hand still holds, so the cut
+   opens behind the hand, half a lift's worth of arc; the sheet before
+   the cut, fed to the hand at the roll's speed, slackens by as much and
+   takes it up as the hand gets going.
+2. **The carry** (`handTimes(omega).back` = lift / 2 + `handBack(gap)` /
+   speed, `handBack` = 2R + gap = 0.68, the front crown to the back one):
+   the hand carries the edge back over the top of the mill at the roll's
+   speed, so sheet comes off the crown as fast as the roll delivers it and
+   hangs from the hand to the crown, sagging under its own weight toward
+   the bank; over the last lift's worth of seconds the hand settles to
+   `HAND_LAND` = 0.06 above where it started, the edge over the back
+   roll's crown.
+3. **Release**: `HAND_HOLD_SECONDS` = 0.2 s later the band is let go at
+   rest with F = I. The sheet now lies doubled across the top of the mill,
+   its edge at the back, its other end still coming over the crown, and
+   the nip pulls the fold in from the middle, both halves at once. About
+   1.2 s in all at the default speed (`handTimes(omega).end`; a crawling
+   roll is pulled at the wind speed's floor, so the move still ends).
+
+One selection, one move script (`handOffset(t)`, a translation of the
+band), one release. `P.fold` = (mode, t, lift seconds, 0), `P.fold4` =
+(speed, distance back, 0, 0); the sim exposes `operatorHandTimes` (speed,
+lift, back, end). Ends still alternate between presses in the UI, as an
+operator alternates hands, though the move is the same from either.
+
+Earlier versions scripted the whole fold (a tongue peeled into a bundle,
+then a flag fold of the halved strip in three page-turn flips on the
+mill). Every particle was placed, so the sheet never sagged, hinges were
+creases, the lengthwise fold was a cross-fade through the roll, and the
+stack was dropped dead. Holding only the edge and leaving the rest to the
+solver replaced three nested coordinate systems with one hand path.
 `GpuMpmSim.cutAndFlop(side)` starts the press; UI button "Cut & fold" (C).
 No knife is drawn: the pull starts when the button is pressed.
 

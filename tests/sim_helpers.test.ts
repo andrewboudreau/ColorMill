@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DOUBLE_SECONDS, FLAG_BANDS, FLAG_FLIP_FRACTION, FLAG_FLIP_MAX_SECONDS, FLAG_HOLD_SECONDS, FLAG_SQUARES, FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, LIFT_SECONDS, WHITE_LATENT, flagTimes, WIND_HOP_SECONDS, WIND_MAX_SECONDS, dispatchSize, foldDuration, foldProfile, halfToFloat, rollSeconds, windArc, windSeconds, windSpeed } from '../src/sim/mpm';
+import { DOUBLE_SECONDS, FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, HAND_HOLD_SECONDS, HAND_LIFT_SECONDS, LIFT_SECONDS, WHITE_LATENT, handBack, handTimes, WIND_HOP_SECONDS, WIND_MAX_SECONDS, dispatchSize, foldDuration, foldProfile, halfToFloat, rollSeconds, windArc, windSeconds, windSpeed } from '../src/sim/mpm';
 import { DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS } from '../src/config/mill';
 
 describe('solver helpers', () => {
@@ -79,26 +79,21 @@ describe('peel and wind timing', () => {
   });
 });
 
-describe('flag fold timing', () => {
-  it('flips as soon as the strip each flip lands on is off the roll, 2 * squares - 1 flips, then lets the stack go', () => {
+describe('cut & fold timing', () => {
+  it('lifts the edge, carries it back to over the back roll at the roll speed, sets it down and lets go', () => {
     const omega = DEFAULT_PARAMS.omega;
-    const f = flagTimes(omega);
-    const square = GEOMETRY.length / FLAG_BANDS;
-    expect(f.speed).toBeCloseTo(windSpeed(omega), 9);
-    expect(f.flip).toBeCloseTo(Math.min(FLAG_FLIP_MAX_SECONDS, (FLAG_FLIP_FRACTION * square) / f.speed), 9);
-    expect(f.folds).toHaveLength(2 * FLAG_SQUARES - 1);
-    // the diagonal of square q once q + 1 squares are off; its bottom edge once q + 2 are; never before the flip before ends
-    expect(f.folds[0]).toBeCloseTo(square / f.speed, 9);
-    for (let k = 1; k < f.folds.length; k++) {
-      const squaresOff = (k >> 1) + 1 + (k & 1);
-      expect(f.folds[k]).toBeCloseTo(Math.max(f.folds[k - 1] + f.flip, (squaresOff * square) / f.speed), 9);
-    }
-    expect(f.end).toBeCloseTo(f.folds[f.folds.length - 1] + f.flip + FLAG_HOLD_SECONDS, 9);
-    // the strip is a hair over FLAG_SQUARES squares (1.5 pi R = 1.508 vs 1.5), so it is all off before the last flip ends
-    expect(f.folds[f.folds.length - 1] + f.flip).toBeGreaterThan(windArc() / f.speed);
-    expect(f.end).toBeGreaterThan(1.5);
-    expect(f.end).toBeLessThan(4);
-    // a crawling roll is pulled at the floor speed, so the press still ends
-    expect(flagTimes(0).end).toBeLessThan(6);
+    const gap = DEFAULT_PARAMS.gap;
+    const t = handTimes(omega, gap);
+    expect(t.speed).toBeCloseTo(windSpeed(omega), 9);
+    expect(t.lift).toBe(HAND_LIFT_SECONDS);
+    expect(handBack(gap)).toBeCloseTo(2 * GEOMETRY.radius + gap, 9);
+    // the speed ramps up over the lift, so the hand reaches the back half a lift later than the roll would
+    expect(t.back).toBeCloseTo(0.5 * t.lift + handBack(gap) / t.speed, 9);
+    expect(t.end).toBeCloseTo(t.back + HAND_HOLD_SECONDS, 9);
+    expect(t.back).toBeGreaterThan(t.lift);
+    expect(t.end).toBeGreaterThan(0.8);
+    expect(t.end).toBeLessThan(2);
+    // a crawling roll is pulled at the floor speed, so the move still ends
+    expect(handTimes(0).end).toBeLessThan(3);
   });
 });

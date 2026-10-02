@@ -32,9 +32,9 @@ without WebGPU.
   to it as a thin sheet and comes back over the top to rejoin the bank.
 - **Cut & fold, cut & roll.** A mill has no sideways transport of its own;
   the operator supplies it. Cut & fold cuts the sheet across at the crown,
-  brings it off flat over the top of the mill folded in half lengthwise,
-  flag-folds it (a triangle flipping along the strip as it feeds in) and
-  drops the stack into the middle of the mill, alternating ends. Cut & roll
+  lifts the cut edge and carries it back over the top of the mill, then
+  lets go for the rolls to pull the fold back in; the sheet itself is the
+  solver's, peeling, sagging and folding on its own. Cut & roll
   takes
   everything off, rolls it
   into a log and feeds it back in end-first. ColorMill scripts both moves; a
@@ -96,18 +96,16 @@ pigment at all; a chunk's load spreads out as it is milled and the colour
 gets deeper where the load is higher.
 
 **Cut & fold** cuts the sheet across at the crown of the front roll and
-brings everything past the cut (the sheet, about one turn of it, not the
-bank) off over the crown flat along the top of the mill, folded in half
-lengthwise as it comes so the strip is half the roll wide and two sheets
-thick (what reaches past the back roll drapes down its back). Then it
-folds the strip the way a flag is folded, on the mill: a triangle rolls
-along it toward the crown in three flips, the corner over the diagonal,
-the doubled triangle over the square's edge onto the next square, that
-over the next diagonal, each flip as soon as the strip it lands on is off
-the roll, each a page turn on the hinge. The finished stack, a flat
-triangle half the roll wide and eight sheets thick,
-is let go where it lies, over the nip, and the rolls pull it in. Which end
-is cut decides which side's material lands on top. **Cut & roll** takes
+takes the cut edge in hand: a band of sheet three cells deep, the full
+width, and nothing else. The hand lifts it off the crown and carries it
+back over the top of the mill at the roll's own speed, to over the back
+roll, sets it down and lets go. The sheet does the rest in the solver: it
+peels off the crown behind the hand (the roll carries the sheet past the
+cut away, so the cut opens), hangs from the hand, sags onto the bank, and
+once the edge is let go the nip pulls the doubled fold in from the
+middle, both halves at once. The hand is the only scripted thing; it is
+heavy on the grid so the sheet follows it instead of tearing off it. Ends
+alternate between presses as an operator's hands do. **Cut & roll** takesis cut decides which side's material lands on top. **Cut & roll** takes
 everything on the mill and winds it off the roll into a volume-preserving log
 (bank kneaded into the core, sheet wrapped around it): a full-width coil on
 the crown of the front roll that the sheet rides up into at the roll's own
@@ -166,7 +164,7 @@ lays the same three bands on the bank.
 | Chunk-size dots (bottom bar) | Small, medium or large chunk for the next tap (also `-` / `=`, or `?chunk=s`, `m`, `l`) |
 | Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack) |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
-| **Cut & fold** / `C` | Cut the sheet across at the crown, bring it off flat over the top of the mill folded in half, flag-fold it in three flips of a triangle along the strip, and drop the stack into the middle of the mill (ends alternate) |
+| **Cut & fold** / `C` | Cut the sheet across at the crown, lift the cut edge and carry it back over the top of the mill, set it down over the back roll and let go; the sheet follows and the rolls pull the fold back in (ends alternate) |
 | **Cut & roll** / `F` | Cut everything off, roll it into a log, fold the roll in half and drop it back on the nip (or lower it in: **Log feed** slider). **Long roll** (drawer checkbox, `?roll=long`) skips the fold and stands the full-length roll up as one, leaning further to fit |
 | **Clear pigment** | Reset every particle to clear silicone |
 | **Reset** / `R` | Re-seed the bank |

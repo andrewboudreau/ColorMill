@@ -4,6 +4,10 @@
 @group(0) @binding(3) var<storage, read_write> gvel : array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read> pmass : array<i32>;   // last frame's render raster (density = pmass / 8)
 
+// The peel zone of the front roll's tack band while the hand holds the cut edge (cut & fold): this
+// far back from the crown along the front face, in radians.
+const PEEL_ARC : f32 = 0.7;
+
 @compute @workgroup_size(4, 4, 4)
 fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   if (gid.x >= P.grid.x || gid.y >= P.grid.y || gid.z >= P.grid.z) { return; }
@@ -38,17 +42,29 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   //    density the band lets go of it in proportion, so the material's own
   //    pressure pushes the excess back up into the bank instead of the sheet
   //    coming out at 1.5-1.8x rest density and the wrap running short.
+  //    While the operator's hand holds the cut edge (cut & fold, fold.wgsl), the band just
+  //    before the crown (PEEL_ARC back from it, on the front face) is a peel zone: the roll
+  //    still carries what presses on it, but lets go of what is pulled away, so the sheet the
+  //    hand holds can come off the roll instead of the hand tearing out of the sheet (the band
+  //    clamps every node the sheet sits on, so the hand could pull only through the outermost
+  //    layer of nodes and the putty gave way there).
   let df = rollerDist(P.front.x, P.front.y, p);
   let inWedge = p.y > P.front.x + 0.06 && p.z < P.front.y;
   if (df < R + P.bands.x && !(inWedge && df > R)) {
     let vr = rollerVel(P.front.x, P.front.y, P.front.z, p);
     let inChannel = abs(p.y - P.front.x) < 0.06 && p.z < P.front.y && df > R;
-    // packing is read off the render raster (a gap-wide channel at rest density
-    // rasters to ~0.65 at `low`; the grid mass here includes the roll's own
-    // stencil overlap and does not tell)
-    let dens = decodeFixed(pmass[n], MASS_SCALE) / 8.0;
-    let over = select(0.0, saturate((dens - 0.8) / 0.4), inChannel);
-    v = mix(vr, v, over);
+    let peel = P.fold.x > 1.5 && df > R && p.z >= P.front.y && p.y - P.front.x > df * cos(PEEL_ARC);
+    if (peel) {
+      let nrm = rollerNormal(P.front.x, P.front.y, p);
+      if (dot(v - vr, nrm) < 0.0) { v = vr; }
+    } else {
+      // packing is read off the render raster (a gap-wide channel at rest density
+      // rasters to ~0.65 at `low`; the grid mass here includes the roll's own
+      // stencil overlap and does not tell)
+      let dens = decodeFixed(pmass[n], MASS_SCALE) / 8.0;
+      let over = select(0.0, saturate((dens - 0.8) / 0.4), inChannel);
+      v = mix(vr, v, over);
+    }
   }
 
   // 2. back roller. In the wedge above the nip it is the same tacky no-slip wall

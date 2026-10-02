@@ -99,52 +99,41 @@ export function foldDuration(logFeed: number, omega: number = DEFAULT_PARAMS.ome
 }
 /** Script length of the lowered-in move at FOLD_FEED_SPEED (≈ 10.5 s). */
 export const FOLD_DURATION = foldDuration(FOLD_FEED_SPEED);
-/** Cut & fold (fold.wgsl, design §6b), done the way a flag is folded, on the mill: the sheet past
- * the cut at the crown (1.5 pi R of it, the wind's arc) comes off the roll at the wind speed flat
- * along the top of the mill heading back over the nip (draping down the back roll's back where it
- * reaches past its crown), folded lengthwise into FLAG_BANDS as it comes, and a triangle rolls
- * along the strip toward the crown as it feeds in: 2 * FLAG_SQUARES - 1
- * flips, each as soon as the strip it lands on is off the roll and the flip before is over, each
- * flagFlipSeconds long (a fraction of the time a square takes to come off, capped). The finished
- * stack lies over the nip and is let go there FLAG_HOLD_SECONDS after the last flip. */
-export const FLAG_BANDS = 2;
-export const FLAG_SQUARES = 2;
-export const FLAG_FLIP_MAX_SECONDS = 0.5;
-export const FLAG_FLIP_FRACTION = 0.45;
-export const FLAG_HOLD_SECONDS = 0.2;
-/** How long each flip takes at roll speed omega: FLAG_FLIP_FRACTION of a square's feed time, at most FLAG_FLIP_MAX_SECONDS. */
-export function flagFlipSeconds(omega: number): number {
-  const square = GEOMETRY.length / FLAG_BANDS;
-  return Math.min(FLAG_FLIP_MAX_SECONDS, (FLAG_FLIP_FRACTION * square) / windSpeed(omega));
+/** Cut & fold (fold.wgsl, design §6b): the sheet is cut across at the crown and the operator's hand takes
+ * the cut edge (a band HAND_CELLS deep along the arc, the full width); only that band is scripted. It is
+ * lifted off the crown over HAND_LIFT_SECONDS while its speed back over the mill ramps up to the roll's
+ * own (windSpeed; the roll carries the sheet past the cut away, opening the cut), carried back over the
+ * top of the mill to over the back roll's crown (handBack: 2 R + gap) at that speed, set down there and
+ * let go HAND_HOLD_SECONDS later. The rest of the sheet follows the hand through the grid (P2G scatters
+ * a hand particle's mass and momentum), peels off the crown, sags onto the bank, and the nip pulls the
+ * doubled fold back in once the edge is let go. */
+export const HAND_LIFT_SECONDS = 0.3;
+export const HAND_HOLD_SECONDS = 0.2;
+/** How far back the hand carries the edge: from the front roll's crown to the back roll's. */
+export function handBack(gap: number): number {
+  return 2 * GEOMETRY.radius + gap;
 }
-/** The flag fold's timeline at roll speed omega (sim seconds from the start of the move). */
-export interface FlagTimes {
-  /** the wind speed the sheet comes off at */
+/** The cut & fold's timeline at roll speed omega (sim seconds from the start of the move). */
+export interface HandTimes {
+  /** the hand's speed back over the mill once the lift is over: the roll's own surface speed (floored) */
   readonly speed: number;
-  /** each flip's length */
-  readonly flip: number;
-  /** when each flip starts (2 * FLAG_SQUARES - 1 of them) */
-  readonly folds: readonly number[];
-  /** when everything is released */
+  /** how long the lift takes (the speed ramps up over it) and the set-down at the back */
+  readonly lift: number;
+  /** when the hand reaches the back and sets the edge down */
+  readonly back: number;
+  /** when the edge is let go: the end of the move */
   readonly end: number;
 }
-/** Mirrors flagStart() in fold.wgsl: flip k starts once the strip it lands on is off the roll (q + 1 squares
- * for the diagonal of square q, q + 2 for its bottom edge onto the next) and the flip before it is over. */
-export function flagTimes(omega: number): FlagTimes {
+/** Mirrors handBack() / handOffset() in fold.wgsl: the speed ramps up over the lift as a smoothstep, so the hand
+ * covers half a lift's worth less than the roll would and reaches the back lift / 2 later. */
+export function handTimes(omega: number, gap: number = DEFAULT_PARAMS.gap): HandTimes {
   const speed = windSpeed(omega);
-  const flip = flagFlipSeconds(omega);
-  const square = GEOMETRY.length / FLAG_BANDS;
-  const folds: number[] = [];
-  let t = 0;
-  for (let k = 0; k < 2 * FLAG_SQUARES - 1; k++) {
-    const squaresOff = (k >> 1) + 1 + (k & 1);
-    t = Math.max(k > 0 ? t + flip : 0, (squaresOff * square) / speed);
-    folds.push(t);
-  }
-  return { speed, flip, folds, end: folds[folds.length - 1] + flip + FLAG_HOLD_SECONDS };
+  const lift = HAND_LIFT_SECONDS;
+  const back = 0.5 * lift + handBack(gap) / speed;
+  return { speed, lift, back, end: back + HAND_HOLD_SECONDS };
 }
-/** Operator-move modes carried in P.fold.x: 1 = cut & roll (log); 2 / 3 = cut & fold (the flag
- * fold) with the cut at the x = 0 / x = L end. */
+/** Operator-move modes carried in P.fold.x: 1 = cut & roll (log); 2 / 3 = cut & fold (the hand
+ * takes the cut edge), the UI alternating between them as an operator alternates ends. */
 export type FoldMode = 0 | 1 | 2 | 3;
 /** Arc length along the front roll -> z on the bank (the unrolled sheet is compressed by this factor). */
 /**
@@ -284,8 +273,8 @@ export class GpuMpm implements GpuMpmSim {
    *  slider change mid-move cannot change its length under it) */
   private foldFeed = 0;
   private foldMode: FoldMode = 0;
-  /** cut & fold: the flag fold's timeline, captured when the move starts */
-  private flag: FlagTimes = flagTimes(DEFAULT_PARAMS.omega);
+  /** cut & fold: the hand's timeline, captured when the move starts */
+  private hand: HandTimes = handTimes(DEFAULT_PARAMS.omega);
   /** how cut & roll puts the roll back; read when the move starts */
   rollStyle: RollStyle = 'double';
   private foldLong = false;
@@ -588,7 +577,7 @@ export class GpuMpm implements GpuMpmSim {
     f.set([mu, lambda, this.config.material.thetaC, this.config.material.thetaS], o + 20);
     f.set([pVol, pMass, pMass / (pVol * MATERIAL_DENSITY), p.dispersion], o + 24);
     if (this.foldMode === 1) f.set([foldActive ? 1 : 0, foldT, this.foldRollSeconds, this.foldFeed], o + 28);
-    else f.set([foldActive ? this.foldMode : 0, foldT, this.flag.flip, 0], o + 28);
+    else f.set([foldActive ? this.foldMode : 0, foldT, this.hand.lift, 0], o + 28);
     // fold: the live bank top is reduced on the GPU (fold.wgsl); fold2.x is only the fallback
     const yMax = GEOMETRY.domain[1] - 3 * h;
     const bankTopFallback = Math.min(bankTopY(this.batch, this.config.params), yMax);
@@ -605,10 +594,10 @@ export class GpuMpm implements GpuMpmSim {
     const ratio = h / fd.h;
     u[o + 44] = fd.nx; u[o + 45] = fd.ny; u[o + 46] = fd.nz; u[o + 47] = 0;
     f.set([fd.h, 1 / fd.h, (ratio * ratio * ratio) / 8, 0], o + 48);
-    // cut & roll: peel and wind, double, lift; cut & fold: the bundle's square (fold.wgsl)
-    // (a negative double time keeps the roll long: no fold in half); cut & fold: the wind speed and the three flips
+    // cut & roll: peel and wind, double, lift (a negative double time keeps the roll long: no fold in half);
+    // cut & fold: the hand's speed back over the mill and how far back it goes (fold.wgsl)
     if (this.foldMode === 1) f.set([this.foldWindSpeed, this.foldWindSeconds, this.foldLong ? -1 : DOUBLE_SECONDS, LIFT_SECONDS], o + 52);
-    else f.set([this.flag.speed, 0, 0, 0], o + 52);
+    else f.set([this.hand.speed, handBack(gap), 0, 0], o + 52);
   }
 
   // ---------------------------------------------------------------------------
@@ -678,7 +667,7 @@ export class GpuMpm implements GpuMpmSim {
     // uniform ring: one slot per substep (fold script state differs per substep)
     let foldActive = this.foldActive || this.foldPending;
     let foldT = this.foldPending ? 0 : this.foldTime;
-    const duration = this.foldMode === 1 ? this.foldTotalSeconds : this.flag.end + 0.02;
+    const duration = this.foldMode === 1 ? this.foldTotalSeconds : this.hand.end + 0.02;
     const finishAt: number[] = [];
     for (let s = 0; s < substeps; s++) {
       this.writeParams(s, foldT, foldActive);
@@ -928,12 +917,12 @@ export class GpuMpm implements GpuMpmSim {
   cutAndFlop(side: 'left' | 'right'): void {
     if (this.destroyed || this.operatorBusy) return;
     this.foldMode = side === 'left' ? 2 : 3;
-    this.flag = flagTimes(this.params.omega);
+    this.hand = handTimes(this.params.omega, this.params.gap);
     this.foldPending = true;
   }
 
-  get operatorFlagTimes(): FlagTimes {
-    return this.flag;
+  get operatorHandTimes(): HandTimes {
+    return this.hand;
   }
 
   get operatorBusy(): boolean {

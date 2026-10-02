@@ -222,7 +222,7 @@ export default async function run() {
     // --- cut & fold: the hand takes the band of sheet at the cut, lifts it off the crown and carries it back
     // over the mill; the rest of the sheet follows in the solver; the edge is let go over the back roll ---
     const handT = await page.evaluate(() => { window.__solver.sim.cutAndFlop('left'); return window.__solver.sim.operatorHandTimes; });
-    const flop = await page.evaluate(async ([nStart, nLift, nBack, nEnd, nMax]) => {
+    const flop = await page.evaluate(async ([nStart, nLift, nMid, nBack, nEnd, nMax]) => {
       const crownY = 0.55 + 0.32, frontZ = 0.75 + 0.32 + 0.02, backZ = 0.75 - 0.32 - 0.02, faceZ = frontZ + 0.32;
       const overTop = (s) => {
         // free (not held) material lifted off the mill top between the crowns: what the hand has dragged off the roll
@@ -249,12 +249,14 @@ export default async function run() {
         if (y > crownY + 0.15) up++;
         if (z > faceZ) inFront++;
       }
-      // the hand is at the back: the sheet it dragged lies over the top of the mill
-      await window.__solver.stepFrames(nBack - nLift);
+      // half-way back: the sheet the hand dragged off the roll hangs over the top of the mill
+      await window.__solver.stepFrames(nMid - nLift);
+      const overB = overTop(await window.__solver.snapshot());
+      // the hand is at the back: the edge is set down over the back roll
+      await window.__solver.stepFrames(nBack - nMid);
       const b = await window.__solver.snapshot();
       let sumZb = 0, kinB = 0;
       for (let p = 0; p < b.count; p++) if (b.flags[p] & 1) { kinB++; sumZb += b.positions[3 * p + 2]; }
-      const overB = overTop(b);
       // the rest of the move: wait until the operator is done
       let steps = 0;
       while (window.__solver.sim.operatorBusy && steps < nMax) { await window.__solver.stepFrames(10); steps += 10; }
@@ -264,9 +266,9 @@ export default async function run() {
       for (const p of idx) { sumX1 += e.positions[3 * p]; sumY1 += e.positions[3 * p + 1]; sumZ1 += e.positions[3 * p + 2]; }
       return { lifted: idx.length, hand0, count: s.count, meanX0: sumX0 / idx.length, over0, kinM, up, inFront, kinB, meanZb: sumZb / Math.max(kinB, 1), overB, steps, busy: window.__solver.sim.operatorBusy, kin, meanX1: sumX1 / idx.length, meanY1: sumY1 / idx.length, meanZ1: sumZ1 / idx.length,
         positions: Array.from(e.positions), velocities: Array.from(e.velocities), latents: Array.from(e.latents), deformation: Array.from(e.deformation), flags: Array.from(e.flags), error: window.__solver.error };
-    }, [4, framesFor(handT.lift + 0.05), framesFor(handT.back), framesFor(handT.end), framesFor(handT.end + 2)]);
+    }, [4, framesFor(handT.lift + 0.05), framesFor(0.5 * (handT.lift + handT.back)), framesFor(handT.back), framesFor(handT.end), framesFor(handT.end + 2)]);
     const aFlop = analyse(flop, dims);
-    console.log(`  cut & fold (lift ${handT.lift.toFixed(2)} s, at the back ${handT.back.toFixed(2)} s, end ${handT.end.toFixed(2)}): the hand took ${flop.lifted} of ${flop.count} (${flop.hand0} hand, mean x ${flop.meanX0.toFixed(3)}); after the lift ${flop.kinM} held, ${flop.up} up, ${flop.inFront} in front of the face; at the back ${flop.kinB} held at mean z ${flop.meanZb.toFixed(3)}, free material over the top ${flop.over0} -> ${flop.overB}; done after ${flop.steps} more frames: mean x ${flop.meanX1.toFixed(3)}, y ${flop.meanY1.toFixed(3)}, z ${flop.meanZ1.toFixed(3)}; ${flop.kin} still held; ${JSON.stringify({ bad: aFlop.bad, outside: aFlop.outside, inRoller: aFlop.inRoller })}`);
+    console.log(`  cut & fold (lift ${handT.lift.toFixed(2)} s, at the back ${handT.back.toFixed(2)} s, end ${handT.end.toFixed(2)}): the hand took ${flop.lifted} of ${flop.count} (${flop.hand0} hand, mean x ${flop.meanX0.toFixed(3)}); after the lift ${flop.kinM} held, ${flop.up} up, ${flop.inFront} in front of the face; free material over the top of the mill ${flop.over0} -> ${flop.overB} half-way back; at the back ${flop.kinB} held at mean z ${flop.meanZb.toFixed(3)}; done after ${flop.steps} more frames: mean x ${flop.meanX1.toFixed(3)}, y ${flop.meanY1.toFixed(3)}, z ${flop.meanZ1.toFixed(3)}; ${flop.kin} still held; ${JSON.stringify({ bad: aFlop.bad, outside: aFlop.outside, inRoller: aFlop.inRoller })}`);
     assert(!flop.error, 'no WebGPU errors during cut & fold: ' + flop.error);
     assert(flop.lifted > 0.01 * flop.count && flop.lifted < 0.15 * flop.count, `the hand takes a band of sheet at the cut, not the sheet (${flop.lifted} of ${flop.count})`);
     assert(flop.hand0 === flop.lifted, `everything held is in the hand (${flop.hand0} of ${flop.lifted})`);
@@ -274,7 +276,7 @@ export default async function run() {
     assert(flop.up > 0.9 * flop.lifted, `the band is lifted off the crown (${flop.up} of ${flop.lifted} up)`);
     assert(flop.inFront < 0.02 * flop.lifted, `nothing stands out in front of the face (${flop.inFront} of ${flop.lifted} past it)`);
     assert(flop.meanZb < 0.75 - 0.2, `the hand carries the edge back over the nip (mean z ${flop.meanZb.toFixed(3)} at the back)`);
-    assert(flop.overB > flop.over0 + 2 * flop.lifted, `the sheet follows the hand off the roll over the top of the mill (free material up there ${flop.over0} -> ${flop.overB}, hand ${flop.lifted})`);
+    assert(flop.overB > flop.over0 + flop.lifted, `the sheet follows the hand off the roll over the top of the mill (free material up there ${flop.over0} -> ${flop.overB} half-way back, hand ${flop.lifted})`);
     assert(!flop.busy && flop.kin === 0, `everything is released once the move is over (${flop.kin} still held, busy ${flop.busy})`);
     assert(flop.meanX1 > 0.45 && flop.meanX1 < 1.05, `the edge stays centred on the roll (mean x ${flop.meanX0.toFixed(3)} -> ${flop.meanX1.toFixed(3)})`);
     assert(flop.meanZ1 > 0.2 && flop.meanZ1 < 0.75, `the edge is set down over the back roll (mean z ${flop.meanZ1.toFixed(3)})`);

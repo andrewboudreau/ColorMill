@@ -15,7 +15,7 @@
 import {
   DEFAULT_PARAMS, PIGMENT_POOL_FRACTION,
   GEOMETRY, bankTopY, colourGridDims, gridDims, lameParameters, rollerPoses, seedBankPositions,
-  type GridDims, type MillConfig, type MillParams, type QualitySettings
+  type GridDims, type MillConfig, type MillParams, type QualitySettings, type RollStyle
 } from '../config/mill';
 import type {
   CutOptions, GpuMpmSim, GpuMpmSimOptions, Latent, ParticleSnapshot, RenderVolumes, SimStats
@@ -74,15 +74,19 @@ export function windSpeed(omega: number): number {
 export function windSeconds(omega: number): number {
   return windArc() / windSpeed(omega) + WIND_HOP_SECONDS;
 }
-/** Length of the whole roll phase (wind, double, lift) at roll speed omega; the log stands over the nip after it. */
-export function rollSeconds(omega: number): number {
-  return windSeconds(omega) + DOUBLE_SECONDS + LIFT_SECONDS;
+/** Length of the whole roll phase (wind, double unless the roll is kept long, lift) at roll speed omega;
+ * the log stands over the nip after it. */
+export function rollSeconds(omega: number, long = false): number {
+  return windSeconds(omega) + (long ? 0 : DOUBLE_SECONDS) + LIFT_SECONDS;
 }
 /** The roll phase at the default roll speed (≈ 2.5 s). */
 export const FOLD_ROLL_SECONDS = rollSeconds(DEFAULT_PARAMS.omega);
 /** The design's original lowering speed (sim units / s along the log axis); FOLD_DURATION is the move's length at it. */
 export const FOLD_FEED_SPEED = 0.15;
 export const FOLD_TILT = 0.42;                // log axis tilt from vertical toward the viewer (rad)
+/** The long single roll (rollStyle 'long') leans further so its full length clears the ceiling: 0.85 rad
+ * puts the top of a 1.5 roll at about 2.1 and its far end 1.9 toward the viewer. */
+export const FOLD_TILT_LONG = 0.85;
 /** Arc bins and depth slices of the fold's thickness histogram, and floats per bin in its tables (mirror NB / NS / TS in fold.wgsl). */
 export const FOLD_BINS = 128;
 export const FOLD_SLICES = 32;
@@ -90,30 +94,60 @@ export const FOLD_TABLE_STRIDE = 16;
 /** Total script length for a given feed: roll, then either let the whole log go (a
  * substep later) or lower it (the material folded in half: L/2 long, plus the
  * tilted end face of a log up to ~0.7 units across) through the nip. */
-export function foldDuration(logFeed: number, omega: number = DEFAULT_PARAMS.omega): number {
-  const roll = rollSeconds(omega);
+export function foldDuration(logFeed: number, omega: number = DEFAULT_PARAMS.omega, long = false): number {
+  const roll = rollSeconds(omega, long);
   if (!(logFeed > 0)) return roll + 0.02;
-  return roll + (0.5 * GEOMETRY.length + 0.6) / logFeed + 0.3;
+  return roll + ((long ? 1 : 0.5) * GEOMETRY.length + 0.6) / logFeed + 0.3;
 }
 /** Script length of the lowered-in move at FOLD_FEED_SPEED (≈ 10.5 s). */
 export const FOLD_DURATION = foldDuration(FOLD_FEED_SPEED);
-/** Cut & fold (fold.wgsl): cut the sheet across from one end to the middle and, for each of
- * BUNDLE_SQUARES squares of strip the roll brings up under the cut (about one turn), fold the
- * free corner over the diagonal as a triangle (FLOP_SECONDS) and lift the doubled triangle into
- * the operator's hands out in front of the roll (BUNDLE_LIFT_SECONDS), where it stacks on the
- * bundle; then set the bundle down on the nip on the other half (BUNDLE_SET_SECONDS). The solver
- * queues each step when the last ends, selected afresh. */
-export const FLOP_SECONDS = 0.5;
-export const BUNDLE_LIFT_SECONDS = 0.35;
-export const BUNDLE_SET_SECONDS = 0.5;
-/** Squares of strip folded into the bundle per press: 2 pi R / (L / 2) is 2.7, about one turn of the roll. */
-export const BUNDLE_SQUARES = 3;
-/** Whole cut & fold press: BUNDLE_SQUARES folds and lifts, then the set-down. */
-export const BUNDLE_DURATION = BUNDLE_SQUARES * (FLOP_SECONDS + BUNDLE_LIFT_SECONDS) + BUNDLE_SET_SECONDS;
-/** Operator-move modes carried in P.fold.x: 1 = cut & roll (log); cut & fold with the cut at the
- * x = 0 / x = L end: 2 / 3 the fold (the corner triangle over the diagonal), 4 / 5 the lift of the
- * doubled triangle into the hands, 6 / 7 the set-down of the bundle on the other half. */
-export type FoldMode = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+/** Cut & fold (fold.wgsl, design §6b), done the way a flag is folded, on the mill: the sheet past
+ * the cut at the crown (1.5 pi R of it, the wind's arc) comes off the roll at the wind speed flat
+ * along the top of the mill heading back over the nip (draping down the back roll's back where it
+ * reaches past its crown), folded lengthwise into FLAG_BANDS as it comes, and a triangle rolls
+ * along the strip toward the crown as it feeds in: 2 * FLAG_SQUARES - 1
+ * flips, each as soon as the strip it lands on is off the roll and the flip before is over, each
+ * flagFlipSeconds long (a fraction of the time a square takes to come off, capped). The finished
+ * stack lies over the nip and is let go there FLAG_HOLD_SECONDS after the last flip. */
+export const FLAG_BANDS = 2;
+export const FLAG_SQUARES = 2;
+export const FLAG_FLIP_MAX_SECONDS = 0.5;
+export const FLAG_FLIP_FRACTION = 0.45;
+export const FLAG_HOLD_SECONDS = 0.2;
+/** How long each flip takes at roll speed omega: FLAG_FLIP_FRACTION of a square's feed time, at most FLAG_FLIP_MAX_SECONDS. */
+export function flagFlipSeconds(omega: number): number {
+  const square = GEOMETRY.length / FLAG_BANDS;
+  return Math.min(FLAG_FLIP_MAX_SECONDS, (FLAG_FLIP_FRACTION * square) / windSpeed(omega));
+}
+/** The flag fold's timeline at roll speed omega (sim seconds from the start of the move). */
+export interface FlagTimes {
+  /** the wind speed the sheet comes off at */
+  readonly speed: number;
+  /** each flip's length */
+  readonly flip: number;
+  /** when each flip starts (2 * FLAG_SQUARES - 1 of them) */
+  readonly folds: readonly number[];
+  /** when everything is released */
+  readonly end: number;
+}
+/** Mirrors flagStart() in fold.wgsl: flip k starts once the strip it lands on is off the roll (q + 1 squares
+ * for the diagonal of square q, q + 2 for its bottom edge onto the next) and the flip before it is over. */
+export function flagTimes(omega: number): FlagTimes {
+  const speed = windSpeed(omega);
+  const flip = flagFlipSeconds(omega);
+  const square = GEOMETRY.length / FLAG_BANDS;
+  const folds: number[] = [];
+  let t = 0;
+  for (let k = 0; k < 2 * FLAG_SQUARES - 1; k++) {
+    const squaresOff = (k >> 1) + 1 + (k & 1);
+    t = Math.max(k > 0 ? t + flip : 0, (squaresOff * square) / speed);
+    folds.push(t);
+  }
+  return { speed, flip, folds, end: folds[folds.length - 1] + flip + FLAG_HOLD_SECONDS };
+}
+/** Operator-move modes carried in P.fold.x: 1 = cut & roll (log); 2 / 3 = cut & fold (the flag
+ * fold) with the cut at the x = 0 / x = L end. */
+export type FoldMode = 0 | 1 | 2 | 3;
 /** Arc length along the front roll -> z on the bank (the unrolled sheet is compressed by this factor). */
 /**
  * Reference material density. The stress force in P2G is scaled by
@@ -268,9 +302,11 @@ export class GpuMpm implements GpuMpmSim {
    *  slider change mid-move cannot change its length under it) */
   private foldFeed = 0;
   private foldMode: FoldMode = 0;
-  /** cut & fold: which square of the strip is being folded (0-based), and this step's length */
-  private bundleSquare = 0;
-  private flopSeconds = FLOP_SECONDS;
+  /** cut & fold: the flag fold's timeline, captured when the move starts */
+  private flag: FlagTimes = flagTimes(DEFAULT_PARAMS.omega);
+  /** how cut & roll puts the roll back; read when the move starts */
+  rollStyle: RollStyle = 'double';
+  private foldLong = false;
   /** cut & roll timing, captured when the move starts (the roll speed may change during it) */
   private foldWindSpeed = windSpeed(DEFAULT_PARAMS.omega);
   private foldWindSeconds = windSeconds(DEFAULT_PARAMS.omega);
@@ -596,7 +632,8 @@ export class GpuMpm implements GpuMpmSim {
     f.set([front.axisY, front.axisZ, front.omegaX, GEOMETRY.radius], o + 16);
     f.set([mu, lambda, this.config.material.thetaC, this.config.material.thetaS], o + 20);
     f.set([pVol, pMass, pMass / (pVol * MATERIAL_DENSITY), p.dispersion], o + 24);
-    f.set([foldActive ? this.foldMode : 0, foldT, this.foldMode === 1 ? this.foldRollSeconds : this.flopSeconds, this.foldFeed], o + 28);
+    if (this.foldMode === 1) f.set([foldActive ? 1 : 0, foldT, this.foldRollSeconds, this.foldFeed], o + 28);
+    else f.set([foldActive ? this.foldMode : 0, foldT, this.flag.flip, 0], o + 28);
     // fold: the live bank top is reduced on the GPU (fold.wgsl); fold2.x is only the fallback
     const yMax = GEOMETRY.domain[1] - 3 * h;
     const bankTopFallback = Math.min(bankTopY(this.batch, this.config.params), yMax);
@@ -607,15 +644,16 @@ export class GpuMpm implements GpuMpmSim {
     // rides the roll instead of only its innermost layer (design §3.3).
     const tackBand = p.tackCells > 0 ? p.tackCells * h : p.gap + 1.0 * h;
     f.set([tackBand, 0.5 * h, 2 * h, 0.6], o + 36);
-    f.set([GEOMETRY.bankHalfDepth, 0.5 * h, FOLD_TILT, yMax], o + 40);
+    f.set([GEOMETRY.bankHalfDepth, 0.5 * h, this.foldMode === 1 && this.foldLong ? FOLD_TILT_LONG : FOLD_TILT, yMax], o + 40);
     // colour raster grid (design §3.5)
     const fd = this.fineDims;
     const ratio = h / fd.h;
     u[o + 44] = fd.nx; u[o + 45] = fd.ny; u[o + 46] = fd.nz; u[o + 47] = 0;
     f.set([fd.h, 1 / fd.h, (ratio * ratio * ratio) / 8, 0], o + 48);
     // cut & roll: peel and wind, double, lift; cut & fold: the bundle's square (fold.wgsl)
-    if (this.foldMode === 1) f.set([this.foldWindSpeed, this.foldWindSeconds, DOUBLE_SECONDS, LIFT_SECONDS], o + 52);
-    else f.set([this.bundleSquare, 0, 0, 0], o + 52);
+    // (a negative double time keeps the roll long: no fold in half); cut & fold: the wind speed and the three flips
+    if (this.foldMode === 1) f.set([this.foldWindSpeed, this.foldWindSeconds, this.foldLong ? -1 : DOUBLE_SECONDS, LIFT_SECONDS], o + 52);
+    else f.set([this.flag.speed, 0, 0, 0], o + 52);
   }
 
   // ---------------------------------------------------------------------------
@@ -685,7 +723,7 @@ export class GpuMpm implements GpuMpmSim {
     // uniform ring: one slot per substep (fold script state differs per substep)
     let foldActive = this.foldActive || this.foldPending;
     let foldT = this.foldPending ? 0 : this.foldTime;
-    const duration = this.foldMode === 1 ? this.foldTotalSeconds : this.flopSeconds + 0.02;
+    const duration = this.foldMode === 1 ? this.foldTotalSeconds : this.flag.end + 0.02;
     const finishAt: number[] = [];
     for (let s = 0; s < substeps; s++) {
       this.writeParams(s, foldT, foldActive);
@@ -733,23 +771,6 @@ export class GpuMpm implements GpuMpmSim {
         if (finishAt.includes(s)) {
           this.dispatchParticles(pass, k.foldFinish, s);
           this.foldActive = false;
-          // cut & fold: fold, lift, fold, lift, ... then the set-down, each selected afresh next frame
-          const m = this.foldMode;
-          if (m === 2 || m === 3) {
-            this.foldMode = (m + 2) as FoldMode;
-            this.flopSeconds = BUNDLE_LIFT_SECONDS;
-            this.foldPending = true;
-          } else if (m === 4 || m === 5) {
-            if (this.bundleSquare + 1 < BUNDLE_SQUARES) {
-              this.bundleSquare += 1;
-              this.foldMode = (m - 2) as FoldMode;
-              this.flopSeconds = FLOP_SECONDS;
-            } else {
-              this.foldMode = (m + 2) as FoldMode;
-              this.flopSeconds = BUNDLE_SET_SECONDS;
-            }
-            this.foldPending = true;
-          }
         }
       }
     }
@@ -947,10 +968,11 @@ export class GpuMpm implements GpuMpmSim {
     this.foldMode = 1;
     this.foldFeed = Math.max(this.params.logFeed, 0);
     const omega = this.params.omega;
+    this.foldLong = this.rollStyle === 'long';
     this.foldWindSpeed = windSpeed(omega);
     this.foldWindSeconds = windSeconds(omega);
-    this.foldRollSeconds = rollSeconds(omega);
-    this.foldTotalSeconds = foldDuration(this.foldFeed, omega);
+    this.foldRollSeconds = rollSeconds(omega, this.foldLong);
+    this.foldTotalSeconds = foldDuration(this.foldFeed, omega, this.foldLong);
     this.foldPending = true;
   }
 
@@ -962,8 +984,7 @@ export class GpuMpm implements GpuMpmSim {
     if (this.destroyed || this.operatorBusy) return;
     this.clearCut();
     this.foldMode = side === 'left' ? 2 : 3;
-    this.bundleSquare = 0;
-    this.flopSeconds = FLOP_SECONDS;
+    this.flag = flagTimes(this.params.omega);
     this.foldPending = true;
   }
 
@@ -1041,6 +1062,10 @@ export class GpuMpm implements GpuMpmSim {
   /** true while a drawn cut keeps its two sides apart */
   get cutActive(): boolean {
     return this.cutLive;
+  }
+
+  get operatorFlagTimes(): FlagTimes {
+    return this.flag;
   }
 
   get operatorBusy(): boolean {

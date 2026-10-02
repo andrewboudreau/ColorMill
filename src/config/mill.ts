@@ -7,6 +7,9 @@
  */
 
 export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra';
+/** How cut & roll puts the wound roll back (design §6): 'double' folds it in half first (the default);
+ *  'long' stands the full-length roll up as one and feeds it in, which may reach the ceiling. */
+export type RollStyle = 'double' | 'long';
 
 export interface QualitySettings {
   readonly preset: QualityPreset;

@@ -31,12 +31,11 @@ without WebGPU.
 - **The sheet.** The front roll is tackier, so the putty leaves the nip stuck
   to it as a thin sheet and comes back over the top to rejoin the bank.
 - **Cut & fold, cut & roll.** A mill has no sideways transport of its own;
-  the operator supplies it. Cut & fold cuts the sheet across on the front
-  roll from the end to the middle, then folds it the way a flag is folded
-  for about a turn of the roll: each square the roll brings up has its free
-  corner folded over as a big triangle and the doubled triangle lifted into
-  the operator's hands onto a growing bundle, which is then set down on the
-  other half, alternating ends. Cut & roll takes
+  the operator supplies it. Cut & fold cuts the sheet across at the crown,
+  brings it off flat over the top of the mill folded in half lengthwise,
+  flag-folds it (a triangle flipping along the strip as it feeds in) and
+  drops the stack into the middle of the mill, alternating ends. Cut & roll
+  takes
   everything off, rolls it
   into a log and feeds it back in end-first. ColorMill scripts both moves; a
   few rounds turn stripes into a blend.
@@ -96,16 +95,19 @@ crisp in the resting bank and blend in the nip. The clear base carries no
 pigment at all; a chunk's load spreads out as it is milled and the colour
 gets deeper where the load is higher.
 
-**Cut & fold** cuts the sheet across on the front face of the front roll,
-from the roll end to the middle just below the crown, so the half-width strip
-below the cut is free at the top and still joined to the other half along
-the uncut seam. Then it folds the strip the way a flag is folded, a square
-at a time as the roll brings it up, for about one turn: the free corner at
-the roll end goes over the diagonal onto the triangle below it (a page turn
-out in front of the roll), and the doubled triangle is lifted into the
-operator's hands out in front, onto a bundle that grows to six plies; the
-bundle is then set down on the nip on the other half, where the rolls pull
-it in. **Cut & roll** takes
+**Cut & fold** cuts the sheet across at the crown of the front roll and
+brings everything past the cut (the sheet, about one turn of it, not the
+bank) off over the crown flat along the top of the mill, folded in half
+lengthwise as it comes so the strip is half the roll wide and two sheets
+thick (what reaches past the back roll drapes down its back). Then it
+folds the strip the way a flag is folded, on the mill: a triangle rolls
+along it toward the crown in three flips, the corner over the diagonal,
+the doubled triangle over the square's edge onto the next square, that
+over the next diagonal, each flip as soon as the strip it lands on is off
+the roll, each a page turn on the hinge. The finished stack, a flat
+triangle half the roll wide and eight sheets thick,
+is let go where it lies, over the nip, and the rolls pull it in. Which end
+is cut decides which side's material lands on top. **Cut & roll** takes
 everything on the mill and winds it off the roll into a volume-preserving log
 (bank kneaded into the core, sheet wrapped around it): a full-width coil on
 the crown of the front roll that the sheet rides up into at the roll's own
@@ -164,8 +166,8 @@ lays the same three bands on the bank.
 | Chunk-size dots (bottom bar) | Small, medium or large chunk for the next tap (also `-` / `=`, or `?chunk=s`, `m`, `l`) |
 | Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack) |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
-| **Cut & fold** / `C` | Cut the sheet across from the end to the middle and fold it like a flag for a turn of the roll: each square's corner triangle over the diagonal, the doubled triangle lifted into the hands onto a growing bundle, then the bundle set down on the other half (ends alternate) |
-| **Cut & roll** / `F` | Cut everything off, roll it into a log and drop it back on the nip (or lower it in: **Log feed** slider) |
+| **Cut & fold** / `C` | Cut the sheet across at the crown, bring it off flat over the top of the mill folded in half, flag-fold it in three flips of a triangle along the strip, and drop the stack into the middle of the mill (ends alternate) |
+| **Cut & roll** / `F` | Cut everything off, roll it into a log, fold the roll in half and drop it back on the nip (or lower it in: **Log feed** slider). **Long roll** (drawer checkbox, `?roll=long`) skips the fold and stands the full-length roll up as one, leaning further to fit |
 | **Knife** / `K`, or Shift-drag | Prototype: drag a line across the sheet on the front roll to tear it there; the kerf opens as a gap, the two sides are separate bodies for the solver, and the cut knits back in the nip (design §6c; `__colormill.sim.cutAlong(points)` takes the line in sheet coordinates) |
 | **Clear pigment** | Reset every particle to clear silicone |
 | **Reset** / `R` | Re-seed the bank |
@@ -180,6 +182,7 @@ lays the same three bands on the bank.
 | `?gap=0.06&omega=2&preset=high&batch=1.5` | Start with mill settings changed: any drawer slider by its name (`omega`, `frictionRatio`, `gap`, `dispersion`, `gravity`, `backFriction`, `logFeed`), the quality preset and the batch size. Values are snapped to the slider's step and capped at its range. The drawer's **Copy start link** writes the session's drops plus every setting that differs from its default, so a whole setup restarts from one URL |
 | `?colour=48` | Experiment: the colour raster's resolution in cells per unit (16 to 128; `?colour=32` at low is the solver grid, the look before the colour raster) |
 | `?render=surface` | Colour mode: `depth` (default) blends a few cells into the material by mean pigment load, which gives the soft tie-dye look; `surface` draws the top-most material only, so a pigment skin reads as pigment and clear over buried pigment reads as clear, and draws pigment by coverage (how much of a fine cell's mass is pigment-carrying), so a thin lamina keeps a sharp edge instead of tinting its whole cell. The drawer's **Surface colour** toggle switches it live |
+| `?roll=long` | Cut & roll keeps the roll long: no fold in half, the full-length roll stands up as one at a steeper lean and goes in end-first (the drawer's **Long roll** checkbox; the start link carries it) |
 | `?experimental=1&omega=50` | Experimental mode: the caps come off. URL values are accepted as written (floored at each slider's minimum), the sliders stretch to 4× their normal top, and the drawer / mixer toggle **Experimental: lift the slider caps** does the same. The solver is not guaranteed stable up there |
 
 ## Quality presets

@@ -2,7 +2,7 @@
  * Shared interfaces between the GPU solver, the renderer, the UI and tests.
  * See docs/design-v2.md. Keep this file free of GPU code.
  */
-import type { GridDims, MillConfig, MillParams, QualitySettings } from '../config/mill';
+import type { GridDims, MillConfig, MillParams, QualitySettings, RollStyle } from '../config/mill';
 import type { Drop } from '../drops';
 
 /** A 7-float Mixbox latent. */
@@ -119,10 +119,10 @@ export interface GpuMpmSim {
   clearPigment(): void;
   /** Start the scripted operator move: cut the sheet off the front roll, roll it into a log, turn it and set it on the bank (design §6). No-op if one is running. */
   cutAndFold(): void;
-  /** Start the other operator move: cut the sheet on the front roll from the `side` end (x = 0 for 'left')
-   *  toward the middle and, for about one turn of the roll, fold each square of strip it brings up like a
-   *  flag and lift the doubled triangle into the operator's hands, then set the bundle down on the nip on
-   *  the other half (design §6b). No-op if a move is running. */
+  /** Start the other operator move: cut the sheet across at the crown of the front roll, let it come off flat
+   *  along the top of the mill folded lengthwise in half (the `side` end's half underneath, 'left' for x = 0),
+   *  fold it the way a flag is folded (a triangle rolling along the strip toward the crown in three flips, the
+   *  stack staying over the nip) and let the stack go there (design §6b). No-op if a move is running. */
   cutAndFlop(side: 'left' | 'right'): void;
   /**
    * Draw a cut: tear the sheet on the front roll along a polyline in sheet coordinates
@@ -137,11 +137,16 @@ export interface GpuMpmSim {
   clearCut(): void;
   /** true while a drawn cut keeps its two sides apart */
   readonly cutActive: boolean;
+  /** The current (or last) cut & fold's timeline in sim seconds from its start: the flips, each one's length, the end. */
+  readonly operatorFlagTimes: { readonly speed: number; readonly flip: number; readonly folds: readonly number[]; readonly end: number };
   /** true while an operator move (cut & roll or cut & fold) is running */
   readonly operatorBusy: boolean;
   /** Length of the current (or last) cut & roll's roll phase in sim seconds: the material is wound off
    *  the roll and the log swung up over the nip; after it the log is dropped or lowered in (design §6). */
   readonly operatorRollSeconds: number;
+  /** How cut & roll puts the roll back: folded in half ('double', the default) or as one long roll
+   *  ('long'); read when the move starts. */
+  rollStyle: RollStyle;
   /** Read particle state back to the CPU (slow; tests and diagnostics only). */
   readParticles(): Promise<ParticleSnapshot>;
   /** Read the packed density volume (volA red channel) back as float32, node-major (i fastest). */

@@ -2,7 +2,7 @@ name: Build and deploy GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, preview/cut]
   workflow_dispatch:
 
 permissions:
@@ -19,8 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
+      # The site is always built from main, whichever branch triggered the run.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       # ----- v2: the WebGPU Vite app -> dist/ (index.html + docs pages + vendor/) -----
       - name: Setup Node
@@ -37,6 +40,22 @@ jobs:
 
       - name: Build v2 app
         run: npm run build
+
+      # ----- preview: an experiment branch built into dist/preview/<name>/ beside the main site -----
+      # The main app is untouched; the preview is a second build of the same app from another branch,
+      # served under its own base path. Pushing the preview branch redeploys the site too.
+      - name: Checkout preview (drawn cut)
+        uses: actions/checkout@v4
+        with:
+          ref: preview/cut
+          path: preview-src/cut
+
+      - name: Build preview (drawn cut) into dist/preview/cut
+        working-directory: preview-src/cut
+        run: |
+          npm ci
+          npx vite build --base /ColorMill/preview/cut/ --outDir ../../dist/preview/cut --emptyOutDir
+          test -f ../../dist/preview/cut/index.html
 
       # ----- v1 legacy: C/raylib -> wasm via Emscripten -> dist/legacy/ -----
       # The Vite build above empties dist/, so the legacy build must come after it.
@@ -79,6 +98,7 @@ jobs:
           test -f dist/vendor/mixbox/mixbox.js
           test -f dist/legacy/index.html
           test -f dist/legacy/index.wasm
+          test -f dist/preview/cut/index.html
           # GitHub Pages must not run Jekyll over the output (it drops _-prefixed paths).
           touch dist/.nojekyll
           find dist -maxdepth 2 -type f | sort

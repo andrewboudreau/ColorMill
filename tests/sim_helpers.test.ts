@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DOUBLE_SECONDS, FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, HAND_HOLD_SECONDS, HAND_LIFT_SECONDS, LIFT_SECONDS, WHITE_LATENT, handBack, handTimes, WIND_HOP_SECONDS, WIND_MAX_SECONDS, dispatchSize, foldDuration, foldProfile, halfToFloat, rollSeconds, windArc, windSeconds, windSpeed } from '../src/sim/mpm';
+import { DOUBLE_SECONDS, FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, HAND_HOLD_SECONDS, HAND_LIFT_SECONDS, HAND_RETURN, HAND_TURN_SECONDS, LIFT_SECONDS, WHITE_LATENT, handBack, handTimes, WIND_HOP_SECONDS, WIND_MAX_SECONDS, dispatchSize, foldDuration, foldProfile, halfToFloat, rollSeconds, windArc, windSeconds, windSpeed } from '../src/sim/mpm';
 import { DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS } from '../src/config/mill';
 
 describe('solver helpers', () => {
@@ -80,20 +80,27 @@ describe('peel and wind timing', () => {
 });
 
 describe('cut & fold timing', () => {
-  it('lifts the edge, carries it back to over the back roll at the roll speed, sets it down and lets go', () => {
+  it('lifts the edge, carries it back at the roll speed, turns, brings it forward over the nip, sets it down and lets go', () => {
     const omega = DEFAULT_PARAMS.omega;
     const gap = DEFAULT_PARAMS.gap;
     const t = handTimes(omega, gap);
+    const D = handBack(gap);
     expect(t.speed).toBeCloseTo(windSpeed(omega), 9);
     expect(t.lift).toBe(HAND_LIFT_SECONDS);
-    expect(handBack(gap)).toBeCloseTo(2 * GEOMETRY.radius + gap, 9);
-    // the speed ramps up over the lift, so the hand reaches the back half a lift later than the roll would
-    expect(t.back).toBeCloseTo(0.5 * t.lift + handBack(gap) / t.speed, 9);
-    expect(t.end).toBeCloseTo(t.back + HAND_HOLD_SECONDS, 9);
+    expect(D).toBeCloseTo(2 * GEOMETRY.radius + gap, 9);
+    // the far point: a lift (half a lift's cruise), the cruise back, half the turn (0.3125 of a turn's cruise short)
+    const tBack = D / t.speed - 0.5 * t.lift - 0.3125 * HAND_TURN_SECONDS;
+    expect(t.back).toBeCloseTo(t.lift + tBack + 0.5 * HAND_TURN_SECONDS, 9);
+    // forward again to HAND_RETURN of the way back, the set-down covering half a lift's cruise
+    const tFwd = ((1 - HAND_RETURN) * D - 0.3125 * t.speed * HAND_TURN_SECONDS - 0.5 * t.speed * t.lift) / t.speed;
+    expect(tFwd).toBeGreaterThan(0);
+    expect(t.down).toBeCloseTo(t.lift + tBack + HAND_TURN_SECONDS + tFwd + t.lift, 9);
+    expect(t.end).toBeCloseTo(t.down + HAND_HOLD_SECONDS, 9);
     expect(t.back).toBeGreaterThan(t.lift);
-    expect(t.end).toBeGreaterThan(0.8);
-    expect(t.end).toBeLessThan(2);
+    expect(t.down).toBeGreaterThan(t.back);
+    expect(t.end).toBeGreaterThan(1.2);
+    expect(t.end).toBeLessThan(3);
     // a crawling roll is pulled at the floor speed, so the move still ends
-    expect(handTimes(0).end).toBeLessThan(3);
+    expect(handTimes(0).end).toBeLessThan(4);
   });
 });

@@ -96,19 +96,22 @@ const DOUBLE_FLAT : f32 = 0.75;
 // grid in P2G, HAND_MASS heavy so the hand wins where it touches, but takes nothing back in G2P).
 // The hand lifts the edge HAND_LIFT off the crown over P.fold.z seconds while its speed back over
 // the mill ramps up to the roll's own (P.fold4.x): the roll carries the sheet past the cut away
-// from the edge the hand holds, so the cut opens there; then it carries the edge back over the
-// top of the mill at that speed, P.fold4.y back (to over the back roll's crown), settling to
-// HAND_LAND over the last P.fold.z seconds, holds HAND_HOLD and lets go. Everything else is the
-// solver's: the band drags the sheet off the roll through the grid, the sheet peels from the
-// crown, hangs from the hand, sags onto the bank, and once the edge is let go the nip pulls the
-// doubled fold back in from the middle.
+// from the edge the hand holds, so the cut opens there. Then it carries the edge back over the
+// top of the mill at that speed, P.fold4.y back (to over the back roll's crown), turns there
+// (its speed reversing as a smoothstep over P.fold4.w seconds) and brings the edge forward again
+// over the sheet it has just laid down, to P.fold4.z back from the crown (over the nip), where it
+// settles to HAND_LAND over the last P.fold.z seconds, holds HAND_HOLD and lets go. So the sheet
+// is folded over itself, the fold at the back, the edge on top over the nip. Everything else is
+// the solver's: the band drags the sheet off the roll through the grid, the sheet peels from the
+// crown, hangs from the hand, sags onto the bank, lies doubled over the nip once the edge is let
+// go, and the nip pulls the fold in.
 // Kinematic script (one selection, one move, one release):
 //   select: the band at the cut, flagged held + hand, fold0 = (p0, arc).
 //   move:   the band translated by handOffset(t); its velocity is the move's over the last substep.
 //   finish: release at rest with F = I.
 const HAND_CELLS : f32 = 3.0;          // depth of the band the hand takes, in cells along the arc
 const HAND_LIFT : f32 = 0.3;           // how high the hand lifts the edge off the crown (sim units)
-const HAND_LAND : f32 = 0.06;          // height the edge is set down at over the back roll's crown
+const HAND_LAND : f32 = 0.15;          // height the edge is set down at, over the nip, on the sheet laid down before
 const INFO_COUNT : u32 = 8u;
 const INFO_DEPTH : u32 = 8u + 2u * NB;
 const TS : u32 = 16u;           // floats per bin in tables
@@ -473,27 +476,52 @@ fn smooth01(x : f32) -> f32 {
   return s * s * (3.0 - 2.0 * s);
 }
 
-/** When the hand reaches the back (mirrors handTimes in mpm.ts): its speed back ramps up over the lift,
-    covering half a lift's worth less than the roll would. */
-fn handBack() -> f32 {
-  return 0.5 * max(P.fold.z, 1e-3) + P.fold4.y / max(P.fold4.x, 1e-3);
+/** Distance covered along a segment whose speed goes from v0 to v1 as a smoothstep over T seconds,
+    tau of the way through it (the integral of the smoothstep is s^3 - s^4 / 2). */
+fn rampDist(v0 : f32, v1 : f32, T : f32, tau : f32) -> f32 {
+  let s = clamp(tau, 0.0, 1.0);
+  return v0 * T * s + (v1 - v0) * T * s * s * s * (1.0 - 0.5 * s);
+}
+
+/** The hand's path over the mill, as the lengths of its segments (mirrors handTimes in mpm.ts): the
+    lift (speed ramping 0 -> v over P.fold.z), the cruise back, the turn (v -> -v over P.fold4.w;
+    its far point is 0.3125 v T short of a cruise's), the cruise forward, the set-down (v -> 0 over
+    P.fold.z). The far point is P.fold4.y back; the set-down ends P.fold4.z back. */
+fn handSegments() -> vec4<f32> {
+  let v = max(P.fold4.x, 1e-3);
+  let tLift = max(P.fold.z, 1e-3);
+  let tTurn = max(P.fold4.w, 1e-3);
+  let tBack = max(P.fold4.y / v - 0.5 * tLift - 0.3125 * tTurn, 0.0);
+  let tFwd = max((P.fold4.y - P.fold4.z - 0.3125 * v * tTurn - 0.5 * v * tLift) / v, 0.0);
+  return vec4<f32>(tLift, tBack, tTurn, tFwd);
 }
 
 /** The hand's offset from where it took the edge, at time t of the move. */
 fn handOffset(t : f32) -> vec3<f32> {
-  let vW = max(P.fold4.x, 1e-3);
-  let tLift = max(P.fold.z, 1e-3);
-  let tBack = handBack();
+  let v = max(P.fold4.x, 1e-3);
+  let seg = handSegments();
+  let tLift = seg.x;
+  let tEnd = seg.x + seg.y + seg.z + seg.w + seg.x;
   var z = 0.0;
-  if (t < tLift) {
-    // speed ramping 0 -> vW as a smoothstep: its integral is tLift * (s^3 - s^4 / 2)
-    let sl = t / tLift;
-    z = -vW * tLift * sl * sl * sl * (1.0 - 0.5 * sl);
-  } else {
-    z = -vW * (t - 0.5 * tLift);
+  var tt = t;
+  z -= rampDist(0.0, v, tLift, tt / tLift);
+  if (tt > tLift) {
+    tt -= tLift;
+    z -= v * min(tt, seg.y);
+    if (tt > seg.y) {
+      tt -= seg.y;
+      z -= rampDist(v, -v, seg.z, tt / seg.z);
+      if (tt > seg.z) {
+        tt -= seg.z;
+        z += v * min(tt, seg.w);
+        if (tt > seg.w) {
+          tt -= seg.w;
+          z += rampDist(v, 0.0, tLift, tt / tLift);
+        }
+      }
+    }
   }
-  z = max(z, -P.fold4.y);
-  let y = HAND_LIFT * smooth01(t / tLift) - (HAND_LIFT - HAND_LAND) * smooth01((t - (tBack - tLift)) / tLift);
+  let y = HAND_LIFT * smooth01(t / tLift) - (HAND_LIFT - HAND_LAND) * smooth01((t - (tEnd - tLift)) / tLift);
   return vec3<f32>(0.0, y, z);
 }
 

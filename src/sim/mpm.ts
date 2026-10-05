@@ -103,34 +103,46 @@ export const FOLD_DURATION = foldDuration(FOLD_FEED_SPEED);
  * the cut edge (a band HAND_CELLS deep along the arc, the full width); only that band is scripted. It is
  * lifted off the crown over HAND_LIFT_SECONDS while its speed back over the mill ramps up to the roll's
  * own (windSpeed; the roll carries the sheet past the cut away, opening the cut), carried back over the
- * top of the mill to over the back roll's crown (handBack: 2 R + gap) at that speed, set down there and
- * let go HAND_HOLD_SECONDS later. The rest of the sheet follows the hand through the grid (P2G scatters
- * a hand particle's mass and momentum), peels off the crown, sags onto the bank, and the nip pulls the
- * doubled fold back in once the edge is let go. */
+ * top of the mill to over the back roll's crown (handBack: 2 R + gap) at that speed, turned there (the
+ * speed reversing over HAND_TURN_SECONDS) and brought forward again over the sheet just laid down to
+ * HAND_RETURN of the way back (over the nip), where it is set down and let go HAND_HOLD_SECONDS later.
+ * The rest of the sheet follows the hand through the grid (P2G scatters a hand particle's mass and
+ * momentum), peels off the crown, sags onto the bank, lies folded over itself once the edge is let go,
+ * and the nip pulls the fold in. */
 export const HAND_LIFT_SECONDS = 0.3;
+export const HAND_TURN_SECONDS = 0.3;
 export const HAND_HOLD_SECONDS = 0.2;
+/** Where the edge is set down, as a fraction of the way back from the front crown to the back one: over the nip. */
+export const HAND_RETURN = 0.5;
 /** How far back the hand carries the edge: from the front roll's crown to the back roll's. */
 export function handBack(gap: number): number {
   return 2 * GEOMETRY.radius + gap;
 }
 /** The cut & fold's timeline at roll speed omega (sim seconds from the start of the move). */
 export interface HandTimes {
-  /** the hand's speed back over the mill once the lift is over: the roll's own surface speed (floored) */
+  /** the hand's cruising speed over the mill: the roll's own surface speed (floored) */
   readonly speed: number;
-  /** how long the lift takes (the speed ramps up over it) and the set-down at the back */
+  /** how long the lift takes (the speed ramps up over it) and the set-down at the end */
   readonly lift: number;
-  /** when the hand reaches the back and sets the edge down */
+  /** when the hand is furthest back, over the back roll's crown, mid-turn */
   readonly back: number;
+  /** when the edge is set down over the nip on the sheet laid down before */
+  readonly down: number;
   /** when the edge is let go: the end of the move */
   readonly end: number;
 }
-/** Mirrors handBack() / handOffset() in fold.wgsl: the speed ramps up over the lift as a smoothstep, so the hand
- * covers half a lift's worth less than the roll would and reaches the back lift / 2 later. */
+/** Mirrors handSegments() / handOffset() in fold.wgsl: speed ramps are smoothsteps, so the lift and the
+ * set-down each cover half a lift's worth of cruising, and the turn's far point is 0.3125 v T short of a cruise's. */
 export function handTimes(omega: number, gap: number = DEFAULT_PARAMS.gap): HandTimes {
-  const speed = windSpeed(omega);
+  const v = windSpeed(omega);
   const lift = HAND_LIFT_SECONDS;
-  const back = 0.5 * lift + handBack(gap) / speed;
-  return { speed, lift, back, end: back + HAND_HOLD_SECONDS };
+  const turn = HAND_TURN_SECONDS;
+  const D = handBack(gap);
+  const tBack = Math.max(D / v - 0.5 * lift - 0.3125 * turn, 0);
+  const tFwd = Math.max((D - HAND_RETURN * D - 0.3125 * v * turn - 0.5 * v * lift) / v, 0);
+  const back = lift + tBack + 0.5 * turn;
+  const down = lift + tBack + turn + tFwd + lift;
+  return { speed: v, lift, back, down, end: down + HAND_HOLD_SECONDS };
 }
 /** Operator-move modes carried in P.fold.x: 1 = cut & roll (log); 2 / 3 = cut & fold (the hand
  * takes the cut edge), the UI alternating between them as an operator alternates ends. */
@@ -595,9 +607,9 @@ export class GpuMpm implements GpuMpmSim {
     u[o + 44] = fd.nx; u[o + 45] = fd.ny; u[o + 46] = fd.nz; u[o + 47] = 0;
     f.set([fd.h, 1 / fd.h, (ratio * ratio * ratio) / 8, 0], o + 48);
     // cut & roll: peel and wind, double, lift (a negative double time keeps the roll long: no fold in half);
-    // cut & fold: the hand's speed back over the mill and how far back it goes (fold.wgsl)
+    // cut & fold: the hand's cruising speed, how far back it goes, where it sets the edge down, its turn (fold.wgsl)
     if (this.foldMode === 1) f.set([this.foldWindSpeed, this.foldWindSeconds, this.foldLong ? -1 : DOUBLE_SECONDS, LIFT_SECONDS], o + 52);
-    else f.set([this.hand.speed, handBack(gap), 0, 0], o + 52);
+    else f.set([this.hand.speed, handBack(gap), HAND_RETURN * handBack(gap), HAND_TURN_SECONDS], o + 52);
   }
 
   // ---------------------------------------------------------------------------

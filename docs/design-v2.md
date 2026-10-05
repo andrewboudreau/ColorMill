@@ -565,25 +565,36 @@ theirs, and the sheet peels off the roll.
    opens behind the hand, half a lift's worth of arc; the sheet before
    the cut, fed to the hand at the roll's speed, slackens by as much and
    takes it up as the hand gets going.
-2. **The carry** (`handTimes(omega).back` = lift / 2 + `handBack(gap)` /
-   speed, `handBack` = 2R + gap = 0.68, the front crown to the back one):
-   the hand carries the edge back over the top of the mill at the roll's
-   speed, so sheet comes off the crown as fast as the roll delivers it and
-   hangs from the hand to the crown, sagging under its own weight toward
-   the bank; over the last lift's worth of seconds the hand settles to
-   `HAND_LAND` = 0.06 above where it started, the edge over the back
-   roll's crown.
-3. **Release**: `HAND_HOLD_SECONDS` = 0.2 s later the band is let go at
-   rest with F = I. The sheet now lies doubled across the top of the mill,
-   its edge at the back, its other end still coming over the crown, and
-   the nip pulls the fold in from the middle, both halves at once. About
-   1.2 s in all at the default speed (`handTimes(omega).end`; a crawling
-   roll is pulled at the wind speed's floor, so the move still ends).
+2. **The carry back** (`handTimes(omega).back` is the far point: lift +
+   cruise + half the turn, with `handBack` = 2R + gap = 0.68 from the
+   front crown to the back one): the hand carries the edge back over the
+   top of the mill at the roll's speed, so sheet comes off the crown as
+   fast as the roll delivers it and hangs from the hand to the crown,
+   sagging under its own weight toward the bank.
+3. **The turn and the fold forward** (`HAND_TURN_SECONDS` = 0.3; the speed
+   reverses as a smoothstep, so the far point is 0.3125 v T short of a
+   cruise's): over the back roll's crown the hand turns and brings the
+   edge forward again at the roll's speed, over the sheet it has just
+   laid down, to `HAND_RETURN` = half of the way back, over the nip. The
+   sheet is now folded over itself: the fold at the back, the first
+   layer on the bank under it, the edge on top. Over the last lift's
+   worth of seconds the hand settles to `HAND_LAND` = 0.15 above where it
+   started (`handTimes(omega).down`).
+4. **Release**: `HAND_HOLD_SECONDS` = 0.2 s later the band is let go at
+   rest with F = I. The fold lies doubled over the nip, its other end
+   still coming over the crown, and the nip pulls it in. About 1.7 s in
+   all at the default speed (`handTimes(omega).end`; a crawling roll is
+   pulled at the wind speed's floor, so the move still ends).
+
+The path is built from segments with smoothstep speed ramps (`rampDist`,
+`handSegments`): lift (0 → v over `HAND_LIFT_SECONDS`), cruise back,
+turn (v → −v), cruise forward, set-down (v → 0); the cruise lengths are
+solved so the far point and the set-down land where they should.
 
 One selection, one move script (`handOffset(t)`, a translation of the
 band), one release. `P.fold` = (mode, t, lift seconds, 0), `P.fold4` =
-(speed, distance back, 0, 0); the sim exposes `operatorHandTimes` (speed,
-lift, back, end). Ends still alternate between presses in the UI, as an
+(speed, distance back, distance back of the set-down, turn seconds); the
+sim exposes `operatorHandTimes` (speed, lift, back, down, end). Ends still alternate between presses in the UI, as an
 operator alternates hands, though the move is the same from either.
 
 Earlier versions scripted the whole fold (a tongue peeled into a bundle,

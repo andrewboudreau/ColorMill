@@ -109,12 +109,13 @@ export interface GpuMpmSim {
   cutAndFold(): void;
   /** Start the other operator move: cut the sheet across at the crown of the front roll and take the cut edge
    *  in hand: lift it off the crown, carry it back over the top of the mill at the roll's speed to over the back
-   *  roll, set it down and let go; the rest of the sheet follows in the solver and the nip pulls the doubled
-   *  fold back in (design §6b). `side` only alternates, as an operator alternates ends. No-op if a move is running. */
+   *  roll, bring it forward again over the sheet just laid down to over the nip, set it down and let go; the
+   *  rest of the sheet follows in the solver, folded over itself, and the nip pulls the fold in (design §6b).
+   *  `side` only alternates, as an operator alternates ends. No-op if a move is running. */
   cutAndFlop(side: 'left' | 'right'): void;
   /** The current (or last) cut & fold's timeline in sim seconds from its start: the hand's speed, the lift, when it
-   *  reaches the back, when it lets go. */
-  readonly operatorHandTimes: { readonly speed: number; readonly lift: number; readonly back: number; readonly end: number };
+   *  is furthest back, when it sets the edge down over the nip, when it lets go. */
+  readonly operatorHandTimes: { readonly speed: number; readonly lift: number; readonly back: number; readonly down: number; readonly end: number };
   /** true while an operator move (cut & roll or cut & fold) is running */
   readonly operatorBusy: boolean;
   /** Length of the current (or last) cut & roll's roll phase in sim seconds: the material is wound off

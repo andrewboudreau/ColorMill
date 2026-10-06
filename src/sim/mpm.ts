@@ -103,17 +103,27 @@ export const FOLD_DURATION = foldDuration(FOLD_FEED_SPEED);
  * the cut edge (a band HAND_CELLS deep along the arc, the full width); only that band is scripted. One
  * pass is lift, pull, drop: the band is lifted off the crown over HAND_LIFT_SECONDS while its speed back
  * over the mill ramps up to the roll's own (windSpeed; the roll carries the sheet past the cut away,
- * opening the cut), pulled back over the top of the mill at that speed until it is over the back roll's
- * crown (handBack: 2 R + gap), and let go there with the hand's velocity. The rest of the sheet follows
- * the hand through the grid (P2G scatters a hand particle's mass and momentum), peels off the crown,
- * hangs from the hand, and falls folded over itself on the bank for the nip to pull in. The operator
- * makes params.foldPasses such passes in a row, HAND_GAP_SECONDS apart, each a fresh cut at the crown. */
+ * opening the cut), pulled back over the top of the roll at that speed to just past the crown (handPull:
+ * HAND_PULL of the way from the front crown to the back one, short of the nip), and let go there with
+ * the hand's velocity, so the cut flap flops back onto the front roll and the bank, folded over itself,
+ * for the roll to carry into the nip. The rest of the sheet follows the hand through the grid (P2G
+ * scatters a hand particle's mass and momentum), peels off the crown, hangs from the hand, and falls.
+ * The operator makes params.foldPasses such passes in a row, HAND_GAP_SECONDS apart, each a fresh cut
+ * at the crown. (Hauling the edge to the back roll pulled too hard: a sheet's length stretched across
+ * the mill instead of a flap flopped over.) */
 export const HAND_LIFT_SECONDS = 0.3;
+/** How far back the hand pulls the edge, as a fraction of the way from the front crown to the back one:
+ * just past the crown, short of the nip (which is half way). */
+export const HAND_PULL = 0.35;
 /** Between passes: the dropped fold lands and the roll brings fresh sheet up to the crown. */
 export const HAND_GAP_SECONDS = 0.4;
-/** How far back the hand pulls the edge: from the front roll's crown to the back roll's. */
+/** From the front roll's crown to the back roll's. */
 export function handBack(gap: number): number {
   return 2 * GEOMETRY.radius + gap;
+}
+/** How far back the hand pulls the edge before dropping it. */
+export function handPull(gap: number): number {
+  return HAND_PULL * handBack(gap);
 }
 /** The cut & fold's timeline at roll speed omega (sim seconds from the start of the move). */
 export interface HandTimes {
@@ -133,11 +143,11 @@ export interface HandTimes {
   readonly end: number;
 }
 /** Mirrors handOffset() in fold.wgsl: the lift's speed ramp is a smoothstep, so the lift covers half a lift's
- * worth of pulling, and the pull then takes the rest of the way to the back roll at the roll's speed. */
+ * worth of pulling, and the pull then takes the rest of the way (handPull) at the roll's speed. */
 export function handTimes(omega: number, gap: number = DEFAULT_PARAMS.gap, passes: number = DEFAULT_PARAMS.foldPasses): HandTimes {
   const v = windSpeed(omega);
   const lift = HAND_LIFT_SECONDS;
-  const pass = lift + Math.max((handBack(gap) - 0.5 * v * lift) / v, 0);
+  const pass = lift + Math.max((handPull(gap) - 0.5 * v * lift) / v, 0);
   const n = Math.max(1, Math.round(passes));
   const drops: number[] = [];
   for (let k = 0; k < n; k++) drops.push(k * (pass + HAND_GAP_SECONDS) + pass);
@@ -610,7 +620,7 @@ export class GpuMpm implements GpuMpmSim {
     // cut & roll: peel and wind, double, lift (a negative double time keeps the roll long: no fold in half);
     // cut & fold: the hand's pulling speed and how far back it pulls (fold.wgsl)
     if (this.foldMode === 1) f.set([this.foldWindSpeed, this.foldWindSeconds, this.foldLong ? -1 : DOUBLE_SECONDS, LIFT_SECONDS], o + 52);
-    else f.set([this.hand.speed, handBack(gap), 0, 0], o + 52);
+    else f.set([this.hand.speed, handPull(gap), 0, 0], o + 52);
   }
 
   // ---------------------------------------------------------------------------

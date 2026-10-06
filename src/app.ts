@@ -338,7 +338,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     if (s.operatorBusy) return;
     s.cutAndFlop(flopSide);
     const passes = s.operatorHandTimes.passes;
-    hud.showHint(`Cut & fold: the sheet is cut across at the crown, its edge lifted, pulled back over the mill and dropped for the rolls to pull in, ${passes} ${passes === 1 ? 'pass' : 'passes'} (${flopSide} hand)`, 3500);
+    hud.showHint(`Cut & fold: the sheet is cut across at the crown, its edge lifted and flopped back onto the front roll for the rolls to pull in, ${passes} ${passes === 1 ? 'pass' : 'passes'} (${flopSide} hand)`, 3500);
     flopSide = flopSide === 'left' ? 'right' : 'left';
   });
 

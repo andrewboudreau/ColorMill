@@ -97,10 +97,12 @@ const DOUBLE_FLAT : f32 = 0.75;
 // The hand lifts the edge HAND_LIFT off the crown over P.fold.z seconds while its speed back over
 // the mill ramps up to the roll's own (P.fold4.x): the roll carries the sheet past the cut away
 // from the edge the hand holds, so the cut opens there. Then it pulls the edge back over the top
-// of the mill at that speed, and when the edge is over the back roll's crown (P.fold4.y back) it
-// lets go: dropped, with the hand's velocity. The sheet follows and falls folded over itself on
-// the bank, and the nip pulls the fold in. One such pass is lift, pull, drop; the operator makes
-// one to three of them in a row (mpm.ts: a fresh cut at the crown each time, after a short gap).
+// of the roll at that speed, only to just past the crown (P.fold4.y back: short of the nip), and
+// lets go: dropped, with the hand's velocity, so the cut flap flops back onto the front roll and
+// the bank behind the crown, folded over itself, and the roll carries the fold into the nip. One
+// such pass is lift, pull, drop; the operator makes one to three of them in a row (mpm.ts: a
+// fresh cut at the crown each time, after a short gap). (Hauling the edge all the way to the back
+// roll pulled too hard: a sheet's length stretched across the mill instead of a flap flopped over.)
 // Everything else is the solver's: the band drags the sheet off the roll through the grid, the
 // sheet peels from the crown, hangs from the hand, sags, and lands.
 // Kinematic script (one selection, one move, one release):
@@ -108,7 +110,7 @@ const DOUBLE_FLAT : f32 = 0.75;
 //   move:   the band translated by handOffset(t); its velocity is the move's over the last substep.
 //   finish: release with the hand's velocity and F = I.
 const HAND_CELLS : f32 = 3.0;          // depth of the band the hand takes, in cells along the arc
-const HAND_LIFT : f32 = 0.3;           // how high the hand lifts the edge off the crown (sim units)
+const HAND_LIFT : f32 = 0.2;           // how high the hand lifts the edge off the crown (sim units)
 const INFO_COUNT : u32 = 8u;
 const INFO_DEPTH : u32 = 8u + 2u * NB;
 const TS : u32 = 16u;           // floats per bin in tables
@@ -483,7 +485,7 @@ fn rampDist(v0 : f32, v1 : f32, T : f32, tau : f32) -> f32 {
 /** The hand's offset from where it took the edge, at time t of a pass (mirrors handTimes in mpm.ts):
     the lift (its speed back ramping 0 -> v as a smoothstep over P.fold.z, covering half a lift's
     cruise, while it rises HAND_LIFT), then the cruise back at v until the edge is P.fold4.y back,
-    over the back roll's crown, where the pass ends and the edge is dropped. */
+    just past the crown, where the pass ends and the edge is dropped. */
 fn handOffset(t : f32) -> vec3<f32> {
   let v = max(P.fold4.x, 1e-3);
   let tLift = max(P.fold.z, 1e-3);

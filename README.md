@@ -32,10 +32,10 @@ without WebGPU.
   to it as a thin sheet and comes back over the top to rejoin the bank.
 - **Cut & fold, cut & roll.** A mill has no sideways transport of its own;
   the operator supplies it. Cut & fold cuts the sheet across at the crown,
-  lifts the cut edge, carries it back over the top of the mill and folds
-  it forward again onto itself, then lets go over the nip for the rolls to
-  pull the fold in; the sheet itself is the solver's, peeling, sagging and
-  folding on its own. Cut & roll
+  lifts the cut edge, pulls it back over the top of the mill and folds it
+  back on itself twice, then lets go for the rolls to pull the fold in;
+  the sheet itself is the solver's, peeling, sagging and folding on its
+  own. Cut & roll
   takes
   everything off, rolls it
   into a log and feeds it back in end-first. ColorMill scripts both moves; a
@@ -98,14 +98,14 @@ gets deeper where the load is higher.
 
 **Cut & fold** cuts the sheet across at the crown of the front roll and
 takes the cut edge in hand: a band of sheet three cells deep, the full
-width, and nothing else. The hand lifts it off the crown, carries it
-back over the top of the mill at the roll's own speed to over the back
-roll, turns, and brings it forward again over the sheet it has just laid
-down to over the nip, sets it down and lets go. The sheet does the rest
-in the solver: it peels off the crown behind the hand (the roll carries
-the sheet past the cut away, so the cut opens), hangs from the hand,
-sags onto the bank, is folded over itself with the fold at the back, and
-once the edge is let go the nip pulls the fold in. The hand is the only
+width, and nothing else. The hand lifts it off the crown and laps the
+top of the mill at the roll's own speed: back to over the back roll,
+forward again over the sheet it has just laid down to over the nip,
+and back once more, then sets the edge down and lets go. The
+sheet does the rest in the solver: it peels off the crown behind the
+hand (the roll carries the sheet past the cut away, so the cut opens),
+hangs from the hand, sags onto the bank, is folded back on itself twice,
+three layers deep, and once the edge is let go the nip pulls the fold in. The hand is the only
 scripted thing; it is heavy on the grid so the sheet follows it instead
 of tearing off it. Ends
 alternate between presses as an operator's hands do. **Cut & roll** takesis cut decides which side's material lands on top. **Cut & roll** takes
@@ -167,7 +167,7 @@ lays the same three bands on the bank.
 | Chunk-size dots (bottom bar) | Small, medium or large chunk for the next tap (also `-` / `=`, or `?chunk=s`, `m`, `l`) |
 | Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack) |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
-| **Cut & fold** / `C` | Cut the sheet across at the crown, lift the cut edge, carry it back over the top of the mill and fold it forward again onto itself, set it down over the nip and let go; the sheet follows and the rolls pull the fold in (ends alternate) |
+| **Cut & fold** / `C` | Cut the sheet across at the crown, lift the cut edge, pull it back over the top of the mill and fold it back on itself twice, set it down and let go; the sheet follows and the rolls pull the fold in (ends alternate) |
 | **Cut & roll** / `F` | Cut everything off, roll it into a log, fold the roll in half and drop it back on the nip (or lower it in: **Log feed** slider). **Long roll** (drawer checkbox, `?roll=long`) skips the fold and stands the full-length roll up as one, leaning further to fit |
 | **Clear pigment** | Reset every particle to clear silicone |
 | **Reset** / `R` | Re-seed the bank |

@@ -108,8 +108,9 @@ export interface GpuMpmSim {
   /** Start the scripted operator move: cut the sheet off the front roll, roll it into a log, turn it and set it on the bank (design §6). No-op if one is running. */
   cutAndFold(): void;
   /** Start the other operator move: cut the sheet across at the crown of the front roll and take the cut edge
-   *  in hand: lift it off the crown, pull it back over the top of the mill at the roll's speed and drop it over
-   *  the back roll; the rest of the sheet follows in the solver and falls folded for the nip to pull in. One press
+   *  in hand: lift it off the crown, pull it back just past the crown at the roll's speed and drop it, so the flap
+   *  flops back onto the front roll folded over itself; the rest of the sheet follows in the solver and the roll
+   *  carries the fold into the nip. One press
    *  makes params.foldPasses such passes, each a fresh cut (design §6b). `side` only alternates, as an operator
    *  alternates hands. No-op if a move is running. */
   cutAndFlop(side: 'left' | 'right'): void;

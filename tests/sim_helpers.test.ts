@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DOUBLE_SECONDS, FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, HAND_GAP_SECONDS, HAND_LIFT_SECONDS, LIFT_SECONDS, WHITE_LATENT, handBack, handTimes, WIND_HOP_SECONDS, WIND_MAX_SECONDS, dispatchSize, foldDuration, foldProfile, halfToFloat, rollSeconds, windArc, windSeconds, windSpeed } from '../src/sim/mpm';
+import { DOUBLE_SECONDS, FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, HAND_GAP_SECONDS, HAND_LIFT_SECONDS, HAND_PULL, LIFT_SECONDS, WHITE_LATENT, handBack, handPull, handTimes, WIND_HOP_SECONDS, WIND_MAX_SECONDS, dispatchSize, foldDuration, foldProfile, halfToFloat, rollSeconds, windArc, windSeconds, windSpeed } from '../src/sim/mpm';
 import { DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS } from '../src/config/mill';
 
 describe('solver helpers', () => {
@@ -80,7 +80,7 @@ describe('peel and wind timing', () => {
 });
 
 describe('cut & fold timing', () => {
-  it('lifts the edge, pulls it back to over the back roll at the roll speed and drops it, once per pass with a gap between', () => {
+  it('lifts the edge, pulls it just past the crown at the roll speed and drops it, once per pass with a gap between', () => {
     const omega = DEFAULT_PARAMS.omega;
     const gap = DEFAULT_PARAMS.gap;
     const t = handTimes(omega, gap, 3);
@@ -88,15 +88,17 @@ describe('cut & fold timing', () => {
     expect(t.speed).toBeCloseTo(windSpeed(omega), 9);
     expect(t.lift).toBe(HAND_LIFT_SECONDS);
     expect(D).toBeCloseTo(2 * GEOMETRY.radius + gap, 9);
+    expect(handPull(gap)).toBeCloseTo(HAND_PULL * D, 9);
+    expect(HAND_PULL).toBeLessThan(0.5);   // short of the nip: the flap flops back onto the front roll
     // the lift's speed ramp covers half a lift's pull; the pull takes the rest of the way at the roll speed
-    expect(t.pass).toBeCloseTo(t.lift + (D - 0.5 * t.speed * t.lift) / t.speed, 9);
+    expect(t.pass).toBeCloseTo(t.lift + (handPull(gap) - 0.5 * t.speed * t.lift) / t.speed, 9);
     expect(t.passes).toBe(3);
     expect(t.gap).toBe(HAND_GAP_SECONDS);
     expect(t.drops).toHaveLength(3);
     for (let k = 0; k < 3; k++) expect(t.drops[k]).toBeCloseTo(k * (t.pass + t.gap) + t.pass, 9);
     expect(t.end).toBe(t.drops[2]);
-    expect(t.pass).toBeGreaterThan(0.7);
-    expect(t.pass).toBeLessThan(1.2);
+    expect(t.pass).toBeGreaterThan(t.lift);
+    expect(t.pass).toBeLessThan(0.8);
     // the default press and a single pass
     expect(handTimes(omega, gap).passes).toBe(DEFAULT_PARAMS.foldPasses);
     expect(handTimes(omega, gap, 1).end).toBeCloseTo(t.pass, 9);

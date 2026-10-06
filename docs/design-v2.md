@@ -560,30 +560,32 @@ theirs, and the sheet peels off the roll.
 One pass is lift, pull, drop:
 
 1. **The lift** (`HAND_LIFT_SECONDS` = 0.3): the hand rises `HAND_LIFT`
-   = 0.3 off the crown (a smoothstep) while its speed back over the mill
+   = 0.2 off the crown (a smoothstep) while its speed back over the mill
    ramps up (another smoothstep) from 0 to the roll's own surface speed
    (`windSpeed(omega)`, as cut & roll). The roll keeps carrying the sheet
    past the cut away at that speed while the hand still holds, so the cut
    opens behind the hand, half a lift's worth of arc; the sheet before
    the cut, fed to the hand at the roll's speed, slackens by as much and
    takes it up as the hand gets going.
-2. **The pull** (`handTimes(omega).pass` = lift + (`handBack(gap)` − half
-   a lift's pull) / speed, `handBack` = 2R + gap = 0.68, the front crown
-   to the back one): the hand pulls the edge back over the top of the
-   mill at the roll's speed, so sheet comes off the crown as fast as the
-   roll delivers it and hangs from the hand to the crown, sagging under
-   its own weight toward the bank.
-3. **The drop**: when the edge is over the back roll's crown the band is
-   let go with the hand's velocity, F = I. The sheet falls folded over
-   itself onto the bank, its other end still coming over the crown, and
-   the nip pulls the fold in.
+2. **The pull** (`handTimes(omega).pass` = lift + (`handPull(gap)` − half
+   a lift's pull) / speed; `handPull` = `HAND_PULL` = 0.35 of `handBack`
+   = 2R + gap = 0.68, so 0.24 back from the crown, short of the nip at
+   0.34): the hand pulls the edge back over the top of the roll at the
+   roll's speed, so sheet comes off the crown as fast as the roll delivers
+   it and hangs from the hand to the crown.
+3. **The drop**: just past the crown the band is let go with the hand's
+   velocity, F = I. The flap flops back onto the front roll and the bank
+   behind the crown, folded over itself, and the roll carries the fold
+   into the nip. (Hauling the edge all the way to the back roll pulled too
+   hard: a sheet's length stretched across the mill instead of a flap
+   flopped over.)
 
 The operator makes `params.foldPasses` such passes in a row (1 to 3, the
 "Cut & fold passes" slider, default 2), `HAND_GAP_SECONDS` = 0.4 apart:
 after a drop the hand is empty for the gap while the fold lands and the
 roll brings fresh sheet up to the crown, then a fresh selection takes the
-band there (a new cut) and the next pass begins. About 0.85 s a pass at
-the default speed, so a default press is a little over 2 s
+band there (a new cut) and the next pass begins. About 0.4 s a pass at
+the default speed, so a default press is about 1.2 s
 (`handTimes(omega).drops` are when each pass lets go, `.end` the last).
 Earlier versions laid the edge down gently, folded it forward and back
 again in laps with turns; the back-and-forth read as shaking, and the

@@ -291,10 +291,10 @@ Constants (in `config.material`):
 
 | name | default | meaning |
 | --- | --- | --- |
-| `E` | 15 | Young's modulus (unit density; 60 makes a rigid slab that starves the nip) |
+| `E` | 22 | Young's modulus (unit density; at 15 a sheet pulled off the roll by its edge sagged as a film and pigment chunks smeared, at 22 it holds as a slab with the chunks still lumps and the bank still rolls; 60 makes a rigid slab that starves the nip) |
 | `nu` | 0.47 | Poisson ratio (nearly incompressible, bulk modulus ≈ 80: at 0.35 the nip packed the putty to 1.5× rest density and carried 50% more than the gap allows; at 0.45 it still packed the sheet to 1.5× once the viscoplastic drag pulled the bank in, and the wrap ran short; at 0.49 (bulk modulus ≈ 500, dt at ~0.85 of the elastic CFL limit) the sheet was continuous at ~1.0–1.3× rest but the fed pile of a cut & roll blew up, speeds of 10–25; 0.47 is stable through a cut & roll) |
 | `thetaC` | 0.025 | plastic compression threshold |
-| `thetaS` | 0.03 | plastic stretch threshold (tensile cohesion; 0.0075 gives a lacy sheet after operator moves) |
+| `thetaS` | 0.05 | plastic stretch threshold (tensile cohesion; 0.0075 gives a lacy sheet after operator moves, 0.03 a continuous one that tears where it sticks when pulled by its edge, 0.05 pulls and folds as putty) |
 | `mu`, `lambda` | derived | `mu = E/(2(1+nu))`, `lambda = E·nu/((1+nu)(1−2nu))` |
 
 Fixed corotated (Stomakhin 2013) with the MLS-MPM stress form:
@@ -345,7 +345,7 @@ clamp. Precision: f32 is fine.
 Stability: sound speed `c = sqrt((lambda + 2mu)/ρ)` with ρ = 1; the measured
 stable limit is `dt ≈ 0.8·h/sqrt(E)` (docs/millref-notes.md §2) and the
 presets use `0.4·h/sqrt(60)`, i.e. a safety factor of 2 at E = 60 and 4 at
-the default E = 15. Keep the constants of §4 the same across presets; only
+the default E = 22. Keep the constants of §4 the same across presets; only
 `dt` and `substepsPerFrame` change.
 
 ---

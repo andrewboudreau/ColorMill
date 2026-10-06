@@ -557,6 +557,8 @@ skips it (the hand sets where it goes). That is the whole coupling: the
 band drags its neighbours through the grid nodes they share, those drag
 theirs, and the sheet peels off the roll.
 
+One pass is lift, pull, drop:
+
 1. **The lift** (`HAND_LIFT_SECONDS` = 0.3): the hand rises `HAND_LIFT`
    = 0.3 off the crown (a smoothstep) while its speed back over the mill
    ramps up (another smoothstep) from 0 to the roll's own surface speed
@@ -565,49 +567,43 @@ theirs, and the sheet peels off the roll.
    opens behind the hand, half a lift's worth of arc; the sheet before
    the cut, fed to the hand at the roll's speed, slackens by as much and
    takes it up as the hand gets going.
-2. **The laps** (`HAND_LAPS` = 3, back / forward / back, each ending at
-   `lapEnd(k)` of the way back from the front crown to the back one,
-   `handBack` = 2R + gap = 0.68: the back roll's crown for the laps back,
-   `HAND_FRONT` = 0.5 of the way, over the nip, for the lap forward; `handTimes(omega).laps`
-   are when each ends): the hand carries the edge over the top of the
+2. **The pull** (`handTimes(omega).pass` = lift + (`handBack(gap)` − half
+   a lift's pull) / speed, `handBack` = 2R + gap = 0.68, the front crown
+   to the back one): the hand pulls the edge back over the top of the
    mill at the roll's speed, so sheet comes off the crown as fast as the
-   roll delivers it and hangs from the hand, sagging under its own weight.
-   Between laps it turns (`HAND_TURN_SECONDS` = 0.3; the speed reverses as
-   a smoothstep, so the far point is 0.3125 v T beyond the cruise and the
-   turn ends where it started). The first lap pulls the sheet back across
-   the mill; the second folds it forward over itself to the nip, the
-   fold at the back; the third folds it back again, the fold over the
-   nip. (Folding forward to just behind the crown and all the way back
-   pulls more sheet than the mill holds: the layers, stuck to the bank
-   and to each other, tore into strands.)
-   Over the last lift's worth of seconds the hand settles to `HAND_LAND`
-   = 0.2 above where it started, the edge on top at the back
-   (`handTimes(omega).down`).
-3. **Release**: `HAND_HOLD_SECONDS` = 0.2 s later the band is let go at
-   rest with F = I. The sheet lies folded back on itself twice, three
-   layers over the top of the mill, its other end still coming over the
-   crown, and the nip pulls the fold in. About 2 s in all at the default
-   speed (`handTimes(omega).end`; a crawling roll is pulled at the wind
-   speed's floor, so the move still ends).
+   roll delivers it and hangs from the hand to the crown, sagging under
+   its own weight toward the bank.
+3. **The drop**: when the edge is over the back roll's crown the band is
+   let go with the hand's velocity, F = I. The sheet falls folded over
+   itself onto the bank, its other end still coming over the crown, and
+   the nip pulls the fold in.
 
-The path is built from segments with smoothstep speed ramps (`rampDist`):
-the lift (0 → v over `HAND_LIFT_SECONDS`, covering half a lift's cruise),
-then per lap a cruise at v and a turn, or for the last lap the set-down
-(v → 0, half a lift's cruise); each cruise is as long as it takes for the
-turn's far point, or the set-down's end, to land on the lap's end.
+The operator makes `params.foldPasses` such passes in a row (1 to 3, the
+"Cut & fold passes" slider, default 2), `HAND_GAP_SECONDS` = 0.4 apart:
+after a drop the hand is empty for the gap while the fold lands and the
+roll brings fresh sheet up to the crown, then a fresh selection takes the
+band there (a new cut) and the next pass begins. About 0.85 s a pass at
+the default speed, so a default press is a little over 2 s
+(`handTimes(omega).drops` are when each pass lets go, `.end` the last).
+Earlier versions laid the edge down gently, folded it forward and back
+again in laps with turns; the back-and-forth read as shaking, and the
+third lap, dragging layers stuck to the bank and to each other, tore the
+sheet into strands. Lift, pull, drop, repeated, is what the footage
+shows.
 
-One selection, one move script (`handOffset(t)`, a translation of the
-band), one release. `P.fold` = (mode, t, lift seconds, 0), `P.fold4` =
-(speed, distance back, 0, turn seconds); the sim exposes
-`operatorHandTimes` (speed, lift, laps[3], back, down, end). Ends still alternate between presses in the UI, as an
+Per pass one selection, one move script (`handOffset(t)`, a translation
+of the band), one release. `P.fold` = (mode, t, lift seconds, 0),
+`P.fold4` = (speed, distance back, 0, 0); the sim exposes
+`operatorHandTimes` (speed, lift, pass, gap, passes, drops[], end) and
+`operatorBusy` stays true through the gaps. Ends still alternate between presses in the UI, as an
 operator alternates hands, though the move is the same from either.
 
-Earlier versions scripted the whole fold (a tongue peeled into a bundle,
-then a flag fold of the halved strip in three page-turn flips on the
-mill). Every particle was placed, so the sheet never sagged, hinges were
-creases, the lengthwise fold was a cross-fade through the roll, and the
-stack was dropped dead. Holding only the edge and leaving the rest to the
-solver replaced three nested coordinate systems with one hand path.
+Before the hand, the whole fold was scripted (a tongue peeled into a
+bundle, then a flag fold of the halved strip in three page-turn flips on
+the mill). Every particle was placed, so the sheet never sagged, hinges
+were creases, the lengthwise fold was a cross-fade through the roll, and
+the stack was dropped dead. Holding only the edge and leaving the rest to
+the solver replaced three nested coordinate systems with one hand path.
 `GpuMpmSim.cutAndFlop(side)` starts the press; UI button "Cut & fold" (C).
 No knife is drawn: the pull starts when the button is pressed.
 

@@ -219,9 +219,8 @@ export default async function run() {
     assert(!chunk.error && chunk.bad === 0, 'chunk particles are finite: ' + chunk.error);
     assert(chunk.added > 500 && chunk.count === chunk.n0 + chunk.added && chunk.statCount === chunk.count, `chunk added particles consistently (${JSON.stringify(chunk)})`);
 
-    // --- cut & fold: the hand takes the band of sheet at the cut, lifts it off the crown, carries it back over
-    // the mill, forward again over the sheet it laid down and back once more; the rest of the sheet follows in
-    // the solver; the edge is let go over the back roll ---
+    // --- cut & fold: the hand takes the band of sheet at the cut, lifts it off the crown, pulls it back over the
+    // mill and drops it over the back roll, foldPasses times; the rest of the sheet follows in the solver ---
     const handT = await page.evaluate(() => { window.__solver.sim.cutAndFlop('left'); return window.__solver.sim.operatorHandTimes; });
     const flop = await page.evaluate(async ([nStart, nLift, nMid, nBack, nEnd, nMax]) => {
       const crownY = 0.55 + 0.32, frontZ = 0.75 + 0.32 + 0.02, backZ = 0.75 - 0.32 - 0.02, faceZ = frontZ + 0.32;
@@ -253,7 +252,7 @@ export default async function run() {
       // half-way back: the sheet the hand dragged off the roll hangs over the top of the mill
       await window.__solver.stepFrames(nMid - nLift);
       const overB = overTop(await window.__solver.snapshot());
-      // the hand is at the back: the edge is set down over the back roll
+      // the end of the first pass: the edge is over the back roll, about to be dropped
       await window.__solver.stepFrames(nBack - nMid);
       const b = await window.__solver.snapshot();
       let sumZb = 0, kinB = 0;
@@ -267,21 +266,20 @@ export default async function run() {
       for (const p of idx) { sumX1 += e.positions[3 * p]; sumY1 += e.positions[3 * p + 1]; sumZ1 += e.positions[3 * p + 2]; }
       return { lifted: idx.length, hand0, count: s.count, meanX0: sumX0 / idx.length, over0, kinM, up, inFront, kinB, meanZb: sumZb / Math.max(kinB, 1), overB, steps, busy: window.__solver.sim.operatorBusy, kin, meanX1: sumX1 / idx.length, meanY1: sumY1 / idx.length, meanZ1: sumZ1 / idx.length,
         positions: Array.from(e.positions), velocities: Array.from(e.velocities), latents: Array.from(e.latents), deformation: Array.from(e.deformation), flags: Array.from(e.flags), error: window.__solver.error };
-    }, [4, framesFor(handT.lift + 0.05), framesFor(0.5 * (handT.lift + handT.back)), framesFor(handT.back), framesFor(handT.end), framesFor(handT.end + 2)]);
+    }, [4, framesFor(handT.lift + 0.05), framesFor(0.5 * (handT.lift + handT.pass)), framesFor(handT.pass - 0.02), framesFor(handT.end), framesFor(handT.end + 2)]);
     const aFlop = analyse(flop, dims);
-    console.log(`  cut & fold (lift ${handT.lift.toFixed(2)} s, laps end at ${handT.laps.map((x) => x.toFixed(2)).join(' / ')} s, end ${handT.end.toFixed(2)}): the hand took ${flop.lifted} of ${flop.count} (${flop.hand0} hand, mean x ${flop.meanX0.toFixed(3)}); after the lift ${flop.kinM} held, ${flop.up} up, ${flop.inFront} in front of the face; free material over the top of the mill ${flop.over0} -> ${flop.overB} half-way back; at the back ${flop.kinB} held at mean z ${flop.meanZb.toFixed(3)}; done after ${flop.steps} more frames: mean x ${flop.meanX1.toFixed(3)}, y ${flop.meanY1.toFixed(3)}, z ${flop.meanZ1.toFixed(3)}; ${flop.kin} still held; ${JSON.stringify({ bad: aFlop.bad, outside: aFlop.outside, inRoller: aFlop.inRoller })}`);
+    console.log(`  cut & fold (lift ${handT.lift.toFixed(2)} s, ${handT.passes} passes of ${handT.pass.toFixed(2)} s, drops at ${handT.drops.map((x) => x.toFixed(2)).join(' / ')} s): the hand took ${flop.lifted} of ${flop.count} (${flop.hand0} hand, mean x ${flop.meanX0.toFixed(3)}); after the lift ${flop.kinM} held, ${flop.up} up, ${flop.inFront} in front of the face; free material over the top of the mill ${flop.over0} -> ${flop.overB} half-way back; at the back ${flop.kinB} held at mean z ${flop.meanZb.toFixed(3)}; done after ${flop.steps} more frames: mean x ${flop.meanX1.toFixed(3)}, y ${flop.meanY1.toFixed(3)}, z ${flop.meanZ1.toFixed(3)}; ${flop.kin} still held; ${JSON.stringify({ bad: aFlop.bad, outside: aFlop.outside, inRoller: aFlop.inRoller })}`);
     assert(!flop.error, 'no WebGPU errors during cut & fold: ' + flop.error);
     assert(flop.lifted > 0.01 * flop.count && flop.lifted < 0.15 * flop.count, `the hand takes a band of sheet at the cut, not the sheet (${flop.lifted} of ${flop.count})`);
     assert(flop.hand0 === flop.lifted, `everything held is in the hand (${flop.hand0} of ${flop.lifted})`);
     assert(flop.kinM === flop.lifted, `the band is still held after the lift (${flop.kinM} of ${flop.lifted})`);
     assert(flop.up > 0.9 * flop.lifted, `the band is lifted off the crown (${flop.up} of ${flop.lifted} up)`);
     assert(flop.inFront < 0.02 * flop.lifted, `nothing stands out in front of the face (${flop.inFront} of ${flop.lifted} past it)`);
-    assert(flop.meanZb < 0.75 - 0.2, `the hand carries the edge back over the nip (mean z ${flop.meanZb.toFixed(3)} at the back)`);
+    assert(flop.meanZb < 0.75 - 0.2, `the hand pulls the edge back past the nip (mean z ${flop.meanZb.toFixed(3)} at the end of the pass)`);
     assert(flop.overB > flop.over0 + flop.lifted, `the sheet follows the hand off the roll over the top of the mill (free material up there ${flop.over0} -> ${flop.overB} half-way back, hand ${flop.lifted})`);
     assert(!flop.busy && flop.kin === 0, `everything is released once the move is over (${flop.kin} still held, busy ${flop.busy})`);
-    assert(flop.meanX1 > 0.45 && flop.meanX1 < 1.05, `the edge stays centred on the roll (mean x ${flop.meanX0.toFixed(3)} -> ${flop.meanX1.toFixed(3)})`);
-    assert(flop.meanZ1 > 0.2 && flop.meanZ1 < 0.65, `the edge is set down over the back roll after the second fold (mean z ${flop.meanZ1.toFixed(3)}; its crown is at 0.41)`);
-    assert(flop.meanY1 > 0.8 && flop.meanY1 < 1.6, `the edge is set down on the mill (mean y ${flop.meanY1.toFixed(3)})`);
+    assert(flop.meanX1 > 0.3 && flop.meanX1 < 1.2, `the first edge stays on the roll (mean x ${flop.meanX0.toFixed(3)} -> ${flop.meanX1.toFixed(3)})`);
+    assert(flop.meanZ1 > 0.1 && flop.meanZ1 < 1.6 && flop.meanY1 > 0.2 && flop.meanY1 < 1.6, `the first edge, dropped, is somewhere on the mill (mean y ${flop.meanY1.toFixed(3)}, z ${flop.meanZ1.toFixed(3)})`);
     assert(aFlop.bad === 0 && aFlop.outside === 0 && aFlop.inRoller === 0 && aFlop.n === chunk.count, 'state sane after cut & fold');
 
     // --- optional: cut & roll ---------------------------------------------

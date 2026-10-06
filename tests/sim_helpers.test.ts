@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DOUBLE_SECONDS, FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, HAND_HOLD_SECONDS, HAND_LAPS, HAND_LIFT_SECONDS, HAND_TURN_SECONDS, LIFT_SECONDS, lapEnd, WHITE_LATENT, handBack, handTimes, WIND_HOP_SECONDS, WIND_MAX_SECONDS, dispatchSize, foldDuration, foldProfile, halfToFloat, rollSeconds, windArc, windSeconds, windSpeed } from '../src/sim/mpm';
+import { DOUBLE_SECONDS, FOLD_DURATION, FOLD_FEED_SPEED, FOLD_ROLL_SECONDS, HAND_GAP_SECONDS, HAND_LIFT_SECONDS, LIFT_SECONDS, WHITE_LATENT, handBack, handTimes, WIND_HOP_SECONDS, WIND_MAX_SECONDS, dispatchSize, foldDuration, foldProfile, halfToFloat, rollSeconds, windArc, windSeconds, windSpeed } from '../src/sim/mpm';
 import { DEFAULT_PARAMS, GEOMETRY, PARAM_LIMITS } from '../src/config/mill';
 
 describe('solver helpers', () => {
@@ -80,39 +80,28 @@ describe('peel and wind timing', () => {
 });
 
 describe('cut & fold timing', () => {
-  it('lifts the edge, then laps the top of the mill at the roll speed: back, forward, back, with turns, sets it down and lets go', () => {
+  it('lifts the edge, pulls it back to over the back roll at the roll speed and drops it, once per pass with a gap between', () => {
     const omega = DEFAULT_PARAMS.omega;
     const gap = DEFAULT_PARAMS.gap;
-    const t = handTimes(omega, gap);
+    const t = handTimes(omega, gap, 3);
     const D = handBack(gap);
     expect(t.speed).toBeCloseTo(windSpeed(omega), 9);
     expect(t.lift).toBe(HAND_LIFT_SECONDS);
     expect(D).toBeCloseTo(2 * GEOMETRY.radius + gap, 9);
-    expect(t.laps).toHaveLength(HAND_LAPS);
-    expect(HAND_LAPS % 2).toBe(1);   // back, forward, ..., back: the edge ends over the back roll
-    // walk the path: a lift covering half a lift's cruise, then per lap a cruise and a turn (far point 0.3125 of a
-    // turn's cruise beyond it, ending where it started) or, last, the set-down covering half a lift's cruise
-    let time = t.lift;
-    let pos = 0.5 * t.speed * t.lift;
-    let dir = 1;
-    for (let k = 0; k < HAND_LAPS; k++) {
-      const last = k + 1 === HAND_LAPS;
-      const reach = last ? 0.5 * t.speed * t.lift : 0.3125 * t.speed * HAND_TURN_SECONDS;
-      const cruise = (Math.abs(lapEnd(k) * D - pos) - reach) / t.speed;
-      expect(cruise).toBeGreaterThan(0);
-      time += cruise;
-      pos += dir * t.speed * cruise;
-      if (last) { time += t.lift; expect(t.laps[k]).toBeCloseTo(time, 9); }
-      else { expect(t.laps[k]).toBeCloseTo(time + 0.5 * HAND_TURN_SECONDS, 9); time += HAND_TURN_SECONDS; dir = -dir; }
-    }
-    expect(t.back).toBe(t.laps[0]);
-    expect(t.down).toBe(t.laps[HAND_LAPS - 1]);
-    expect(t.end).toBeCloseTo(t.down + HAND_HOLD_SECONDS, 9);
-    expect(t.back).toBeGreaterThan(t.lift);
-    expect(t.down).toBeGreaterThan(t.back);
-    expect(t.end).toBeGreaterThan(2);
-    expect(t.end).toBeLessThan(4);
+    // the lift's speed ramp covers half a lift's pull; the pull takes the rest of the way at the roll speed
+    expect(t.pass).toBeCloseTo(t.lift + (D - 0.5 * t.speed * t.lift) / t.speed, 9);
+    expect(t.passes).toBe(3);
+    expect(t.gap).toBe(HAND_GAP_SECONDS);
+    expect(t.drops).toHaveLength(3);
+    for (let k = 0; k < 3; k++) expect(t.drops[k]).toBeCloseTo(k * (t.pass + t.gap) + t.pass, 9);
+    expect(t.end).toBe(t.drops[2]);
+    expect(t.pass).toBeGreaterThan(0.7);
+    expect(t.pass).toBeLessThan(1.2);
+    // the default press and a single pass
+    expect(handTimes(omega, gap).passes).toBe(DEFAULT_PARAMS.foldPasses);
+    expect(handTimes(omega, gap, 1).end).toBeCloseTo(t.pass, 9);
+    expect(handTimes(omega, gap, 0).passes).toBe(1);
     // a crawling roll is pulled at the floor speed, so the move still ends
-    expect(handTimes(0).end).toBeLessThan(6);
+    expect(handTimes(0, gap, 3).end).toBeLessThan(6);
   });
 });

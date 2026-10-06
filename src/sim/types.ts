@@ -108,15 +108,14 @@ export interface GpuMpmSim {
   /** Start the scripted operator move: cut the sheet off the front roll, roll it into a log, turn it and set it on the bank (design §6). No-op if one is running. */
   cutAndFold(): void;
   /** Start the other operator move: cut the sheet across at the crown of the front roll and take the cut edge
-   *  in hand: lift it off the crown, carry it back over the top of the mill at the roll's speed to over the back
-   *  roll, bring it forward again over the sheet just laid down, then back once more, set it down and let go;
-   *  the rest of the sheet follows in the solver, folded back on itself twice, and the nip pulls the fold in
-   *  (design §6b).
-   *  `side` only alternates, as an operator alternates ends. No-op if a move is running. */
+   *  in hand: lift it off the crown, pull it back over the top of the mill at the roll's speed and drop it over
+   *  the back roll; the rest of the sheet follows in the solver and falls folded for the nip to pull in. One press
+   *  makes params.foldPasses such passes, each a fresh cut (design §6b). `side` only alternates, as an operator
+   *  alternates hands. No-op if a move is running. */
   cutAndFlop(side: 'left' | 'right'): void;
-  /** The current (or last) cut & fold's timeline in sim seconds from its start: the hand's speed, the lift, when each
-   *  lap ends (the first is `back`, the last `down`, the set-down), when it lets go. */
-  readonly operatorHandTimes: { readonly speed: number; readonly lift: number; readonly laps: readonly number[]; readonly back: number; readonly down: number; readonly end: number };
+  /** The current (or last) cut & fold's timeline in sim seconds from its start: the hand's speed, the lift, one
+   *  pass's length, the gap between passes, how many, when each drops, the end. */
+  readonly operatorHandTimes: { readonly speed: number; readonly lift: number; readonly pass: number; readonly gap: number; readonly passes: number; readonly drops: readonly number[]; readonly end: number };
   /** true while an operator move (cut & roll or cut & fold) is running */
   readonly operatorBusy: boolean;
   /** Length of the current (or last) cut & roll's roll phase in sim seconds: the material is wound off

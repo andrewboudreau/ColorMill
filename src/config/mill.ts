@@ -93,6 +93,9 @@ export interface MillParams {
    *  (dropped onto the nip); > 0 = lowered in end-first at this speed (sim units / s along
    *  the log axis), released only where it touches the pile the nip is eating. */
   logFeed: number;
+  /** cut & fold: how many passes one press makes (each a cut at the crown, the edge lifted, pulled back over
+   *  the mill and dropped), 1 to 3 */
+  foldPasses: number;
 }
 
 export const DEFAULT_PARAMS: Readonly<MillParams> = {
@@ -108,7 +111,8 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
   tackCells: 0,
   /* drop: lowering the log in released it a thin slice at a time, and the nip spread and
      tore each slice before the rest arrived; the whole log set down at once holds together */
-  logFeed: 0
+  logFeed: 0,
+  foldPasses: 2
 };
 
 export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max: number; step: number }>> = {
@@ -119,7 +123,8 @@ export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max:
   dispersion: { min: 0, max: 0.5, step: 0.005 },
   backFriction: { min: 0, max: 1, step: 0.02 },
   tackCells: { min: 0, max: 6, step: 0.1 },
-  logFeed: { min: 0, max: 0.6, step: 0.05 }
+  logFeed: { min: 0, max: 0.6, step: 0.05 },
+  foldPasses: { min: 1, max: 3, step: 1 }
 };
 
 /** Fixed geometry (sim units). */

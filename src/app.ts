@@ -337,7 +337,8 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   const cutFlop = (): void => withSim('cutAndFlop failed', (s) => {
     if (s.operatorBusy) return;
     s.cutAndFlop(flopSide);
-    hud.showHint(`Cut & fold: the sheet is cut across at the crown, its edge lifted, pulled back over the mill and folded back on itself twice (${flopSide} hand), then let go for the rolls to pull in`, 3500);
+    const passes = s.operatorHandTimes.passes;
+    hud.showHint(`Cut & fold: the sheet is cut across at the crown, its edge lifted, pulled back over the mill and dropped for the rolls to pull in, ${passes} ${passes === 1 ? 'pass' : 'passes'} (${flopSide} hand)`, 3500);
     flopSide = flopSide === 'left' ? 'right' : 'left';
   });
 

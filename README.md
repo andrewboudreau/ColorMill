@@ -100,8 +100,8 @@ gets deeper where the load is higher.
 takes the cut edge in hand: a band of sheet three cells deep, the full
 width, and nothing else. The hand lifts it off the crown and laps the
 top of the mill at the roll's own speed: back to over the back roll,
-forward again over the sheet it has just laid down to just behind the
-crown, and back once more, then sets the edge down and lets go. The
+forward again over the sheet it has just laid down to over the nip,
+and back once more, then sets the edge down and lets go. The
 sheet does the rest in the solver: it peels off the crown behind the
 hand (the roll carries the sheet past the cut away, so the cut opens),
 hangs from the hand, sags onto the bank, is folded back on itself twice,

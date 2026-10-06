@@ -99,10 +99,12 @@ const DOUBLE_FLAT : f32 = 0.75;
 // from the edge the hand holds, so the cut opens there. Then it carries the edge over the top of
 // the mill at that speed in HAND_LAPS laps, turning between them (its speed reversing as a
 // smoothstep over P.fold4.w seconds): back to over the back roll's crown (P.fold4.y back), forward
-// again over the sheet it has just laid down to HAND_FRONT of the way back (just behind the
-// crown), and back once more to over the back roll, where it settles to HAND_LAND over the last
-// P.fold.z seconds, holds HAND_HOLD and lets go. So the sheet is pulled off and folded back on
-// itself twice, three layers over the top of the mill with the edge on top at the back.
+// again over the sheet it has just laid down to HAND_FRONT of the way back (over the nip), and
+// back once more to over the back roll, where it settles to HAND_LAND over the last P.fold.z
+// seconds, holds HAND_HOLD and lets go. So the sheet is pulled off and folded back on itself
+// twice, three layers over the back half of the mill with the edge on top at the back. (Folding
+// forward to just behind the crown and all the way back again pulls more sheet than the mill
+// holds and the layers, stuck to the bank and to each other, tear into strands.)
 // Everything else is the solver's: the band drags the sheet off the roll through the grid, the
 // sheet peels from the crown, hangs from the hand, sags onto the bank, lies folded over the nip
 // once the edge is let go, and the nip pulls the fold in.
@@ -114,7 +116,7 @@ const HAND_CELLS : f32 = 3.0;          // depth of the band the hand takes, in c
 const HAND_LIFT : f32 = 0.3;           // how high the hand lifts the edge off the crown (sim units)
 const HAND_LAND : f32 = 0.2;           // height the edge is set down at, on the layers laid down before
 const HAND_LAPS : u32 = 3u;            // laps over the top of the mill: back, forward, back (mirrors HAND_LAPS in mpm.ts)
-const HAND_FRONT : f32 = 0.2;          // where the forward lap ends, as a fraction of the way back from the crown
+const HAND_FRONT : f32 = 0.5;          // where the forward lap ends, as a fraction of the way back from the crown: over the nip
 const INFO_COUNT : u32 = 8u;
 const INFO_DEPTH : u32 = 8u + 2u * NB;
 const TS : u32 = 16u;           // floats per bin in tables

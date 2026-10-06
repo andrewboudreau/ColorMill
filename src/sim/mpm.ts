@@ -114,8 +114,9 @@ export const HAND_TURN_SECONDS = 0.3;
 export const HAND_HOLD_SECONDS = 0.2;
 /** Laps over the top of the mill: back, forward, back. */
 export const HAND_LAPS = 3;
-/** Where the forward lap ends, as a fraction of the way back from the front crown to the back one. */
-export const HAND_FRONT = 0.2;
+/** Where the forward lap ends, as a fraction of the way back from the front crown to the back one: over the nip
+ * (forward to just behind the crown and all the way back again pulls more sheet than the mill holds and tears it). */
+export const HAND_FRONT = 0.5;
 /** Where lap k ends, as a fraction of the way back (mirrors lapEnd in fold.wgsl). */
 export function lapEnd(k: number): number {
   return k % 2 === 1 ? HAND_FRONT : 1;

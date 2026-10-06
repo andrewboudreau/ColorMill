@@ -568,22 +568,25 @@ theirs, and the sheet peels off the roll.
 2. **The laps** (`HAND_LAPS` = 3, back / forward / back, each ending at
    `lapEnd(k)` of the way back from the front crown to the back one,
    `handBack` = 2R + gap = 0.68: the back roll's crown for the laps back,
-   `HAND_FRONT` = 0.2 of the way for the lap forward; `handTimes(omega).laps`
+   `HAND_FRONT` = 0.5 of the way, over the nip, for the lap forward; `handTimes(omega).laps`
    are when each ends): the hand carries the edge over the top of the
    mill at the roll's speed, so sheet comes off the crown as fast as the
    roll delivers it and hangs from the hand, sagging under its own weight.
    Between laps it turns (`HAND_TURN_SECONDS` = 0.3; the speed reverses as
    a smoothstep, so the far point is 0.3125 v T beyond the cruise and the
    turn ends where it started). The first lap pulls the sheet back across
-   the mill; the second folds it forward over itself, the fold at the
-   back; the third folds it back again, the fold just behind the crown.
+   the mill; the second folds it forward over itself to the nip, the
+   fold at the back; the third folds it back again, the fold over the
+   nip. (Folding forward to just behind the crown and all the way back
+   pulls more sheet than the mill holds: the layers, stuck to the bank
+   and to each other, tore into strands.)
    Over the last lift's worth of seconds the hand settles to `HAND_LAND`
    = 0.2 above where it started, the edge on top at the back
    (`handTimes(omega).down`).
 3. **Release**: `HAND_HOLD_SECONDS` = 0.2 s later the band is let go at
    rest with F = I. The sheet lies folded back on itself twice, three
    layers over the top of the mill, its other end still coming over the
-   crown, and the nip pulls the fold in. About 2.6 s in all at the default
+   crown, and the nip pulls the fold in. About 2 s in all at the default
    speed (`handTimes(omega).end`; a crawling roll is pulled at the wind
    speed's floor, so the move still ends).
 

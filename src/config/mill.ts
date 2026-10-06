@@ -44,14 +44,16 @@ export interface MaterialConstants {
 }
 
 /*
- * Uncured silicone millbase is a soft yield-stress paste. E = 15 (unit
+ * Uncured silicone millbase is a soft yield-stress paste. E = 22 (unit
  * density) lets the bank slump into the nip's V as a rolling bank and keeps
- * the nip fed so the sheet on the front roll is continuous; at E = 60 the
+ * the nip fed so the sheet on the front roll is continuous, while a pulled
+ * sheet (cut & fold) holds together as a slab with the pigment chunks still
+ * lumps; at 15 it sagged as a film and the chunks smeared, at E = 60 the
  * bank is a rigid slab that starves the nip and the sheet comes out lacy
  * (validated on the GPU at the low preset, gravity 2, see docs/design-v2.md §4).
  */
 export const DEFAULT_MATERIAL: MaterialConstants = {
-  E: 15,
+  E: 22,
   /* nearly incompressible: at 0.35 the nip packed the putty to 1.5x rest density
      and carried 50% more through than the gap allows; at 0.45 it still packed
      the sheet to 1.5x once the viscoplastic drag pulled the bank in (and the
@@ -62,8 +64,10 @@ export const DEFAULT_MATERIAL: MaterialConstants = {
   nu: 0.47,
   thetaC: 0.025,
   /* tensile cohesion: at 0.0075 the sheet re-forming after an operator move
-     comes out lacy; 0.03 keeps it continuous (validated headlessly) */
-  thetaS: 0.03
+     comes out lacy; 0.03 keeps it continuous but a sheet pulled off the roll by
+     its edge thins to a film and tears where it sticks; 0.05 pulls and folds as
+     putty, a thick slab (validated headlessly, cut & fold frames) */
+  thetaS: 0.05
 };
 
 /** Lamé parameters derived from E and nu. */

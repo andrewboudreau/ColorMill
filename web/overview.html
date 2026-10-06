@@ -59,7 +59,7 @@
         <li><strong>The bank.</strong> Putty rests in the valley between the rolls. Gravity and the rolls' surfaces keep pulling it toward the gap.</li>
         <li><strong>The nip.</strong> The rolls squeeze the putty through a narrow gap. The back roll turns faster than the front, so the gap is a shear zone. This is the only place colours really mix.</li>
         <li><strong>The sheet.</strong> The front roll is tackier, so the putty leaves the nip stuck to it as a thin sheet and comes round the top to rejoin the bank.</li>
-        <li><strong>Cut &amp; fold, cut &amp; roll.</strong> A mill only moves material front to back. To mix across the width, the operator cuts the sheet across at the crown, lifts the cut edge, pulls it back over the top of the mill and folds it back on itself twice for the rolls to pull in; or cuts the whole sheet off, rolls it into a log and feeds it back in end-first. ColorMill scripts both moves.</li>
+        <li><strong>Cut &amp; fold, cut &amp; roll.</strong> A mill only moves material front to back. To mix across the width, the operator cuts the sheet across at the crown, lifts the cut edge, pulls it back over the top of the mill and drops it for the rolls to pull in, a few passes at a time; or cuts the whole sheet off, rolls it into a log and feeds it back in end-first. ColorMill scripts both moves.</li>
       </ol>
 
       <h2>The tech, in six pieces</h2>
@@ -82,7 +82,7 @@
         </div>
         <div class="card">
           <h3>The operator's moves</h3>
-          <p>Cut &amp; fold cuts the sheet across at the crown and takes the cut edge in hand: only that band is scripted. The hand lifts it off the crown and laps the top of the mill at the roll's speed, back, forward over the sheet it laid down, and back again, then sets the edge down and lets go; the sheet peels, hangs, sags and folds back on itself twice on its own in the solver, and the nip pulls the fold in, ends alternating. Cut &amp; roll takes everything on the mill, winds it into a volume-preserving log standing over the nip, and drops it back on the nip for the rolls to pull in (or lowers it in end-first, a slider's choice). Nothing is lost or invented either way.</p>
+          <p>Cut &amp; fold cuts the sheet across at the crown and takes the cut edge in hand: only that band is scripted. Lift, pull, drop: the hand lifts it off the crown, pulls it back over the top of the mill at the roll's speed and drops it over the back roll; the sheet peels, hangs, sags and falls folded on its own in the solver, and the nip pulls the fold in. One to three passes a press, a fresh cut each time, ends alternating. Cut &amp; roll takes everything on the mill, winds it into a volume-preserving log standing over the nip, and drops it back on the nip for the rolls to pull in (or lowers it in end-first, a slider's choice). Nothing is lost or invented either way.</p>
         </div>
         <div class="card">
           <h3>Ray-marched rendering</h3>
@@ -103,7 +103,7 @@
       <h2>Using it</h2>
       <ul>
         <li><strong>Tap a colour</strong> to set a chunk of pigmented putty down on the bank. The strip of dots picks where along the roll it lands, the three dollops pick how big it is, and chunks stack on whatever is already there.</li>
-        <li><strong>Cut &amp; fold</strong> (C) cuts the sheet across at the crown, lifts the cut edge, pulls it back over the top of the mill and folds it back on itself twice, then lets go for the rolls to pull the fold in, alternating ends. <strong>Cut &amp; roll</strong> (F) rolls the sheet up and feeds it back in end-first. A few of either and stripes become a blend.</li>
+        <li><strong>Cut &amp; fold</strong> (C) cuts the sheet across at the crown, lifts the cut edge, pulls it back over the top of the mill and drops it for the rolls to pull the fold in, one to three passes a press, alternating ends. <strong>Cut &amp; roll</strong> (F) rolls the sheet up and feeds it back in end-first. A few of either and stripes become a blend.</li>
         <li><strong>The drawer</strong> (P) has roll speed, speed ratio, nip gap, dispersion, gravity, batch size and quality preset, plus live stats.</li>
         <li><strong>Drag</strong> to orbit, wheel or pinch to zoom, double-tap for the front view. Space pauses, R resets.</li>
       </ul>

@@ -100,74 +100,48 @@ export function foldDuration(logFeed: number, omega: number = DEFAULT_PARAMS.ome
 /** Script length of the lowered-in move at FOLD_FEED_SPEED (≈ 10.5 s). */
 export const FOLD_DURATION = foldDuration(FOLD_FEED_SPEED);
 /** Cut & fold (fold.wgsl, design §6b): the sheet is cut across at the crown and the operator's hand takes
- * the cut edge (a band HAND_CELLS deep along the arc, the full width); only that band is scripted. It is
- * lifted off the crown over HAND_LIFT_SECONDS while its speed back over the mill ramps up to the roll's
- * own (windSpeed; the roll carries the sheet past the cut away, opening the cut), then carried over the
- * top of the mill at that speed in HAND_LAPS laps with a turn between them (the speed reversing over
- * HAND_TURN_SECONDS): back to over the back roll's crown (handBack: 2 R + gap), forward again over the
- * sheet just laid down to HAND_FRONT of the way back, and back once more, where it is set down and let go
- * HAND_HOLD_SECONDS later. The rest of the sheet follows the hand through the grid (P2G scatters a hand
- * particle's mass and momentum), peels off the crown, sags onto the bank, lies folded back on itself
- * twice once the edge is let go, and the nip pulls the fold in. */
+ * the cut edge (a band HAND_CELLS deep along the arc, the full width); only that band is scripted. One
+ * pass is lift, pull, drop: the band is lifted off the crown over HAND_LIFT_SECONDS while its speed back
+ * over the mill ramps up to the roll's own (windSpeed; the roll carries the sheet past the cut away,
+ * opening the cut), pulled back over the top of the mill at that speed until it is over the back roll's
+ * crown (handBack: 2 R + gap), and let go there with the hand's velocity. The rest of the sheet follows
+ * the hand through the grid (P2G scatters a hand particle's mass and momentum), peels off the crown,
+ * hangs from the hand, and falls folded over itself on the bank for the nip to pull in. The operator
+ * makes params.foldPasses such passes in a row, HAND_GAP_SECONDS apart, each a fresh cut at the crown. */
 export const HAND_LIFT_SECONDS = 0.3;
-export const HAND_TURN_SECONDS = 0.3;
-export const HAND_HOLD_SECONDS = 0.2;
-/** Laps over the top of the mill: back, forward, back. */
-export const HAND_LAPS = 3;
-/** Where the forward lap ends, as a fraction of the way back from the front crown to the back one: over the nip
- * (forward to just behind the crown and all the way back again pulls more sheet than the mill holds and tears it). */
-export const HAND_FRONT = 0.5;
-/** Where lap k ends, as a fraction of the way back (mirrors lapEnd in fold.wgsl). */
-export function lapEnd(k: number): number {
-  return k % 2 === 1 ? HAND_FRONT : 1;
-}
-/** How far back the hand carries the edge: from the front roll's crown to the back roll's. */
+/** Between passes: the dropped fold lands and the roll brings fresh sheet up to the crown. */
+export const HAND_GAP_SECONDS = 0.4;
+/** How far back the hand pulls the edge: from the front roll's crown to the back roll's. */
 export function handBack(gap: number): number {
   return 2 * GEOMETRY.radius + gap;
 }
 /** The cut & fold's timeline at roll speed omega (sim seconds from the start of the move). */
 export interface HandTimes {
-  /** the hand's cruising speed over the mill: the roll's own surface speed (floored) */
+  /** the hand's pulling speed over the mill: the roll's own surface speed (floored) */
   readonly speed: number;
-  /** how long the lift takes (the speed ramps up over it) and the set-down at the end */
+  /** how long the lift takes (the speed ramps up over it) */
   readonly lift: number;
-  /** when each lap ends: mid-turn at its far point, or for the last lap at the end of the set-down */
-  readonly laps: readonly number[];
-  /** when the hand is first furthest back, over the back roll's crown (laps[0]) */
-  readonly back: number;
-  /** when the edge is set down (the last lap's end) */
-  readonly down: number;
-  /** when the edge is let go: the end of the move */
+  /** one pass, lift to drop */
+  readonly pass: number;
+  /** the gap between passes */
+  readonly gap: number;
+  /** how many passes */
+  readonly passes: number;
+  /** when each pass drops its edge */
+  readonly drops: readonly number[];
+  /** when the last edge is dropped: the end of the move */
   readonly end: number;
 }
-/** Mirrors handOffset() in fold.wgsl: speed ramps are smoothsteps, so the lift and the set-down each cover half
- * a lift's worth of cruising, and a turn's far point is 0.3125 v T beyond its cruise. */
-export function handTimes(omega: number, gap: number = DEFAULT_PARAMS.gap): HandTimes {
+/** Mirrors handOffset() in fold.wgsl: the lift's speed ramp is a smoothstep, so the lift covers half a lift's
+ * worth of pulling, and the pull then takes the rest of the way to the back roll at the roll's speed. */
+export function handTimes(omega: number, gap: number = DEFAULT_PARAMS.gap, passes: number = DEFAULT_PARAMS.foldPasses): HandTimes {
   const v = windSpeed(omega);
   const lift = HAND_LIFT_SECONDS;
-  const turn = HAND_TURN_SECONDS;
-  const D = handBack(gap);
-  const laps: number[] = [];
-  let t = lift;
-  let pos = 0.5 * v * lift;
-  let dir = 1;
-  for (let k = 0; k < HAND_LAPS; k++) {
-    const last = k + 1 === HAND_LAPS;
-    const reach = last ? 0.5 * v * lift : 0.3125 * v * turn;
-    const cruise = Math.max((Math.abs(lapEnd(k) * D - pos) - reach) / v, 0);
-    t += cruise;
-    pos += dir * v * cruise;
-    if (last) {
-      t += lift;
-      laps.push(t);
-    } else {
-      laps.push(t + 0.5 * turn);
-      t += turn;
-      dir = -dir;
-    }
-  }
-  const down = laps[laps.length - 1];
-  return { speed: v, lift, laps, back: laps[0], down, end: down + HAND_HOLD_SECONDS };
+  const pass = lift + Math.max((handBack(gap) - 0.5 * v * lift) / v, 0);
+  const n = Math.max(1, Math.round(passes));
+  const drops: number[] = [];
+  for (let k = 0; k < n; k++) drops.push(k * (pass + HAND_GAP_SECONDS) + pass);
+  return { speed: v, lift, pass, gap: HAND_GAP_SECONDS, passes: n, drops, end: drops[n - 1] };
 }
 /** Operator-move modes carried in P.fold.x: 1 = cut & roll (log); 2 / 3 = cut & fold (the hand
  * takes the cut edge), the UI alternating between them as an operator alternates ends. */
@@ -310,8 +284,10 @@ export class GpuMpm implements GpuMpmSim {
    *  slider change mid-move cannot change its length under it) */
   private foldFeed = 0;
   private foldMode: FoldMode = 0;
-  /** cut & fold: the hand's timeline, captured when the move starts */
+  /** cut & fold: the hand's timeline, captured when the move starts; passes still to make after the current one; the gap left before the next */
   private hand: HandTimes = handTimes(DEFAULT_PARAMS.omega);
+  private foldPassesLeft = 0;
+  private foldRest = 0;
   /** how cut & roll puts the roll back; read when the move starts */
   rollStyle: RollStyle = 'double';
   private foldLong = false;
@@ -632,9 +608,9 @@ export class GpuMpm implements GpuMpmSim {
     u[o + 44] = fd.nx; u[o + 45] = fd.ny; u[o + 46] = fd.nz; u[o + 47] = 0;
     f.set([fd.h, 1 / fd.h, (ratio * ratio * ratio) / 8, 0], o + 48);
     // cut & roll: peel and wind, double, lift (a negative double time keeps the roll long: no fold in half);
-    // cut & fold: the hand's cruising speed, how far back it goes, its turn (fold.wgsl)
+    // cut & fold: the hand's pulling speed and how far back it pulls (fold.wgsl)
     if (this.foldMode === 1) f.set([this.foldWindSpeed, this.foldWindSeconds, this.foldLong ? -1 : DOUBLE_SECONDS, LIFT_SECONDS], o + 52);
-    else f.set([this.hand.speed, handBack(gap), 0, HAND_TURN_SECONDS], o + 52);
+    else f.set([this.hand.speed, handBack(gap), 0, 0], o + 52);
   }
 
   // ---------------------------------------------------------------------------
@@ -701,10 +677,15 @@ export class GpuMpm implements GpuMpmSim {
     const frameSlot = q.substepsPerFrame;
     const { back, front } = rollerPoses(this.params);
 
+    // cut & fold: between passes the hand is empty; the next cut comes after the gap
+    if (this.foldRest > 0) {
+      this.foldRest -= q.dt * substeps;
+      if (this.foldRest <= 0) { this.foldRest = 0; this.foldPending = true; }
+    }
     // uniform ring: one slot per substep (fold script state differs per substep)
     let foldActive = this.foldActive || this.foldPending;
     let foldT = this.foldPending ? 0 : this.foldTime;
-    const duration = this.foldMode === 1 ? this.foldTotalSeconds : this.hand.end + 0.02;
+    const duration = this.foldMode === 1 ? this.foldTotalSeconds : this.hand.pass;
     const finishAt: number[] = [];
     for (let s = 0; s < substeps; s++) {
       this.writeParams(s, foldT, foldActive);
@@ -750,6 +731,9 @@ export class GpuMpm implements GpuMpmSim {
         if (finishAt.includes(s)) {
           this.dispatchParticles(pass, k.foldFinish, s);
           this.foldActive = false;
+          // cut & fold: the next pass after the gap
+          if (this.foldMode !== 1 && this.foldPassesLeft > 1) { this.foldPassesLeft--; this.foldRest = this.hand.gap; }
+          else this.foldPassesLeft = 0;
         }
       }
     }
@@ -795,6 +779,8 @@ export class GpuMpm implements GpuMpmSim {
     this.foldPending = false;
     this.foldActive = false;
     this.foldTime = 0;
+    this.foldPassesLeft = 0;
+    this.foldRest = 0;
     this.statsData.simTime = 0;
     this.statsData.rollerAngleFront = 0;
     this.statsData.rollerAngleBack = 0;
@@ -954,7 +940,9 @@ export class GpuMpm implements GpuMpmSim {
   cutAndFlop(side: 'left' | 'right'): void {
     if (this.destroyed || this.operatorBusy) return;
     this.foldMode = side === 'left' ? 2 : 3;
-    this.hand = handTimes(this.params.omega, this.params.gap);
+    this.hand = handTimes(this.params.omega, this.params.gap, this.params.foldPasses);
+    this.foldPassesLeft = this.hand.passes;
+    this.foldRest = 0;
     this.foldPending = true;
   }
 
@@ -963,7 +951,7 @@ export class GpuMpm implements GpuMpmSim {
   }
 
   get operatorBusy(): boolean {
-    return this.foldActive || this.foldPending;
+    return this.foldActive || this.foldPending || this.foldRest > 0;
   }
 
   async readParticles(): Promise<ParticleSnapshot> {

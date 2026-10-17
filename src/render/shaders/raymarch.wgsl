@@ -32,13 +32,11 @@ struct Uniforms {
 
 @group(0) @binding(0) var<uniform> U: Uniforms;
 @group(0) @binding(1) var volA: texture_3d<f32>;
-@group(0) @binding(2) var volB: texture_3d<f32>;
 @group(0) @binding(3) var volSampler: sampler;
 // coarse mip: max density over each block of mip.w^3 texels (plus a one-texel halo, so a
 // trilinear sample anywhere inside the block is bounded by it); rebuilt by csMip every frame
 @group(0) @binding(4) var<storage, read> mipMax: array<f32>;
 @group(0) @binding(5) var<storage, read_write> mipOut: array<f32>;
-@group(0) @binding(6) var volC: texture_3d<f32>;   // x = pigment load / 8 (same normalisation as density)
 // the colour raster (design §3.5), on its own finer grid: pigment load, latent and mass, so a
 // streak thinner than a solver cell still reaches the picture; the surface itself is still
 // found on volA's density
@@ -804,19 +802,24 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     // Uncured silicone is clear, not white: the base is rendered translucent, going
     // milky with thickness, while pigment makes it opaque. What shows through is
     // the analytic scene behind the hit along the same ray.
-    var behind: vec3f;
-    if (roller.t < tFloor) {
-      let pb = ro + rd * roller.t;
-      if (roller.kind == 1) { behind = shadeRollerBody(pb, roller.n, v, rollerPose); } else { behind = shadeRollerCap(pb, roller.n, v, rollerPose); }
-    } else if (tFloor < INF) {
-      behind = shadeFloor(ro + rd * tFloor, rd);
-    } else {
-      behind = skyColor(rd);
+    let clearness = (1.0 - pigment) * exp(-thickness / (14.0 * h));
+    let alpha = 1.0 - 0.8 * clearness;
+    col = surface;
+    // Fully opaque material has no background contribution. Use an exact
+    // comparison so translucent sheets retain their original shading.
+    if (alpha < 1.0) {
+      var behind: vec3f;
+      if (roller.t < tFloor) {
+        let pb = ro + rd * roller.t;
+        if (roller.kind == 1) { behind = shadeRollerBody(pb, roller.n, v, rollerPose); } else { behind = shadeRollerCap(pb, roller.n, v, rollerPose); }
+      } else if (tFloor < INF) {
+        behind = shadeFloor(ro + rd * tFloor, rd);
+      } else {
+        behind = skyColor(rd);
+      }
+      let tint = mix(vec3f(0.84, 0.89, 0.92), albedo, pigment);
+      col = mix(behind * tint, surface, alpha);
     }
-    let clearness = (1.0 - pigment) * exp(-thickness / (14.0 * h));  // clear sheet / bank: see through, milky when thick
-    let alpha = 1.0 - 0.8 * clearness;                                 // base alone: up to 80% shows through
-    let tint = mix(vec3f(0.84, 0.89, 0.92), albedo, pigment);         // transmitted light picks up the pigment
-    col = mix(behind * tint, surface, alpha);
   } else if (roller.t < tFloor) {
     tHit = roller.t;
     let p = ro + rd * roller.t;

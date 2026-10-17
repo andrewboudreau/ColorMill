@@ -84,6 +84,22 @@ describe('mill geometry', () => {
   });
 });
 
+describe('bank height cache', () => {
+  it('tracks batch and live gap changes even when the parameter object is reused', () => {
+    const params = { ...DEFAULT_PARAMS };
+    for (const batch of [1, 2, 0.5, 1]) {
+      for (const gap of [0.04, 0.08, 0.02, 0.04]) {
+        params.gap = gap;
+        const top = bankTopY(batch, params);
+        expect(bankVolumeBelow(top, params)).toBeCloseTo(GEOMETRY.bankVolume * batch, 5);
+        params.omega += 1;
+        params.frictionRatio += 0.1;
+        expect(bankTopY(batch, params)).toBe(top);
+      }
+    }
+  });
+});
+
 describe('pigment drop slots', () => {
   it('spaces the slots evenly along the roll, clear of the end guides', () => {
     const xs = Array.from({ length: DROP_SLOTS }, (_, i) => dropSlotX(i));

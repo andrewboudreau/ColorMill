@@ -7,10 +7,10 @@
  *   node tests/e2e/run.mjs render mixer    # any of several names (CI shards this way)
  */
 import { readdirSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
-const dir = path.dirname(new URL(import.meta.url).pathname);
+const dir = path.dirname(fileURLToPath(import.meta.url));
 const only = process.argv.slice(2).filter(Boolean);
 const specs = readdirSync(dir).filter((f) => f.endsWith('.spec.mjs') && (!only.length || only.some((o) => f.includes(o)))).sort();
 if (!specs.length) { console.log(`no spec matches ${only.join(', ')}`); process.exit(1); }

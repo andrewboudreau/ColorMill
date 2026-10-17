@@ -62,7 +62,7 @@ jobs:
           - shard: solver
             specs: solver
           - shard: quick
-            specs: render mixer webgpu
+            specs: render mixer webgpu performance
     name: e2e (${{ matrix.shard }})
     steps:
       - name: Checkout

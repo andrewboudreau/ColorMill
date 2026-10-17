@@ -152,6 +152,9 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   // GPU cannot keep up (frame time sustained above ADAPT_SLOW_MS).
   let adaptive = chosen.reason !== 'query parameter' && !navigator.webdriver;
   let slowSince = 0;
+  const scaleQuery = Number.parseFloat(query.get('scale') ?? '');
+  let renderScale = Number.isFinite(scaleQuery) ? Math.min(1, Math.max(0.5, scaleQuery)) : 1;
+  let adaptiveResolution = !Number.isFinite(scaleQuery);
   // Automated browsers (Playwright) on software WebGPU cannot present to the
   // canvas; render offscreen there and let the debug API read pixels back.
   const offscreen = navigator.webdriver || query.get('offscreen') === '1';
@@ -208,6 +211,11 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       if (sim) sim.params[key] = value;
     },
     onQuality: (p) => { adaptive = false; presetPinned = true; void rebuildSim(p, batch); },
+    onRenderScale: (scale) => {
+      adaptiveResolution = false;
+      renderScale = scale;
+      if (renderer) renderer.renderScale = scale;
+    },
     onBatch: (b) => { void rebuildSim(preset, b); },
     onAutoOrbit: (on) => { autoOrbit = on; },
     onSurfaceColour: (on) => { if (renderer) renderer.mode = on ? 'surface' : 'depth'; },
@@ -221,7 +229,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     },
     onLongRoll: (on) => { longRoll = on; if (sim) sim.rollStyle = on ? 'long' : 'double'; },
     onCopyStartLink: () => copyStartLink()
-  }, { params: { ...initialParams }, preset, batch, autoOrbit, experimental, longRoll, open: wideScreen });
+  }, { params: { ...initialParams }, preset, batch, renderScale, autoOrbit, experimental, longRoll, open: wideScreen });
 
   // where along the roll a tap lands: one of DROP_SLOTS fixed positions, the
   // operator picks which (strip in the palette, [ and ], ?slot=)
@@ -308,7 +316,8 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   /** index.html URL that reproduces this session's start: the drop log, plus batch/preset when set. */
   const startLink = (): string => {
     // drops, batch, preset (when pinned) and every mill parameter that differs from its default
-    const q = formatMillQuery({ experimental, drops: dropLog, batch, preset: presetPinned ? preset : undefined, params: sim ? sim.params : initialParams, roll: longRoll ? 'long' : 'double' });
+    const settings = formatMillQuery({ experimental, drops: dropLog, batch, preset: presetPinned ? preset : undefined, params: sim ? sim.params : initialParams, roll: longRoll ? 'long' : 'double' });
+    const q = settings + (renderScale !== 1 ? `${settings ? '&' : ''}scale=${renderScale}` : '');
     return `${location.origin}${location.pathname}${q ? `?${q}` : ''}`;
   };
 
@@ -429,10 +438,12 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
 
     let encoder = device.createCommandEncoder({ label: 'colormill frame' });
     const wasPaused = sim.paused;
+    let stepped = false;
     if (forceStep) sim.paused = false;
     if (!sim.paused) {
       try {
         sim.step(encoder, frameDt);
+        stepped = true;
       } catch (e) {
         reportError('Simulation step failed', e);
         sim.paused = true;
@@ -448,12 +459,13 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
 
     const st = sim.stats;
     try {
-      renderer.render(encoder, {
+      const drew = renderer.render(encoder, {
         params: sim.params,
         rollerAngleFront: st.rollerAngleFront,
         rollerAngleBack: st.rollerAngleBack,
         timeSeconds: (performance.now() - startTime) / 1000
       });
+      if (drew === false && !stepped) return;
     } catch (e) {
       reportError('Render failed', e);
       return;
@@ -479,6 +491,17 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     if (msFrame < ADAPT_SLOW_MS) { slowSince = 0; return; }
     if (!slowSince) { slowSince = now; return; }
     if (now - slowSince < ADAPT_SETTLE_SECONDS * 1000) return;
+    // Reduce pixel work before sacrificing material detail and rebuilding the bank.
+    if (adaptiveResolution && renderer?.renderScale !== undefined && renderScale > 0.5) {
+      renderScale = Math.max(0.5, Math.round((renderScale - 0.15) * 100) / 100);
+      renderer.renderScale = renderScale;
+      panel.setRenderScale(renderScale);
+      frameTimes.length = 0;
+      frameTimeSum = 0;
+      slowSince = 0;
+      hud.showHint(`Lowering render resolution to ${Math.round(renderScale * 100)}% to improve frame rate`, 6000);
+      return;
+    }
     const idx = PRESET_ORDER.indexOf(preset);
     if (idx <= 0) { adaptive = false; return; }
     const next = PRESET_ORDER[idx - 1];
@@ -580,6 +603,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   await nextPaint();
   try {
     renderer = opts.makeRenderer(ctx, canvas);
+    renderer.renderScale = renderScale;
     if (offscreen) renderer.setPresentation?.(false);
     const isoQuery = parseFloat(query.get('iso') ?? '');
     if (Number.isFinite(isoQuery) && isoQuery > 0.05 && isoQuery < 1) renderer.iso = isoQuery;   // debug: iso-surface threshold

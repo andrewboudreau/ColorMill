@@ -13,6 +13,7 @@ import { formatCount } from './hud';
 export interface PanelCallbacks {
   onParam(key: keyof MillParams, value: number): void;
   onQuality(preset: QualityPreset): void;
+  onRenderScale(scale: number): void;
   /** batch size multiplier (rebuilds the bank) */
   onBatch(batch: number): void;
   onAutoOrbit(on: boolean): void;
@@ -41,6 +42,7 @@ export interface PanelStats {
 export interface PanelInitial {
   readonly params: MillParams;
   readonly preset: QualityPreset;
+  readonly renderScale?: number;
   /** batch size multiplier */
   readonly batch?: number;
   readonly autoOrbit: boolean;
@@ -66,6 +68,8 @@ export class Panel {
   readonly toggleButton: HTMLButtonElement;
   private readonly sliders = new Map<keyof MillParams, { input: HTMLInputElement; value: HTMLElement; spec: SliderSpec }>();
   private readonly quality: HTMLSelectElement;
+  private readonly renderScale: HTMLInputElement;
+  private readonly renderScaleLabel: HTMLElement;
   private readonly batch: HTMLSelectElement;
   private readonly orbit: HTMLInputElement;
   private readonly surface: HTMLInputElement;
@@ -177,6 +181,26 @@ export class Panel {
     qfield.append(qname, this.quality);
     qsec.appendChild(qfield);
 
+    const rfield = document.createElement('label');
+    rfield.className = 'cm-field';
+    this.renderScaleLabel = document.createElement('span');
+    this.renderScaleLabel.className = 'cm-field-name';
+    this.renderScale = document.createElement('input');
+    this.renderScale.type = 'range';
+    this.renderScale.name = 'renderScale';
+    this.renderScale.min = '0.5';
+    this.renderScale.max = '1';
+    this.renderScale.step = '0.05';
+    rfield.title = 'Lower the image resolution to improve frame rate. The material and pigment detail stay at the selected simulation preset.';
+    this.setRenderScale(initial.renderScale ?? 1);
+    this.renderScale.addEventListener('input', () => {
+      const scale = Number(this.renderScale.value);
+      this.setRenderScale(scale);
+      this.cb.onRenderScale(scale);
+    });
+    rfield.append(this.renderScaleLabel, this.renderScale);
+    qsec.appendChild(rfield);
+
     const bfield = document.createElement('label');
     bfield.className = 'cm-field';
     const bname = document.createElement('span');
@@ -271,6 +295,11 @@ export class Panel {
     asec.appendChild(link);
 
     this.applyOpen();
+  }
+
+  setRenderScale(scale: number): void {
+    this.renderScale.value = String(scale);
+    this.renderScaleLabel.textContent = `Render resolution: ${Math.round(scale * 100)}%`;
   }
 
   private section(title: string): HTMLElement {

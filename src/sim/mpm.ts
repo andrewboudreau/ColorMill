@@ -8,7 +8,7 @@
  * produced by g2p so p2g reads one matrix and repeats no SVD), latent (7),
  * flags (u32) and the cut-and-fold start pose (vec4: p0 + arc). Grid
  * accumulators are i32 fixed point (mass 2^20, momentum 2^16, latent·mass 2^18)
- * plus a vec4 f32 velocity grid. The render volume is two rgba16float 3D
+ * plus a vec4 f32 velocity grid. The render volume is four rgba16float 3D
  * storage textures. readParticles() converts the vec4 arrays back to the
  * xyz-interleaved ParticleSnapshot layout.
  */
@@ -260,8 +260,8 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufProbe: GPUBuffer;
   private readonly uniformSlots: number;
   private readonly volA: GPUTexture;
-  private readonly volB: GPUTexture;
-  private readonly volC: GPUTexture;
+  private volumeVersion = 0;
+  private densityVersion = 0;
   /** colour raster (design §3.5): accumulators and textures on the finer grid fineDims */
   readonly fineDims: GridDims;
   private readonly bufFMass: GPUBuffer;
@@ -371,12 +371,15 @@ export class GpuMpm implements GpuMpmSim {
 
     const texUsage = GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC;
     this.volA = device.createTexture({ size: [d.nx, d.ny, d.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'volA' });
-    this.volB = device.createTexture({ size: [d.nx, d.ny, d.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'volB' });
-    this.volC = device.createTexture({ size: [d.nx, d.ny, d.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'volC' });
     this.finA = device.createTexture({ size: [fd.nx, fd.ny, fd.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'finA' });
     this.finB = device.createTexture({ size: [fd.nx, fd.ny, fd.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'finB' });
     this.finC = device.createTexture({ size: [fd.nx, fd.ny, fd.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'finC' });
-    this.volumes = { volA: this.volA, volB: this.volB, volC: this.volC, dims: d, finA: this.finA, finB: this.finB, finC: this.finC, fineDims: fd };
+    const sim = this;
+    this.volumes = {
+      volA: this.volA, dims: d, finA: this.finA, finB: this.finB, finC: this.finC, fineDims: fd,
+      get version() { return sim.volumeVersion; },
+      get densityVersion() { return sim.densityVersion; }
+    };
 
     const maxDim = device.limits.maxComputeWorkgroupsPerDimension;
     this.particleDispatch = dispatchSize(Math.ceil(Math.max(this.count, 1) / PARTICLE_WG), maxDim);
@@ -478,8 +481,6 @@ export class GpuMpm implements GpuMpmSim {
     const foldRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags), rw(this.bufFold),
       rw(this.bufFoldInfo), ro(this.bufPMass), rw(this.bufFoldTables)];
     const volAView = this.volA.createView({ dimension: '3d' });
-    const volBView = this.volB.createView({ dimension: '3d' });
-    const volCView = this.volC.createView({ dimension: '3d' });
     const finAView = this.finA.createView({ dimension: '3d' });
     const finBView = this.finB.createView({ dimension: '3d' });
     const finCView = this.finC.createView({ dimension: '3d' });
@@ -503,15 +504,14 @@ export class GpuMpm implements GpuMpmSim {
       disperse: this.makeKernel('disperse', mod('disperse', disperseSrc), 'main',
         [rw(this.bufPos), ro(this.bufC), rw(this.bufLat), ro(this.bufPMass), ro(this.bufPLat), ro(this.bufFlags), ro(this.bufPLoad)]),
       pack: this.makeKernel('pack', packMod, 'main',
-        [ro(this.bufPMass), ro(this.bufPLat), { kind: 'storageTexture', view: volAView }, { kind: 'storageTexture', view: volBView }, ro(this.bufPLoad),
-          { kind: 'storageTexture', view: volCView }, { kind: 'storageTexture', view: finCView }, ro(this.bufPCov)]),
+        [ro(this.bufPMass), ro(this.bufPLat), { kind: 'storageTexture', view: volAView }]),
       // the colour raster: the same scatter and pack onto the finer grid, its accumulators bound
       // where the solver grid's are
       rasterFine: this.makeKernel('rasterFine', rasterMod, 'mainFine',
         [ro(this.bufPos), ro(this.bufLat), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad), rw(this.bufFCov)]),
       packFine: this.makeKernel('packFine', packMod, 'mainFine',
         [ro(this.bufFMass), ro(this.bufFLat), { kind: 'storageTexture', view: finAView }, { kind: 'storageTexture', view: finBView }, ro(this.bufFLoad),
-          { kind: 'storageTexture', view: volCView }, { kind: 'storageTexture', view: finCView }, ro(this.bufFCov)]),
+          { kind: 'storageTexture', view: finCView }, ro(this.bufFCov)]),
       inject: this.makeKernel('inject', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
       probe: this.makeKernel('probe', injectMod, 'probeColumn', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
       injectAll: this.makeKernel('injectAll', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInjectAll }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
@@ -650,7 +650,9 @@ export class GpuMpm implements GpuMpmSim {
   }
 
   /** raster (+ disperse) + pack, then the colour raster, using uniform slot `slot`. */
-  private encodeFrameKernels(pass: GPUComputePassEncoder, slot: number, disperse: boolean): void {
+  private encodeFrameKernels(pass: GPUComputePassEncoder, slot: number, disperse: boolean, densityChanged = true): void {
+    this.volumeVersion++;
+    if (densityChanged) this.densityVersion++;
     const k = this.kernels;
     this.dispatchGrid(pass, k.clearRaster, slot);
     this.dispatchParticles(pass, k.raster, slot);
@@ -901,7 +903,7 @@ export class GpuMpm implements GpuMpmSim {
     const pass = enc.beginComputePass();
     this.dispatchParticles(pass, this.kernels.probe, 0);
     this.dispatchParticles(pass, this.kernels.inject, 0);
-    this.encodeFrameKernels(pass, 0, false);
+    this.encodeFrameKernels(pass, 0, false, false);
     pass.end();
     this.device.queue.submit([enc.finish()]);
   }
@@ -925,7 +927,7 @@ export class GpuMpm implements GpuMpmSim {
     const enc = this.device.createCommandEncoder({ label: `GpuMpm-${k.name}` });
     const pass = enc.beginComputePass();
     this.dispatchParticles(pass, k, 0);
-    this.encodeFrameKernels(pass, 0, false);
+    this.encodeFrameKernels(pass, 0, false, false);
     pass.end();
     this.device.queue.submit([enc.finish()]);
   }
@@ -1043,8 +1045,6 @@ export class GpuMpm implements GpuMpmSim {
     for (const s of this.queryStaging) s.buffer.destroy();
     this.querySet?.destroy();
     this.volA.destroy();
-    this.volB.destroy();
-    this.volC.destroy();
     this.finA.destroy();
     this.finB.destroy();
     this.finC.destroy();

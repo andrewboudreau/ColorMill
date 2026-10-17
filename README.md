@@ -181,6 +181,7 @@ lays the same three bands on the bank.
 | `?drops=hansaYellow@3.m,phthaloBlue@5.l` | Start with those pigment chunks already dropped (pigment@slot.size; size s, m or l; a custom colour as six hex digits) |
 | `?gap=0.06&omega=2&preset=high&batch=1.5` | Start with mill settings changed: any drawer slider by its name (`omega`, `frictionRatio`, `gap`, `dispersion`, `gravity`, `backFriction`, `logFeed`), the quality preset and the batch size. Values are snapped to the slider's step and capped at its range. The drawer's **Copy start link** writes the session's drops plus every setting that differs from its default, so a whole setup restarts from one URL |
 | `?colour=48` | Experiment: the colour raster's resolution in cells per unit (16 to 128; `?colour=32` at low is the solver grid, the look before the colour raster) |
+| `?scale=0.75` | Render at 75% resolution in each dimension. The drawer's **Render resolution** slider adjusts this from 50% to 100% without rebuilding the bank; the start link preserves it |
 | `?render=surface` | Colour mode: `depth` (default) blends a few cells into the material by mean pigment load, which gives the soft tie-dye look; `surface` draws the top-most material only, so a pigment skin reads as pigment and clear over buried pigment reads as clear, and draws pigment by coverage (how much of a fine cell's mass is pigment-carrying), so a thin lamina keeps a sharp edge instead of tinting its whole cell. The drawer's **Surface colour** toggle switches it live |
 | `?roll=long` | Cut & roll keeps the roll long: no fold in half, the full-length roll stands up as one at a steeper lean and goes in end-first (the drawer's **Long roll** checkbox; the start link carries it) |
 | `?experimental=1&omega=50` | Experimental mode: the caps come off. URL values are accepted as written (floored at each slider's minimum), the sliders stretch to 4× their normal top, and the drawer / mixer toggle **Experimental: lift the slider caps** does the same. The solver is not guaranteed stable up there |
@@ -216,8 +217,11 @@ kg, so conservation is visible.
 
 The app picks `medium` on non-discrete adapters (`low` on mobile user agents)
 and `high` otherwise; override with the quality select or `?preset=low` in the
-URL. It also steps the preset down when frames stay above 45 ms, unless a
-preset was chosen explicitly. Simulated time per rendered frame is
+URL. When frames stay above 45 ms and no preset was chosen explicitly, it
+first lowers render resolution toward 50%, then steps the simulation preset
+down if necessary. A manually chosen render resolution is preserved. Paused
+views redraw only when the material, camera, lighting, size or display settings
+change. Simulated time per rendered frame is
 `dt × substeps` (about 13 ms), so at 60 fps the mill runs at about 0.8× real
 time; the HUD shows the ratio.
 

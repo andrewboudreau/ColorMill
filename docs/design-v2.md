@@ -246,10 +246,10 @@ x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.2
   2^20 for mass, 2^18 for latent·mass); scatter `wgt·pMass` and
   `wgt·pMass·latent` with the same 27-node stencil.
 - **Disperse** (shear-driven mixing, §5).
-- **Pack**: write the render volume (§8): two `rgba16float` 3D textures of
-  node dims: `volA = (density, lat0, lat1, lat2)`, `volB = (lat3, lat4, lat5, lat6)`
-  where `density = pmass / 8` (so a fully packed cell ≈ 1) and `latN =
-  plat[N] / pmass` (0 where pmass = 0).
+- **Pack**: write the coarse density volume (§8): one `rgba16float` 3D texture
+  of node dims, `volA = (density, 0, 0, 0)`, where `density = pmass / 8`
+  (so a fully packed cell ≈ 1). Coarse pigment accumulators remain inputs to
+  dispersion; only the fine raster's pigment is packed into render textures.
 - **Colour raster**: the same scatter and pack a second time onto a finer
   grid (`colourCellsPerUnit`: 64 at low, 80 at medium, 88 at high and ultra,
   the most whose 7-channel accumulator fits the default 128 MiB storage-binding limit;
@@ -398,10 +398,10 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   `t = 1 − |d|/radius`.
 - **Pigment load.** Each particle carries a pigment load in `pos.w` (clear
   base 0, a masterbatch chunk `PIGMENT_LOAD` = 12). The raster accumulates
-  per node the mass, the load and the load-weighted latent; `pack` writes
-  `volA/volB` = density and the latent normalised by the node's load (the
-  mix of the pigments only) and `volC` = load / 8 (same normalisation as the
-  density, so `volC / density` is the load per unit mass). The raster uses
+  per node the mass, the load and the load-weighted latent. The fine raster's
+  pack writes `finA/finB` = load and the latent normalised by the node's load
+  (the mix of the pigments only), and `finC` = mass and coverage. Thus
+  `finA.x / finC.x` is the load per unit mass. The raster uses
   the tight 8-node trilinear stencil so one-cell streaks are not averaged
   away before they are drawn, and the renderer integrates colour through
   the sheet's thickness.
@@ -708,8 +708,12 @@ Single fullscreen ray-march pass (`src/render/shaders/raymarch.wgsl`):
    vertical gradient.
 7. Output sRGB. The canvas uses `navigator.gpu.getPreferredCanvasFormat()`.
 
-Render at `min(devicePixelRatio, 2)`. Provide `Renderer.setVolumes(volA, volB)`
-so the renderer can be tested with a procedural volume without the sim.
+Render at `min(devicePixelRatio, 2) * renderScale`, with a separate 0.5–1
+resolution control that preserves the simulation. `Renderer.setVolumes(volumes)`
+accepts procedural volumes for testing without the sim. Optional volume and
+density versions allow unchanged frames and density-mip rebuilds to be skipped;
+unversioned external volumes retain the always-refresh behavior. Fully opaque
+putty skips shading the analytic scene behind it; translucent shading is unchanged.
 
 ---
 

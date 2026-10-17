@@ -263,12 +263,19 @@ export function bankVolumeBelow(top: number, params: BankParams): number {
   return area * (GEOMETRY.length - 2 * GEOMETRY.bankEndMargin);
 }
 
+// Geometry depends only on batch volume and gap. Keep a small bounded cache so
+// substep uniforms and the renderer do not repeat the numerical integration.
+const bankTopCache = new Map<string, number>();
+
 /**
  * Top of the seeded bank for a batch size: the height at which the bank slab
  * holds `batch × GEOMETRY.bankVolume` of material. Batch is a volume (mass)
  * multiplier, not a height multiplier, so 2× really is twice the putty.
  */
 export function bankTopY(batch: number, params: BankParams = DEFAULT_PARAMS): number {
+  const key = `${batch}:${params.gap}`;
+  const cached = bankTopCache.get(key);
+  if (cached !== undefined) return cached;
   const target = GEOMETRY.bankVolume * Math.max(batch, 0);
   let lo: number = GEOMETRY.axisY;
   let hi: number = GEOMETRY.domain[1];
@@ -276,7 +283,10 @@ export function bankTopY(batch: number, params: BankParams = DEFAULT_PARAMS): nu
     const mid = 0.5 * (lo + hi);
     if (bankVolumeBelow(mid, params) < target) lo = mid; else hi = mid;
   }
-  return 0.5 * (lo + hi);
+  const top = 0.5 * (lo + hi);
+  if (bankTopCache.size >= 32) bankTopCache.delete(bankTopCache.keys().next().value!);
+  bankTopCache.set(key, top);
+  return top;
 }
 
 /** Litres of putty in a batch (HUD/panel readout). */

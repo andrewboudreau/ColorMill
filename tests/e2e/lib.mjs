@@ -9,11 +9,12 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import { chromium } from 'playwright';
 
 /** Repository root (this file lives in tests/e2e). */
-export const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
+export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const CHROMIUM_CANDIDATES = [
   process.env.COLORMILL_CHROMIUM,
@@ -29,11 +30,12 @@ export function chromiumExecutable() {
 export const WEBGPU_ARGS = [
   '--headless=new',
   '--enable-unsafe-webgpu',
-  '--enable-features=WebGPU,Vulkan',
+  // On Windows, initialize SwiftShader Vulkan for WebGPU without forcing
+  // Vulkan compositing (which can leave the browser without an adapter).
+  ...(process.platform === 'win32' ? ['--use-vulkan=swiftshader'] : ['--enable-features=WebGPU,Vulkan', '--use-angle=swiftshader']),
   '--use-webgpu-adapter=swiftshader',
   '--enable-unsafe-swiftshader',
-  '--ignore-gpu-blocklist',
-  '--use-angle=swiftshader'
+  '--ignore-gpu-blocklist'
 ];
 
 export async function launchBrowser() {
@@ -67,7 +69,7 @@ export async function startServer({ mode = process.env.E2E_MODE || 'dev', port =
   // bind IPv4 explicitly: on hosts where `localhost` resolves to ::1 the 127.0.0.1 probe below would never connect
   const common = ['--host', '127.0.0.1', '--port', String(port), '--strictPort'];
   const args = mode === 'preview' ? [viteBin, 'preview', ...common] : [viteBin, ...common];
-  const child = spawn(process.execPath, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...process.env, BROWSER: 'none', E2E_NO_HMR: '1' } });
+  const child = spawn(process.execPath, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], detached: true, windowsHide: true, env: { ...process.env, BROWSER: 'none', E2E_NO_HMR: '1' } });
   let out = '';
   child.stdout.on('data', (d) => { out += d.toString(); });
   child.stderr.on('data', (d) => { out += d.toString(); });

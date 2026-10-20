@@ -201,7 +201,7 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
   const fc = new Uint16Array(nx * ny * nz * 4);
   for (let i = 0; i < nx * ny * nz; i++) { fa[i * 4] = cc[i * 4]; fc[i * 4] = a[i * 4]; fc[i * 4 + 1] = cov[i]; }
   return {
-    volA: make('harness-volA', a), volB: make('harness-volB', bb), volC: make('harness-volC', cc), dims,
+    volA: make('harness-volA', a), dims, version: 0, densityVersion: 0,
     finA: make('harness-finA', fa), finB: make('harness-finB', bb), finC: make('harness-finC', fc), fineDims: dims
   };
 }

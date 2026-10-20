@@ -45,12 +45,12 @@ export interface ParticleSnapshot {
 
 /** The render volume produced by the solver each frame (design §3.5 / §8). */
 export interface RenderVolumes {
-  /** rgba16float 3D texture: (density, lat0, lat1, lat2) */
+  /** rgba16float 3D texture: (density, 0, 0, 0) */
   readonly volA: GPUTexture;
-  /** rgba16float 3D texture: (lat3, lat4, lat5, lat6) */
-  readonly volB: GPUTexture;
-  /** rgba16float: (pigment load / 8, 0, 0, 0); pigment / density = load per unit mass (0 = clear base) */
-  readonly volC: GPUTexture;
+  /** Incremented whenever volume contents change. Omit to disable render caching. */
+  readonly version?: number;
+  /** Incremented when density changes. Omit to rebuild the density mip on every draw. */
+  readonly densityVersion?: number;
   readonly dims: GridDims;
   /** colour raster (design §3.5), on the finer grid fineDims: rgba16float (pigment load, lat0, lat1, lat2) */
   readonly finA: GPUTexture;
@@ -167,7 +167,7 @@ export interface GpuMpmSim {
 export interface DebugApi {
   readonly sim: GpuMpmSim;
   /** the live renderer (camera, iso threshold, colour mode) */
-  readonly renderer: { readonly camera: unknown; iso?: number; mode?: 'depth' | 'surface' };
+  readonly renderer: { readonly camera: unknown; iso?: number; mode?: 'depth' | 'surface'; renderScale?: number };
   /** Run exactly n frames (sim step + render) synchronously in a loop and resolve when the GPU is idle. */
   stepFrames(n: number): Promise<void>;
   /** Particle snapshot (readParticles) */

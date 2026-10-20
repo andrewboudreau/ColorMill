@@ -36,12 +36,14 @@ export interface Renderer {
   iso?: number;
   /** colour mode (see RenderMode) */
   mode?: RenderMode;
+  /** Backing-store resolution multiplier, 0.5 to 1; independent of simulation quality. */
+  renderScale?: number;
   /** Swap the volumes the ray-marcher samples (called when the sim is rebuilt). */
   setVolumes(volumes: RenderVolumes): void;
-  /** Match the canvas backing store to its CSS size * dpr (capped at 2). Returns true if it changed. */
+  /** Match backing size to CSS size * min(dpr, 2) * renderScale. Returns true if it changed. */
   resize(): boolean;
-  /** Encode the frame into `encoder`; the caller submits. */
-  render(encoder: GPUCommandEncoder, info: RenderFrameInfo): void;
+  /** Encode the frame into `encoder`; the caller submits. False means the image was unchanged. */
+  render(encoder: GPUCommandEncoder, info: RenderFrameInfo): boolean | void;
   /** Reset the camera to the default front view. */
   resetCamera(): void;
   /**

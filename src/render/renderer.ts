@@ -3,7 +3,7 @@
  *
  * Owns: the canvas configuration, one render pipeline (fullscreen triangle),
  * a compute pipeline that rebuilds a coarse max-density mip of the live
- * volume every frame (empty-space skipping in the march), a uniform buffer
+ * volume when density changes (empty-space skipping in the march), a uniform buffer
  * (camera ray basis, volume dims, roller poses/angles, lights, mip dims,
  * end-guide plates), a filtering sampler and the bind groups that reference
  * the render volumes (rebuilt by setVolumes()).
@@ -21,6 +21,7 @@ import raymarchSrc from './shaders/raymarch.wgsl?raw';
 export const ISO_THRESHOLD = 0.32; // a gap-thick sheet is ~1.3 cells at `low`; 0.45 punched holes in it
 /** Cap on the backing-store scale (design §8). */
 export const MAX_DPR = 2;
+const GUIDE_TOP = bankTopY(1) + 0.15;
 
 /** Light rig; directions point toward the light, colours are linear. */
 export interface LightRig {
@@ -74,6 +75,11 @@ export class RayMarchRenderer implements Renderer {
   iso = ISO_THRESHOLD;
   /** colour mode: a few cells into the material (default), or the top-most material only (design §8) */
   mode: RenderMode = 'depth';
+  private scale = 1;
+  get renderScale(): number { return this.scale; }
+  set renderScale(value: number) {
+    if (Number.isFinite(value)) this.scale = Math.min(1, Math.max(0.5, value));
+  }
   readonly lights: LightRig = defaultLightRig();
   /** Draw the translucent end-guide plates at x = 0 and x = L (design §8, optional). */
   endGuides = true;
@@ -97,6 +103,9 @@ export class RayMarchRenderer implements Renderer {
   private destroyed = false;
   private present = true;
   private offscreen: GPUTexture | null = null;
+  private lastFrameData: Float32Array | null = null;
+  private lastVolumeVersion: number | undefined;
+  private mipDensityVersion: number | undefined;
 
   constructor(ctx: GpuContext, canvas: HTMLCanvasElement) {
     this.device = ctx.device;
@@ -114,10 +123,8 @@ export class RayMarchRenderer implements Renderer {
       entries: [
         { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
-        { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
         { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
         { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
-        { binding: 6, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
         { binding: 7, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
         { binding: 8, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
         { binding: 9, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } }
@@ -171,7 +178,7 @@ export class RayMarchRenderer implements Renderer {
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
     });
     this.mipBuffer = this.makeMipBuffer(1);
-    this.bindGroup = this.makeBindGroup(this.placeholder, this.placeholder, this.placeholder, this.placeholder, this.placeholder, this.placeholder);
+    this.bindGroup = this.makeBindGroup(this.placeholder, this.placeholder, this.placeholder, this.placeholder);
     this.mipBindGroup = this.makeMipBindGroup(this.placeholder);
     this.resize();
   }
@@ -201,17 +208,15 @@ export class RayMarchRenderer implements Renderer {
     return this.module.getCompilationInfo();
   }
 
-  private makeBindGroup(volA: GPUTexture, volB: GPUTexture, volC: GPUTexture, finA: GPUTexture, finB: GPUTexture, finC: GPUTexture): GPUBindGroup {
+  private makeBindGroup(volA: GPUTexture, finA: GPUTexture, finB: GPUTexture, finC: GPUTexture): GPUBindGroup {
     return this.device.createBindGroup({
       label: 'raymarch-bg',
       layout: this.pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
         { binding: 1, resource: volA.createView({ dimension: '3d' }) },
-        { binding: 2, resource: volB.createView({ dimension: '3d' }) },
         { binding: 3, resource: this.sampler },
         { binding: 4, resource: { buffer: this.mipBuffer } },
-        { binding: 6, resource: volC.createView({ dimension: '3d' }) },
         { binding: 7, resource: finA.createView({ dimension: '3d' }) },
         { binding: 8, resource: finB.createView({ dimension: '3d' }) },
         { binding: 9, resource: finC.createView({ dimension: '3d' }) }
@@ -221,6 +226,8 @@ export class RayMarchRenderer implements Renderer {
 
   setVolumes(volumes: RenderVolumes): void {
     this.volumes = volumes;
+    this.lastFrameData = null;
+    this.mipDensityVersion = undefined;
     const m = mipDims(volumes.dims);
     const cells = m[0] * m[1] * m[2];
     if (cells !== this.mipSize[0] * this.mipSize[1] * this.mipSize[2] || this.mipBuffer.size < cells * 4) {
@@ -228,12 +235,12 @@ export class RayMarchRenderer implements Renderer {
       this.mipBuffer = this.makeMipBuffer(cells);
     }
     this.mipSize = m;
-    this.bindGroup = this.makeBindGroup(volumes.volA, volumes.volB, volumes.volC, volumes.finA, volumes.finB, volumes.finC);
+    this.bindGroup = this.makeBindGroup(volumes.volA, volumes.finA, volumes.finB, volumes.finC);
     this.mipBindGroup = this.makeMipBindGroup(volumes.volA);
   }
 
   resize(): boolean {
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR) * this.scale;
     const cssW = this.canvas.clientWidth || this.canvas.width / dpr || 1;
     const cssH = this.canvas.clientHeight || this.canvas.height / dpr || 1;
     const maxDim = this.device.limits.maxTextureDimension2D;
@@ -242,6 +249,7 @@ export class RayMarchRenderer implements Renderer {
     if (w === this.canvas.width && h === this.canvas.height) return false;
     this.canvas.width = w;
     this.canvas.height = h;
+    this.lastFrameData = null;
     return true;
   }
 
@@ -285,27 +293,28 @@ export class RayMarchRenderer implements Renderer {
     const m = this.mipSize;
     set4(15, m[0], m[1], m[2], MIP_BLOCK);
     // end-guide plates: plate top (a little above the settled bank), half depth in z, thickness, enabled
-    const guideTop = bankTopY(1) + 0.15;
-    set4(16, guideTop, GEOMETRY.bankHalfDepth, 0.012, this.endGuides ? 1 : 0);
+    set4(16, GUIDE_TOP, GEOMETRY.bankHalfDepth, 0.012, this.endGuides ? 1 : 0);
     // the colour raster's grid (design §3.5): node counts and cell size
     const cg = vol ? vol.fineDims : undefined;
     set4(17, cg ? cg.nx : 1, cg ? cg.ny : 1, cg ? cg.nz : 1, cg ? cg.h : hCell);
-    this.device.queue.writeBuffer(this.uniformBuffer, 0, u);
   }
 
   /** Rebuild the coarse max-density mip from the live volume (design §8: empty-space skipping). */
   private encodeMipPass(encoder: GPUCommandEncoder): void {
     if (!this.volumes) return;
+    const version = this.volumes.densityVersion;
+    if (version !== undefined && version === this.mipDensityVersion) return;
     const m = this.mipSize;
     const pass = encoder.beginComputePass({ label: 'raymarch-density-mip' });
     pass.setPipeline(this.mipPipeline);
     pass.setBindGroup(0, this.mipBindGroup);
     pass.dispatchWorkgroups(Math.ceil(m[0] / MIP_WG), Math.ceil(m[1] / MIP_WG), Math.ceil(m[2] / MIP_WG));
     pass.end();
+    this.mipDensityVersion = version;
   }
 
-  private encodePass(encoder: GPUCommandEncoder, info: RenderFrameInfo, view: GPUTextureView, w: number, h: number): void {
-    this.writeUniforms(info, w, h);
+  private encodePass(encoder: GPUCommandEncoder, view: GPUTextureView): void {
+    this.device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData);
     this.encodeMipPass(encoder);
     const pass = encoder.beginRenderPass({
       label: 'raymarch-pass',
@@ -318,6 +327,7 @@ export class RayMarchRenderer implements Renderer {
   }
 
   setPresentation(enabled: boolean): void {
+    if (enabled !== this.present) this.lastFrameData = null;
     this.present = enabled;
   }
 
@@ -334,11 +344,22 @@ export class RayMarchRenderer implements Renderer {
     return this.offscreen.createView();
   }
 
-  render(encoder: GPUCommandEncoder, info: RenderFrameInfo): void {
-    if (this.destroyed) return;
+  render(encoder: GPUCommandEncoder, info: RenderFrameInfo): boolean {
+    if (this.destroyed) return false;
     const w = Math.max(1, this.canvas.width), h = Math.max(1, this.canvas.height);
+    this.writeUniforms(info, w, h);
+    const version = this.volumes?.version;
+    // Uniforms include camera, lighting, roller poses, colour mode and size.
+    // camUp.w is reserved wall-clock time, currently unused by the shader.
+    // Unknown volume versions deliberately keep drawing for external callers.
+    if (version !== undefined && version === this.lastVolumeVersion && this.lastFrameData
+      && this.uniformData.every((v, i) => i === 11 || v === this.lastFrameData![i])) return false;
     const view = this.present ? this.context.getCurrentTexture().createView() : this.offscreenView(w, h);
-    this.encodePass(encoder, info, view, w, h);
+    this.encodePass(encoder, view);
+    if (!this.lastFrameData) this.lastFrameData = new Float32Array(UNIFORM_FLOATS);
+    this.lastFrameData.set(this.uniformData);
+    this.lastVolumeVersion = version;
+    return true;
   }
 
   /**
@@ -364,7 +385,8 @@ export class RayMarchRenderer implements Renderer {
     });
     try {
       const encoder = this.device.createCommandEncoder({ label: 'raymarch-offscreen' });
-      this.encodePass(encoder, info, target.createView(), w, h);
+      this.writeUniforms(info, w, h);
+      this.encodePass(encoder, target.createView());
       encoder.copyTextureToBuffer({ texture: target }, { buffer: readback, bytesPerRow, rowsPerImage: h }, { width: w, height: h });
       this.device.queue.submit([encoder.finish()]);
       await readback.mapAsync(GPUMapMode.READ);

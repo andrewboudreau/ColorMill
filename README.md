@@ -42,7 +42,10 @@ without WebGPU.
   few rounds turn stripes into a blend.
 - **Pigment.** The base is clear silicone. A tap sets a chunk of concentrated
   masterbatch down on the bank at one of six drop spots along the roll, in one
-  of three sizes, and chunks stack if you tap the same spot again.
+  of three sizes, and chunks stack if you tap the same spot again. Or stamp
+  a picture on the bank before milling: an image file, or a line of text
+  from the link (`?stamp=Hello&ink=naphtholRed`), pressed onto the putty's
+  surface for the rolls to pull in and streak.
 
 <table>
   <tr>
@@ -167,6 +170,7 @@ lays the same three bands on the bank.
 | Chunk-size dots (bottom bar) | Small, medium or large chunk for the next tap (also `-` / `=`, or `?chunk=s`, `m`, `l`) |
 | Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack) |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
+| **Stamp picture** | Press an image file onto the bank's surface (or drop an image on the mill); `?stamp=Hello&ink=red` stamps a line of text at the start |
 | **Cut & fold** / `C` | Cut the sheet across at the crown, lift the cut edge and flop it back onto the front roll; the sheet follows and the rolls pull the fold in. One to three passes a press ("Cut & fold passes" in the drawer; ends alternate) |
 | **Cut & roll** / `F` | Cut everything off, roll it into a log, fold the roll in half and drop it back on the nip (or lower it in: **Log feed** slider). **Long roll** (drawer checkbox, `?roll=long`) skips the fold and stands the full-length roll up as one, leaning further to fit |
 | **Clear pigment** | Reset every particle to clear silicone |

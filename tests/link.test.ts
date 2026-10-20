@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_PARAMS, PARAM_LIMITS } from '../src/config/mill';
 import {
   EXPERIMENTAL_SCALE, LINK_PARAM_KEYS, clampBatch, clampParam, formatMillQuery, isDefaultParam, millLink, paramMax,
-  parseExperimental, parseMillParams, parseMillStart
+  parseExperimental, parseInk, parseMillParams, parseMillStart
 } from '../src/config/link';
 
 describe('parseMillParams', () => {
@@ -57,6 +57,21 @@ describe('formatMillQuery / millLink', () => {
     expect(formatMillQuery({ roll: 'long' })).toBe('roll=long');
     expect(formatMillQuery({ roll: 'double' })).toBe('');
     expect(parseMillStart('?preset=insane&batch=x').preset).toBeUndefined();
+  });
+
+  it('carries a stamped line of text and its ink', () => {
+    expect(formatMillQuery({ stamp: 'Hello mill', ink: 'red' })).toBe('stamp=Hello%20mill&ink=naphtholRed');
+    expect(formatMillQuery({ stamp: 'Hi', ink: '#FF8A00' })).toBe('stamp=Hi&ink=ff8a00');
+    expect(formatMillQuery({ stamp: 'Hi', ink: 'nope' })).toBe('stamp=Hi');
+    expect(formatMillQuery({ stamp: '  ', ink: 'red' })).toBe('');
+    expect(formatMillQuery({ ink: 'red' })).toBe('');
+    const back = parseMillStart('?stamp=Hello%20mill&ink=ff8a00');
+    expect(back.stamp).toBe('Hello mill');
+    expect(back.ink).toBe('#ff8a00');
+    expect(parseMillStart('?stamp=Hi&ink=Carbon%20Black').ink).toBe('ivoryBlack');
+    expect(parseMillStart('?stamp=Hi&ink=zzz').ink).toBeUndefined();
+    expect(parseMillStart('')).not.toHaveProperty('stamp', expect.anything());
+    expect(parseInk('')).toBeUndefined();
   });
 
   it('keeps the linkable keys within the parameter table', () => {

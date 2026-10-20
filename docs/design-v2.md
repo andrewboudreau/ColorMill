@@ -396,6 +396,24 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
 - **Inject** kernel: `addPigment(center, radius, latent, strength)` blends
   particle latents inside the sphere: `z = mix(z, zPigment, strength·t)`,
   `t = 1 − |d|/radius`.
+- **Stamp** kernel (`stamp.wgsl`): `stampImage(image, placement)` presses a
+  picture onto the material seen from above. The image is a raster of up to
+  256 px a side, 8 floats per pixel (a latent and an opacity), mapped onto a
+  footprint `x0..x1 × z0..z1` on the bank (`fitStamp` in `src/stamp.ts` fits
+  the picture's aspect inside the bank's footprint between the end margins;
+  the top row goes to the back so it reads right from the front). `probeTop`
+  records per solver column (i, k) the highest particle under the footprint
+  (float bits, `atomicMax`), then `main` gives every particle within
+  `STAMP_DEPTH_CELLS` = 2.5 cells of its column's top the pixel it lies
+  under, `z = mix(z, zPixel, α·strength)`, and the masterbatch load, as
+  inject does. The surface is found fresh each stamp, so a picture lands on
+  the flat seeded bank (the use: a logo or a line of text laid on the putty
+  before the mill pulls it in and streaks it) and on whatever the material
+  has become. The app rasterises an image file (`Stamp picture`, or a file
+  dropped on the viewport) or a line of text (`?stamp=Hello&ink=naphtholRed`)
+  on a canvas, converts the pixels with mixbox.js once per distinct colour
+  (text in a palette pigment uses its latent directly), and stamps them; the
+  stamped text goes into the start link.
 - **Pigment load.** Each particle carries a pigment load in `pos.w` (clear
   base 0, a masterbatch chunk `PIGMENT_LOAD` = 12). The raster accumulates
   per node the mass, the load and the load-weighted latent; `pack` writes
@@ -723,7 +741,10 @@ so the renderer can be tested with a procedural volume without the sim.
   masterbatch chunk of the chosen radius set down on top of whatever is over
   the nip at the chosen slot, so repeated taps stack), a colour picker swatch,
   "Cut & roll",
-  "Cut & fold" (alternating sides), "Clear pigment", "Reset", Pause.
+  "Cut & fold" (alternating sides), "Stamp picture" (an image file pressed
+  onto the bank, §5; an image dropped on the viewport does the same, and
+  `?stamp=text&ink=pigment` stamps a line of text at the start), "Clear
+  pigment", "Reset", Pause.
 - Right drawer (collapsible; hidden by default on narrow screens): sliders
   for roller speed (rpm shown), friction ratio, nip gap, dispersion, gravity,
   back-roll friction, log feed (drop, or lower in at a speed; §6); an
@@ -753,7 +774,8 @@ src/gpu/device.ts               WebGPU init + capability report + fallback messa
 src/config/mill.ts              MillConfig, presets, geometry helpers (pure, tested)
 src/sim/types.ts                shared interfaces (GpuMpmSim API, snapshots, stats)
 src/sim/mpm.ts                  GpuMpmSim implementation
-src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, raster, disperse, pack, inject, fold
+src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, raster, disperse, pack, inject, stamp, fold
+src/stamp.ts                    stamping a picture on the bank: raster size, footprint, pixels to latents (pure, tested)
 src/render/renderer.ts          Renderer (ray-march), src/render/camera.ts
 src/render/shaders/raymarch.wgsl, mixbox.wgsl
 src/color/pigments.ts           palette latents + latentToRgb (TS mirror, tested)

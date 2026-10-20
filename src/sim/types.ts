@@ -62,6 +62,27 @@ export interface RenderVolumes {
   readonly fineDims: GridDims;
 }
 
+/**
+ * A picture to stamp onto the material: `width × height` pixels, row-major from the top-left, 8 floats per
+ * pixel: the Mixbox latent (7) and the pixel's opacity 0..1 (0 leaves the material alone).
+ */
+export interface StampImage {
+  readonly width: number;
+  readonly height: number;
+  readonly data: Float32Array;
+}
+
+/**
+ * Where a stamp lands, seen from above: the image's left and right edges at x0 / x1, its top row at z0 and its
+ * bottom row at z1. The back of the bank is the smaller z, so with z0 < z1 the picture reads right from the front.
+ */
+export interface StampPlacement {
+  readonly x0: number;
+  readonly x1: number;
+  readonly z0: number;
+  readonly z1: number;
+}
+
 export interface GpuMpmSimOptions {
   readonly device: GPUDevice;
   readonly config: MillConfig;
@@ -105,6 +126,13 @@ export interface GpuMpmSim {
   addPigmentChunk(x: number, z: number, radius: number, latent: Latent): Promise<number>;
   /** Set every particle's pigment back to the base latent. */
   clearPigment(): void;
+  /**
+   * Stamp a picture onto the material seen from above: every particle under the image's footprint that lies
+   * within `depth` (sim units; default 2.5 cells) of the top of its column takes the pixel's latent, blended by
+   * the pixel's opacity times `strength` (default 1), and a masterbatch pigment load. The surface is found on
+   * the GPU per column, so it works on the flat seeded bank and on whatever the material has become (design §5).
+   */
+  stampImage(image: StampImage, place: StampPlacement, options?: { depth?: number; strength?: number }): void;
   /** Start the scripted operator move: cut the sheet off the front roll, roll it into a log, turn it and set it on the bank (design §6). No-op if one is running. */
   cutAndFold(): void;
   /** Start the other operator move: cut the sheet across at the crown of the front roll and take the cut edge
@@ -161,6 +189,10 @@ export interface DebugApi {
   startLink(): string;
   /** Set the chunks down in sequence (each awaited so they stack), as the ?drops= parameter does at boot. Does not change the current slot/size selection. */
   applyDrops(drops: readonly Drop[]): Promise<void>;
+  /** Stamp a line of text on the bank, as ?stamp= does at boot (`ink`: a pigment name or '#rrggbb'; black by default). */
+  stampText(text: string, ink?: string): void;
+  /** Stamp a picture of latents on the bank (sim.stampImage, fitted to the bank when `place` is omitted). */
+  stampImage(image: StampImage, place?: StampPlacement): void;
   /** Switch preset (rebuilds the sim), resolves when ready */
   setQuality(preset: 'low' | 'medium' | 'high' | 'ultra'): Promise<void>;
   /** Render the current frame offscreen and return RGBA8 pixels (works where canvas presentation does not). */

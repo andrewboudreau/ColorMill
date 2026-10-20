@@ -108,13 +108,12 @@ export default async function run() {
     // every particle under the footprint within STAMP_DEPTH_CELLS of the top of its solver column takes
     // its pixel's latent; nothing outside the footprint or deeper down changes
     // the picture fitted inside the bank's footprint and the depth it reaches (mirrors src/stamp.ts fitStamp and
-    // STAMP_DEPTH_CELLS, which Node cannot import here)
-    const STAMP_DEPTH_CELLS = 2.5;
+    // stampDepth, which Node cannot import here)
+    const stampDepth = Math.max(0.06, 1.5 * dims.h);
     const foot = { x0: GEOMETRY.bankEndMargin, x1: GEOMETRY.length - GEOMETRY.bankEndMargin, z0: GEOMETRY.nipZ - GEOMETRY.bankHalfDepth, z1: GEOMETRY.nipZ + GEOMETRY.bankHalfDepth };
     let stampW = foot.x1 - foot.x0, stampD = stampW / 2;
     if (stampD > foot.z1 - foot.z0) { stampD = foot.z1 - foot.z0; stampW = 2 * stampD; }
     const place = { x0: GEOMETRY.length / 2 - stampW / 2, x1: GEOMETRY.length / 2 + stampW / 2, z0: GEOMETRY.nipZ - stampD / 2, z1: GEOMETRY.nipZ + stampD / 2 };
-    const stampDepth = STAMP_DEPTH_CELLS * dims.h;
     const stamped = await page.evaluate(async ([blue, red, place]) => {
       const data = new Float32Array(16);
       data.set(blue, 0); data[7] = 1;
@@ -152,7 +151,7 @@ export default async function run() {
         if (left ? !isBlue(rgb) : !isRed(rgb)) wrongColour++;
       }
     }
-    console.log(`  stamp ${JSON.stringify(place)}: ${changedAll} particles took the picture (${hit} of the ${expected} expected in the top ${STAMP_DEPTH_CELLS} cells; ${stray} outside the footprint, ${deep} too deep, ${wrongColour} the wrong colour)`);
+    console.log(`  stamp ${JSON.stringify(place)}: ${changedAll} particles took the picture (${hit} of the ${expected} expected in the top ${stampDepth.toFixed(3)}; ${stray} outside the footprint, ${deep} too deep, ${wrongColour} the wrong colour)`);
     assert(expected > 0.02 * snap0.count && expected < 0.3 * snap0.count, `the surface band under the stamp is a few percent of the batch (${expected} of ${snap0.count})`);
     assert(hit >= 0.95 * expected, `the stamp reached the surface band (${hit} of ${expected})`);
     assert(stray === 0 && deep === 0, `nothing outside the footprint (${stray}) or below the band (${deep}) changed`);

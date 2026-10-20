@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GEOMETRY } from '../src/config/mill';
 import { PIGMENTS } from '../src/color/pigments';
 import {
-  STAMP_FLOATS_PER_PIXEL, STAMP_MAX_PIXELS, STAMP_MAX_SIDE, STAMP_TEXT_MAX, bankFootprint, fitStamp, parseStampText, rgbaToStamp, stampDims, stampFromLatents
+  STAMP_DEPTH, STAMP_FLOATS_PER_PIXEL, STAMP_MAX_PIXELS, STAMP_MAX_SIDE, STAMP_TEXT_MAX, bankFootprint, fitStamp, parseStampText, rgbaToStamp, stampDepth, stampDims, stampFromLatents
 } from '../src/stamp';
 
 describe('stampDims', () => {
@@ -98,5 +98,12 @@ describe('parseStampText', () => {
     expect(parseStampText('  hello   mill \n')).toBe('hello mill');
     expect(parseStampText(null)).toBe('');
     expect(parseStampText('x'.repeat(100))).toHaveLength(STAMP_TEXT_MAX);
+  });
+});
+
+describe('stampDepth', () => {
+  it('is a fixed print layer, but never thinner than a cell and a half', () => {
+    expect(stampDepth(1 / 64)).toBeCloseTo(STAMP_DEPTH);
+    expect(stampDepth(1 / 16)).toBeCloseTo(1.5 / 16);
   });
 });

@@ -20,7 +20,7 @@ import {
 import type {
   GpuMpmSim, GpuMpmSimOptions, Latent, ParticleSnapshot, RenderVolumes, SimStats, StampImage, StampPlacement
 } from './types';
-import { STAMP_DEPTH_CELLS, STAMP_FLOATS_PER_PIXEL, STAMP_MAX_PIXELS } from '../stamp';
+import { STAMP_FLOATS_PER_PIXEL, STAMP_MAX_PIXELS, stampDepth } from '../stamp';
 import commonSrc from './shaders/common.wgsl?raw';
 import clearSrc from './shaders/clear.wgsl?raw';
 import p2gSrc from './shaders/p2g.wgsl?raw';
@@ -941,7 +941,7 @@ export class GpuMpm implements GpuMpmSim {
     if (data.length < STAMP_FLOATS_PER_PIXEL * n) throw new Error(`stampImage: ${data.length} floats for ${n} pixels`);
     const w = place.x1 - place.x0, d = place.z1 - place.z0;
     if (!(w > 0 && d > 0)) throw new Error('stampImage: the placement needs x0 < x1 and z0 < z1');
-    const depth = options.depth ?? STAMP_DEPTH_CELLS * this.dims.h;
+    const depth = options.depth ?? stampDepth(this.dims.h);
     const info = new Float32Array(12);
     info.set([place.x0, place.z0, 1 / w, 1 / d], 0);
     new Uint32Array(info.buffer).set([width, height, 0, 0], 4);

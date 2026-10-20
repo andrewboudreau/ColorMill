@@ -128,7 +128,7 @@ export interface GpuMpmSim {
   clearPigment(): void;
   /**
    * Stamp a picture onto the material seen from above: every particle under the image's footprint that lies
-   * within `depth` (sim units; default 2.5 cells) of the top of its column takes the pixel's latent, blended by
+   * within `depth` (sim units; default STAMP_DEPTH = 0.06, at least 1.5 cells) of the top of its column takes the pixel's latent, blended by
    * the pixel's opacity times `strength` (default 1), and a masterbatch pigment load. The surface is found on
    * the GPU per column, so it works on the flat seeded bank and on whatever the material has become (design §5).
    */

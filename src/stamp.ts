@@ -21,8 +21,15 @@ export const STAMP_MAX_PIXELS = STAMP_MAX_SIDE * STAMP_MAX_SIDE;
 export const STAMP_FLOATS_PER_PIXEL = 8;
 /** Longest line of text `?stamp=` takes (kept short so it stays readable across the bank). */
 export const STAMP_TEXT_MAX = 40;
-/** How deep a stamp goes below the surface, in cells: enough particle layers to read as solid from above. */
-export const STAMP_DEPTH_CELLS = 2.5;
+/** How deep a stamp goes below the surface (sim units, ~1 cm at UNIT_METRES): a print layer the mill thins into streaks. */
+export const STAMP_DEPTH = 0.06;
+/** The least depth in cells, so a coarse grid still has enough particle layers to read as solid from above. */
+export const STAMP_DEPTH_MIN_CELLS = 1.5;
+
+/** The depth a stamp reaches at cell size h: STAMP_DEPTH, but at least STAMP_DEPTH_MIN_CELLS cells. */
+export function stampDepth(h: number): number {
+  return Math.max(STAMP_DEPTH, STAMP_DEPTH_MIN_CELLS * h);
+}
 
 /** Raster size a picture is scaled to before stamping: at most `maxSide` on its longer side, never upscaled, at least 1×1. */
 export function stampDims(width: number, height: number, maxSide = STAMP_MAX_SIDE): { width: number; height: number } {

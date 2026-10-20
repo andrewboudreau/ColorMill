@@ -404,7 +404,7 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   the top row goes to the back so it reads right from the front). `probeTop`
   records per solver column (i, k) the highest particle under the footprint
   (float bits, `atomicMax`), then `main` gives every particle within
-  `STAMP_DEPTH_CELLS` = 2.5 cells of its column's top the pixel it lies
+  `STAMP_DEPTH` = 0.06 (about 1 cm; at least 1.5 cells) of its column's top the pixel it lies
   under, `z = mix(z, zPixel, α·strength)`, and the masterbatch load, as
   inject does. The surface is found fresh each stamp, so a picture lands on
   the flat seeded bank (the use: a logo or a line of text laid on the putty

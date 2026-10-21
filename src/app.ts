@@ -15,16 +15,17 @@
  * the drawer produces such a link from the session's drop log).
  */
 import './styles.css';
-import { BASE_LATENT, findPigment, rgbToLatentAsync } from './color/pigments';
+import { BASE_LATENT, PIGMENTS, findPigment, loadMixbox, rgbToLatentAsync } from './color/pigments';
 import { parseDrops, type Drop } from './drops';
-import { clampParam, formatMillQuery, parseExperimental, parseMillParams, parseRollStyle } from './config/link';
+import { clampParam, formatMillQuery, parseExperimental, parseInk, parseMillParams, parseRollStyle } from './config/link';
+import { fitStamp, parseStampText, rgbaToStamp, stampDims } from './stamp';
 import {
   BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres,
   type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
 import type { CameraState, Renderer } from './render/types';
-import type { DebugApi, GpuMpmSim, Latent, ParticleSnapshot, SimStats } from './sim/types';
+import type { DebugApi, GpuMpmSim, Latent, ParticleSnapshot, SimStats, StampImage } from './sim/types';
 import { Hud } from './ui/hud';
 import { installKeyboard } from './ui/keys';
 import { installOrbitControls, type OrbitControls } from './ui/orbit';
@@ -164,6 +165,9 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   let experimental = parseExperimental(query);
   // cut & roll: the roll folded in half before feeding (default) or kept long (?roll=long)
   let longRoll = parseRollStyle(query) === 'long';
+  // a line of text stamped on the bank once it is up (?stamp=Hello&ink=naphtholRed); the last stamp goes in the start link
+  let stampedText = parseStampText(query.get('stamp'));
+  let stampedInk = parseInk(query.get('ink'));
   // mill parameters from the URL (?gap=0.06&omega=2 …; src/config/link.ts), the rest default
   const initialParams: MillParams = { ...DEFAULT_PARAMS, ...parseMillParams(query, experimental) };
   // the preset goes into the start link when it was chosen on purpose (URL or panel), not auto-selected
@@ -315,8 +319,9 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
 
   /** index.html URL that reproduces this session's start: the drop log, plus batch/preset when set. */
   const startLink = (): string => {
-    // drops, batch, preset (when pinned) and every mill parameter that differs from its default
-    const settings = formatMillQuery({ experimental, drops: dropLog, batch, preset: presetPinned ? preset : undefined, params: sim ? sim.params : initialParams, roll: longRoll ? 'long' : 'double' });
+    // drops, batch, preset (when pinned), the stamped text and every mill parameter that differs from its default
+    const settings = formatMillQuery({ experimental, drops: dropLog, batch, preset: presetPinned ? preset : undefined, params: sim ? sim.params : initialParams, roll: longRoll ? 'long' : 'double',
+      stamp: stampedText, ink: stampedInk });
     const q = settings + (renderScale !== 1 ? `${settings ? '&' : ''}scale=${renderScale}` : '');
     return `${location.origin}${location.pathname}${q ? `?${q}` : ''}`;
   };
@@ -330,6 +335,93 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     if (write) write.then(() => hud.showHint(`Link copied: ${what}`, 4000)).catch(fallback);
     else fallback();
   };
+  // --- stamping a picture on the bank ----------------------------------------------
+  /** Stamp a raster of latents on the bank (fitted to its footprint unless `place` says where). */
+  const stampImage = (image: StampImage, place = fitStamp(image.width, image.height)): void => {
+    if (!sim) return;
+    sim.stampImage(image, place);
+  };
+  /** Draw `source` at stamp resolution, convert the pixels to latents with mixbox.js and stamp them on the bank. */
+  const stampPixels = async (source: CanvasImageSource, width: number, height: number, what: string): Promise<void> => {
+    const dims = stampDims(width, height);
+    const cv = document.createElement('canvas');
+    cv.width = dims.width;
+    cv.height = dims.height;
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    if (!g) throw new Error('no 2D canvas to rasterise the picture');
+    g.drawImage(source, 0, 0, dims.width, dims.height);
+    const px = g.getImageData(0, 0, dims.width, dims.height).data;
+    const mb = await loadMixbox();
+    const image = rgbaToStamp(px, dims.width, dims.height, (r, gg, b) => mb.floatRgbToLatent(r, gg, b) ?? BASE_LATENT);
+    if (!sim) return;
+    stampImage(image);
+    hud.showHint(`Stamped ${what} on the bank (${dims.width}×${dims.height})${sim.paused ? ': press Play to mill it' : ''}`, 4000);
+  };
+  /** Stamp an image file the operator picked or dropped on the mill. */
+  const stampFile = (file: File): void => {
+    if (!file.type.startsWith('image/')) { hud.showHint(`${file.name || 'That file'} is not an image`, 3000); return; }
+    hud.setError(null);
+    createImageBitmap(file)
+      .then((bmp) => stampPixels(bmp, bmp.width, bmp.height, file.name || 'the picture').finally(() => bmp.close()))
+      .catch((e) => reportError('Stamp failed', e));
+  };
+  /** Stamp a line of text (bold, one colour) across the bank: a pigment name or '#rrggbb' as the ink, black by default. */
+  const stampText = (text: string, ink?: string): void => {
+    const line = parseStampText(text);
+    if (!line || !sim) return;
+    const cv = document.createElement('canvas');
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    if (!g) throw new Error('no 2D canvas to draw the text');
+    const font = 'bold 96px system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+    g.font = font;
+    const m = g.measureText(line);
+    const pad = 12;
+    const w = Math.ceil(m.width) + 2 * pad;
+    const h = Math.ceil((m.actualBoundingBoxAscent || 72) + (m.actualBoundingBoxDescent || 24)) + 2 * pad;
+    cv.width = w;
+    cv.height = h;
+    g.font = font;
+    g.textBaseline = 'alphabetic';
+    g.fillStyle = '#000';
+    g.fillText(line, pad, pad + (m.actualBoundingBoxAscent || 72));
+    const key = parseInk(ink);
+    const pigment = key ? findPigment(key) : undefined;
+    const latent = pigment?.latent ?? PIGMENTS.ivoryBlack.latent;
+    const done = (): void => {
+      stampedText = line;
+      stampedInk = key;
+      hud.showHint(`Stamped "${line}" on the bank${sim?.paused ? ': press Play to mill it' : ''}`, 4000);
+    };
+    if (pigment || !key) {
+      // one colour: no need for mixbox, the pixels' alpha carries the lettering
+      const dims = stampDims(w, h);
+      const small = document.createElement('canvas');
+      small.width = dims.width;
+      small.height = dims.height;
+      const sg = small.getContext('2d', { willReadFrequently: true });
+      if (!sg) throw new Error('no 2D canvas to rasterise the text');
+      sg.drawImage(cv, 0, 0, dims.width, dims.height);
+      const px = sg.getImageData(0, 0, dims.width, dims.height).data;
+      stampImage(rgbaToStamp(px, dims.width, dims.height, () => latent));
+      done();
+      return;
+    }
+    // a custom hex colour: draw in it and let mixbox convert
+    g.fillStyle = key;
+    g.fillText(line, pad, pad + (m.actualBoundingBoxAscent || 72));
+    stampPixels(cv, w, h, `"${line}"`).then(done).catch((e) => reportError('Stamp failed', e));
+  };
+  // an image file dragged onto the mill is stamped on the bank
+  canvas.addEventListener('dragover', (ev) => {
+    if (ev.dataTransfer?.types.includes('Files')) { ev.preventDefault(); ev.dataTransfer.dropEffect = 'copy'; }
+  });
+  canvas.addEventListener('drop', (ev) => {
+    const f = ev.dataTransfer?.files?.[0];
+    if (!f) return;
+    ev.preventDefault();
+    stampFile(f);
+  });
+
   const withSim = (what: string, fn: (s: GpuMpmSim) => void): void => {
     if (!sim) return;
     try { fn(sim); } catch (e) { reportError(what, e); }
@@ -357,6 +449,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       void injectLatent(p?.latent ?? BASE_LATENT, undefined, undefined, p?.key);
     },
     onCutFlop: cutFlop,
+    onStampFile: stampFile,
     onSlot: (i) => {
       dropSlot = i;
       hud.showHint(`Pigment drops at slot ${i + 1} of ${DROP_SLOTS} (left to right along the roll)`, 2500);
@@ -368,7 +461,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     },
     onCutFold: () => withSim('cutAndFold failed', (s) => s.cutAndFold()),
     onClear: () => withSim('clearPigment failed', (s) => s.clearPigment()),
-    onReset: () => withSim('reset failed', (s) => { s.reset(); dropLog.length = 0; hud.setError(null); }),
+    onReset: () => withSim('reset failed', (s) => { s.reset(); dropLog.length = 0; stampedText = ''; stampedInk = undefined; hud.setError(null); }),
     onTogglePause: togglePause
   }, undefined, dropSlot, chunkSize);
 
@@ -380,7 +473,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   };
   const removeKeys = installKeyboard(window, {
     togglePause,
-    reset: () => withSim('reset failed', (s) => { s.reset(); dropLog.length = 0; }),
+    reset: () => withSim('reset failed', (s) => { s.reset(); dropLog.length = 0; stampedText = ''; stampedInk = undefined; }),
     cutFold: () => withSim('cutAndFold failed', (s) => s.cutAndFold()),
     cutFlop,
     pigment: (i) => { const key = palette.order[i]; if (key) tapPigment(key); },
@@ -652,6 +745,8 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     get dropLog(): readonly Drop[] { return dropLog; },
     startLink,
     applyDrops,
+    stampText,
+    stampImage,
     setQuality,
     async screenshot() {
       const r = renderer as Renderer;
@@ -684,6 +779,10 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   canvas.focus({ preventScroll: true });
   rafId = requestAnimationFrame(frame);
 
+  // ?stamp=: the linked text on the bank now that it is up
+  if (stampedText) {
+    try { stampText(stampedText, stampedInk); } catch (e) { reportError('Could not stamp the linked text', e); }
+  }
   // ?drops=: set the linked chunks down now that the bank is up (each awaited so they stack)
   if (initialDrops.length) {
     const n = initialDrops.length;

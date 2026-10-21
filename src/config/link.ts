@@ -17,7 +17,9 @@
  * guaranteed stable up there (a fixed substep against a much faster roll),
  * which is the point of the mode.
  */
+import { findPigment } from '../color/pigments';
 import { formatDrops, parseDrops, type Drop } from '../drops';
+import { parseStampText } from '../stamp';
 import {
   BATCH_LIMITS, DEFAULT_PARAMS, PARAM_LIMITS, QUALITY_PRESETS, omegaToRpm, type MillParams, type QualityPreset, type RollStyle } from './mill';
 
@@ -54,6 +56,10 @@ export interface MillStart {
   params: Partial<MillParams>;
   /** cut & roll puts the roll back doubled (default) or as one long roll (?roll=long) */
   roll?: RollStyle;
+  /** a line of text stamped on the bank at the start (?stamp=), '' or absent for none */
+  stamp?: string;
+  /** the stamp's colour (?ink=): a pigment name or '#rrggbb'; absent for black */
+  ink?: string;
 }
 
 /** `?roll=long` for the long single roll; anything else is the doubled roll. */
@@ -128,8 +134,20 @@ export function parseMillStart(search: string | URLSearchParams): MillStart {
     batch: clampBatch(parseFloat(q.get('batch') ?? '')),
     preset: isPreset(preset) ? preset : undefined,
     params: parseMillParams(q, experimental),
-    roll: parseRollStyle(q)
+    roll: parseRollStyle(q),
+    stamp: parseStampText(q.get('stamp')) || undefined,
+    ink: parseInk(q.get('ink'))
   };
+}
+
+/** `?ink=`: a pigment name / alias or a hex colour, normalised ('#rrggbb' lowercase); undefined when unusable. */
+export function parseInk(raw: string | null | undefined): string | undefined {
+  const t = (raw ?? '').trim();
+  if (!t) return undefined;
+  const p = findPigment(t);
+  if (p) return p.key;
+  const m = /^#?([0-9a-f]{6})$/i.exec(t);
+  return m ? `#${m[1].toLowerCase()}` : undefined;
 }
 
 function fmtNum(v: number): string {
@@ -154,6 +172,12 @@ export function formatMillQuery(start: Partial<MillStart>, extra: readonly (read
   if (start.batch !== undefined && Math.abs(start.batch - 1) > 1e-9) parts.push(`batch=${fmtNum(clampBatch(start.batch))}`);
   if (start.preset) parts.push(`preset=${start.preset}`);
   if (start.roll === 'long') parts.push('roll=long');
+  const stamp = parseStampText(start.stamp);
+  if (stamp) {
+    parts.push(`stamp=${encodeURIComponent(stamp)}`);
+    const ink = parseInk(start.ink);
+    if (ink) parts.push(`ink=${ink.replace('#', '')}`);
+  }
   const p = start.params ?? {};
   for (const key of LINK_PARAM_KEYS) {
     const v = p[key];

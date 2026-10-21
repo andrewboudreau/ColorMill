@@ -104,6 +104,59 @@ export default async function run() {
     const a0 = analyse(snap0, dims);
     assert(a0.bad === 0 && a0.outside === 0 && a0.inRoller === 0, `initial state sane (${JSON.stringify(a0)})`);
 
+    // --- 0. stamp: a two-pixel picture (blue | red) pressed onto the flat seeded bank ---------
+    // every particle under the footprint within STAMP_DEPTH_CELLS of the top of its solver column takes
+    // its pixel's latent; nothing outside the footprint or deeper down changes
+    // the picture fitted inside the bank's footprint and the depth it reaches (mirrors src/stamp.ts fitStamp and
+    // stampDepth, which Node cannot import here)
+    const stampDepth = Math.max(0.06, 1.5 * dims.h);
+    const foot = { x0: GEOMETRY.bankEndMargin, x1: GEOMETRY.length - GEOMETRY.bankEndMargin, z0: GEOMETRY.nipZ - GEOMETRY.bankHalfDepth, z1: GEOMETRY.nipZ + GEOMETRY.bankHalfDepth };
+    let stampW = foot.x1 - foot.x0, stampD = stampW / 2;
+    if (stampD > foot.z1 - foot.z0) { stampD = foot.z1 - foot.z0; stampW = 2 * stampD; }
+    const place = { x0: GEOMETRY.length / 2 - stampW / 2, x1: GEOMETRY.length / 2 + stampW / 2, z0: GEOMETRY.nipZ - stampD / 2, z1: GEOMETRY.nipZ + stampD / 2 };
+    const stamped = await page.evaluate(async ([blue, red, place]) => {
+      const data = new Float32Array(16);
+      data.set(blue, 0); data[7] = 1;
+      data.set(red, 8); data[15] = 1;
+      window.__solver.sim.stampImage({ width: 2, height: 1, data }, place);
+      const s = await window.__solver.snapshot();
+      return { count: s.count, positions: Array.from(s.positions), latents: Array.from(s.latents), error: window.__solver.error };
+    }, [BLUE, RED, place]);
+    assert(!stamped.error && stamped.count === snap0.count, 'stamp ran without WebGPU errors: ' + stamped.error);
+    const colOf = (x, z) => Math.floor(z / dims.h) * dims.nx + Math.floor(x / dims.h);
+    const underStamp = (x, z) => x >= place.x0 && x < place.x1 && z >= place.z0 && z < place.z1;
+    const colTop = new Map();
+    for (let p = 0; p < snap0.count; p++) {
+      const x = snap0.positions[3 * p], y = snap0.positions[3 * p + 1], z = snap0.positions[3 * p + 2];
+      if (!underStamp(x, z)) continue;
+      const c = colOf(x, z);
+      colTop.set(c, Math.max(colTop.get(c) ?? 0, y));
+    }
+    const isBlue = ([r, g, b]) => b > g + 0.1 && b > r + 0.1;
+    const isRed = ([r, g, b]) => r > g + 0.1 && r > b + 0.1;
+    let expected = 0, hit = 0, stray = 0, deep = 0, wrongColour = 0, changedAll = 0;
+    for (let p = 0; p < snap0.count; p++) {
+      let d = 0;
+      for (let c = 0; c < 7; c++) d += Math.abs(stamped.latents[7 * p + c] - snap0.latents[7 * p + c]);
+      const changed = d > 1e-3;
+      if (changed) changedAll++;
+      const x = snap0.positions[3 * p], y = snap0.positions[3 * p + 1], z = snap0.positions[3 * p + 2];
+      if (!underStamp(x, z)) { if (changed) stray++; continue; }
+      const top = colTop.get(colOf(x, z));
+      if (y > top - stampDepth + 1e-4) { expected++; if (changed) hit++; }
+      else if (changed && y < top - stampDepth - 1e-4) deep++;
+      if (changed) {
+        const rgb = latentToRgb(stamped.latents.slice(7 * p, 7 * p + 7));
+        const left = x < 0.5 * (place.x0 + place.x1);
+        if (left ? !isBlue(rgb) : !isRed(rgb)) wrongColour++;
+      }
+    }
+    console.log(`  stamp ${JSON.stringify(place)}: ${changedAll} particles took the picture (${hit} of the ${expected} expected in the top ${stampDepth.toFixed(3)}; ${stray} outside the footprint, ${deep} too deep, ${wrongColour} the wrong colour)`);
+    assert(expected > 0.02 * snap0.count && expected < 0.3 * snap0.count, `the surface band under the stamp is a few percent of the batch (${expected} of ${snap0.count})`);
+    assert(hit >= 0.95 * expected, `the stamp reached the surface band (${hit} of ${expected})`);
+    assert(stray === 0 && deep === 0, `nothing outside the footprint (${stray}) or below the band (${deep}) changed`);
+    assert(wrongColour < 0.01 * changedAll + 1, `left half blue, right half red (${wrongColour} wrong)`);
+
     // --- 1. stability run ------------------------------------------------
     const warm = await page.evaluate(async () => { await window.__solver.stepFrames(5); return window.__solver.msPerFrame; });
     console.log(`  per-frame wall time (5 warm-up frames): ${warm.toFixed(0)} ms`);

@@ -18,8 +18,9 @@ import {
   type GridDims, type MillConfig, type MillParams, type QualitySettings, type RollStyle
 } from '../config/mill';
 import type {
-  GpuMpmSim, GpuMpmSimOptions, Latent, ParticleSnapshot, RenderVolumes, SimStats
+  GpuMpmSim, GpuMpmSimOptions, Latent, ParticleSnapshot, RenderVolumes, SimStats, StampImage, StampPlacement
 } from './types';
+import { STAMP_FLOATS_PER_PIXEL, STAMP_MAX_PIXELS, stampDepth } from '../stamp';
 import commonSrc from './shaders/common.wgsl?raw';
 import clearSrc from './shaders/clear.wgsl?raw';
 import p2gSrc from './shaders/p2g.wgsl?raw';
@@ -31,6 +32,7 @@ import packSrc from './shaders/pack.wgsl?raw';
 import injectSrc from './shaders/inject.wgsl?raw';
 import resetSrc from './shaders/reset.wgsl?raw';
 import foldSrc from './shaders/fold.wgsl?raw';
+import stampSrc from './shaders/stamp.wgsl?raw';
 
 /** Titanium White base latent (src/sim/mixbox.c MB_WHITE). */
 export const WHITE_LATENT: Latent = [0, 0, 0, 1, 0.00481862, 0.00021851, 0.00295198];
@@ -258,6 +260,10 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufInject: GPUBuffer;
   private readonly bufInjectAll: GPUBuffer;
   private readonly bufProbe: GPUBuffer;
+  // stamp (stamp.wgsl): the picture's latents, the per-column surface, its uniform
+  private readonly bufStamp: GPUBuffer;
+  private readonly bufStampTop: GPUBuffer;
+  private readonly bufStampInfo: GPUBuffer;
   private readonly uniformSlots: number;
   private readonly volA: GPUTexture;
   private volumeVersion = 0;
@@ -368,6 +374,9 @@ export class GpuMpm implements GpuMpmSim {
     this.bufInject = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bufInjectAll = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bufProbe = device.createBuffer({ label: 'GpuMpm-probe', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+    this.bufStamp = device.createBuffer({ label: 'GpuMpm-stamp', size: 4 * STAMP_FLOATS_PER_PIXEL * STAMP_MAX_PIXELS, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.bufStampTop = device.createBuffer({ label: 'GpuMpm-stamp-top', size: 4 * this.dims.nx * this.dims.nz, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.bufStampInfo = device.createBuffer({ label: 'GpuMpm-stamp-info', size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
     const texUsage = GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC;
     this.volA = device.createTexture({ size: [d.nx, d.ny, d.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'volA' });
@@ -477,6 +486,8 @@ export class GpuMpm implements GpuMpmSim {
     const clearMod = mod('clear', clearSrc);
     const foldMod = mod('fold', foldSrc);
     const injectMod = mod('inject', injectSrc);
+    const stampMod = mod('stamp', stampSrc);
+    const stampRes: Resource[] = [{ kind: 'uniform', buffer: this.bufStampInfo }, rw(this.bufPos), rw(this.bufLat), rw(this.bufStampTop), ro(this.bufStamp)];
     const clearRes = [rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGVel), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)];
     const foldRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags), rw(this.bufFold),
       rw(this.bufFoldInfo), ro(this.bufPMass), rw(this.bufFoldTables)];
@@ -515,6 +526,8 @@ export class GpuMpm implements GpuMpmSim {
       inject: this.makeKernel('inject', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
       probe: this.makeKernel('probe', injectMod, 'probeColumn', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
       injectAll: this.makeKernel('injectAll', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInjectAll }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
+      stampProbe: this.makeKernel('stampProbe', stampMod, 'probeTop', stampRes),
+      stamp: this.makeKernel('stamp', stampMod, 'main', stampRes),
       reset: this.makeKernel('reset', mod('reset', resetSrc), 'main',
         [rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags)]),
       foldSelect: this.makeKernel('foldSelect', foldMod, 'select_', foldRes),
@@ -922,6 +935,32 @@ export class GpuMpm implements GpuMpmSim {
     this.runParticleKernel(this.kernels.injectAll);
   }
 
+  stampImage(image: StampImage, place: StampPlacement, options: { depth?: number; strength?: number } = {}): void {
+    if (this.destroyed) return;
+    const { width, height, data } = image;
+    const n = width * height;
+    if (!(width >= 1 && height >= 1) || n > STAMP_MAX_PIXELS) throw new Error(`stampImage: ${width}×${height} pixels, at most ${STAMP_MAX_PIXELS}`);
+    if (data.length < STAMP_FLOATS_PER_PIXEL * n) throw new Error(`stampImage: ${data.length} floats for ${n} pixels`);
+    const w = place.x1 - place.x0, d = place.z1 - place.z0;
+    if (!(w > 0 && d > 0)) throw new Error('stampImage: the placement needs x0 < x1 and z0 < z1');
+    const depth = options.depth ?? stampDepth(this.dims.h);
+    const info = new Float32Array(12);
+    info.set([place.x0, place.z0, 1 / w, 1 / d], 0);
+    new Uint32Array(info.buffer).set([width, height, 0, 0], 4);
+    info.set([Math.max(depth, 0), options.strength ?? 1, 0, 0], 8);
+    const q = this.device.queue;
+    q.writeBuffer(this.bufStampInfo, 0, info);
+    q.writeBuffer(this.bufStamp, 0, data, 0, STAMP_FLOATS_PER_PIXEL * n);
+    q.writeBuffer(this.bufStampTop, 0, new Uint32Array(this.dims.nx * this.dims.nz));
+    const enc = this.device.createCommandEncoder({ label: 'GpuMpm-stamp' });
+    const pass = enc.beginComputePass();
+    this.dispatchParticles(pass, this.kernels.stampProbe, 0);
+    this.dispatchParticles(pass, this.kernels.stamp, 0);
+    this.encodeFrameKernels(pass, 0, false);
+    pass.end();
+    q.submit([enc.finish()]);
+  }
+
   /** Submit a standalone particle kernel followed by a raster+pack so the volume reflects it. */
   private runParticleKernel(k: Kernel): void {
     const enc = this.device.createCommandEncoder({ label: `GpuMpm-${k.name}` });
@@ -1037,7 +1076,8 @@ export class GpuMpm implements GpuMpmSim {
     if (this.destroyed) return;
     this.destroyed = true;
     for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufFold, this.bufFoldInfo, this.bufFoldTables,
-      this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll, this.bufProbe, this.bufPLoad]) {
+      this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll, this.bufProbe, this.bufPLoad,
+      this.bufStamp, this.bufStampTop, this.bufStampInfo]) {
       b.destroy();
     }
     this.readbackStaging?.destroy();

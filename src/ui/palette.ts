@@ -2,7 +2,7 @@
  * Bottom bar: the drop-slot strip (where along the roll the next tap lands),
  * large round pigment swatches (tap = inject), a custom colour swatch backed
  * by <input type="color">, and the action buttons (Cut & roll, Cut & fold,
- * Clear pigment, Reset, Pause/Play).
+ * Stamp picture, Clear pigment, Reset, Pause/Play).
  */
 import { PALETTE_ORDER, PIGMENTS } from '../color/pigments';
 import { DROP_SLOTS, PIGMENT_CHUNK_SIZES } from '../config/mill';
@@ -18,6 +18,8 @@ export interface PaletteCallbacks {
   onCutFold(): void;
   /** cut the sheet at the middle and flop one half over onto the other (sides alternate) */
   onCutFlop(): void;
+  /** the operator picked a picture to stamp on the bank */
+  onStampFile(file: File): void;
   onClear(): void;
   onReset(): void;
   onTogglePause(): void;
@@ -29,6 +31,7 @@ export class Palette {
   private readonly pauseButton: HTMLButtonElement;
   private readonly foldButton: HTMLButtonElement;
   private readonly flopButton: HTMLButtonElement;
+  private readonly stampInput: HTMLInputElement;
   private readonly swatches = new Map<string, HTMLButtonElement>();
   private readonly slotButtons: HTMLButtonElement[] = [];
   private readonly sizeButtons: HTMLButtonElement[] = [];
@@ -144,6 +147,20 @@ export class Palette {
     actions.className = 'cm-actions';
     this.foldButton = this.button(actions, 'Cut & roll', 'F', () => this.cb.onCutFold());
     this.flopButton = this.button(actions, 'Cut & fold', 'C', () => this.cb.onCutFlop());
+    // stamp a picture: the file picker sits behind a plain button
+    this.stampInput = document.createElement('input');
+    this.stampInput.type = 'file';
+    this.stampInput.accept = 'image/*';
+    this.stampInput.hidden = true;
+    this.stampInput.setAttribute('aria-label', 'Picture to stamp on the bank');
+    this.stampInput.addEventListener('change', () => {
+      const f = this.stampInput.files?.[0];
+      if (f) this.cb.onStampFile(f);
+      this.stampInput.value = '';
+    });
+    const stamp = this.button(actions, 'Stamp picture', undefined, () => this.stampInput.click());
+    stamp.title = 'Stamp a picture onto the bank before milling (or drop an image file on the mill)';
+    stamp.appendChild(this.stampInput);
     this.button(actions, 'Clear pigment', undefined, () => this.cb.onClear());
     this.button(actions, 'Reset', 'R', () => this.cb.onReset());
     this.pauseButton = this.button(actions, 'Pause', 'Space', () => this.cb.onTogglePause());

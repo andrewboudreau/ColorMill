@@ -8,13 +8,17 @@
 @group(0) @binding(2) var<storage, read_write> gmom : array<i32>;
 @group(0) @binding(3) var<storage, read_write> gvel : array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read> pmass : array<i32>;   // last frame's render raster (density = pmass / 8)
+// the material's box (box.wgsl): the dispatch covers BOX_GRID's nodes only; outside it nothing was
+// scattered, the accumulators are empty and no particle reads the velocity
+@group(0) @binding(5) var<storage, read> box : array<u32>;
 
 // The peel zone of the front roll's tack band while the hand holds the cut edge (cut & fold): this
 // far back from the crown along the front face, in radians.
 const PEEL_ARC : f32 = 0.7;
 
 @compute @workgroup_size(4, 4, 4)
-fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
+fn main(@builtin(global_invocation_id) lid : vec3<u32>) {
+  let gid = lid + vec3<u32>(box[BOX_GRID], box[BOX_GRID + 1u], box[BOX_GRID + 2u]);
   if (gid.x >= P.grid.x || gid.y >= P.grid.y || gid.z >= P.grid.z) { return; }
   let n = nodeIndex(gid.x, gid.y, gid.z);
   let mi = gmass[n];

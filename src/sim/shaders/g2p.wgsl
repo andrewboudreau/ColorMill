@@ -11,6 +11,20 @@
 // cut & fold reductions: [0] = live pile top under the standing log (atomicMax on float bits)
 @group(0) @binding(8) var<storage, read_write> foldInfo : array<atomic<u32>>;
 @group(0) @binding(9) var<storage, read> fold0 : array<vec4<f32>>;   // .w = release time of a fed particle
+// the material's box (box.wgsl): BOX_ACC is the min / max cell over every particle this substep
+@group(0) @binding(10) var<storage, read_write> box : array<atomic<u32>>;
+
+/// Grow the box to hold a particle at x. The load first: nearly every particle is inside the
+/// bounds already and writes nothing.
+fn growBox(x : vec3<f32>) {
+  let c = vec3<u32>(clamp(x * P.hdt.y, vec3<f32>(0.0), vec3<f32>(P.grid.xyz - vec3<u32>(1u))));
+  if (c.x < atomicLoad(&box[BOX_ACC])) { atomicMin(&box[BOX_ACC], c.x); }
+  if (c.y < atomicLoad(&box[BOX_ACC + 1u])) { atomicMin(&box[BOX_ACC + 1u], c.y); }
+  if (c.z < atomicLoad(&box[BOX_ACC + 2u])) { atomicMin(&box[BOX_ACC + 2u], c.z); }
+  if (c.x > atomicLoad(&box[BOX_ACC + 3u])) { atomicMax(&box[BOX_ACC + 3u], c.x); }
+  if (c.y > atomicLoad(&box[BOX_ACC + 4u])) { atomicMax(&box[BOX_ACC + 4u], c.y); }
+  if (c.z > atomicLoad(&box[BOX_ACC + 5u])) { atomicMax(&box[BOX_ACC + 5u], c.z); }
+}
 
 const FOLD_SETTLE : f32 = 0.5;   // s: material just let go of the log does not count as pile yet
 
@@ -38,7 +52,10 @@ const DEV_CAP : f32 = 1.0;   // most extra deviatoric stretch the relaxation may
 fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
   let p = particleIndex(gid, nwg);
   if (p >= P.grid.w) { return; }
-  if ((flags[p] & 1u) != 0u) { return; }   // kinematic: moved by the fold kernel
+  if ((flags[p] & 1u) != 0u) {   // kinematic: moved by the fold kernel
+    growBox(pos[p].xyz);
+    return;
+  }
 
   let h = P.hdt.x;
   let invh = P.hdt.y;
@@ -128,6 +145,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   x = pushOut(P.front.x, P.front.y, R, x, h);
   x = pushOut(P.back.x, P.back.y, R, x, h);
   x = clamp(x, lo, hi);
+  growBox(x);
 
   pos[p] = vec4<f32>(x, pw);
   vel[p] = vec4<f32>(v, 0.0);

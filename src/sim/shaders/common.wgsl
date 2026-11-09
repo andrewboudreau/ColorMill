@@ -53,6 +53,15 @@ const PI : f32 = 3.14159265358979;
 // several times its own mass of base to a mid-tone instead of fading out.
 const PIGMENT_LOAD : f32 = 12.0;
 
+// The material's box buffer (box.wgsl, design §3.6), u32 words. Cells and nodes share indices
+// (cell c spans nodes c .. c+1).
+const BOX_ACC : u32 = 0u;     // min cell xyz, max cell xyz: G2P's reduction over the particles this substep
+const BOX_GRID : u32 = 6u;    // origin xyz, size xyz: the nodes the solver's grid update covers
+const BOX_LAST : u32 = 12u;   // min cell xyz, max cell xyz of the last finished reduction
+const BOX_FRAME : u32 = 18u;  // origin xyz, size xyz: the nodes the frame's raster clear and pack cover
+const BOX_PREV : u32 = 24u;   // origin xyz, size xyz of the previous frame's own raster box
+const BOX_SLACK : i32 = 1;    // extra cells around every box
+
 fn nodeIndex(i : u32, j : u32, k : u32) -> u32 {
   return (k * P.grid.y + j) * P.grid.x + i;
 }

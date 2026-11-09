@@ -285,6 +285,44 @@ x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.2
   falls back to the solver grid with a console warning. The dispersion
   kernel keeps reading the solver-grid raster.
 
+### 3.6 The material's box
+
+The domain is tall and deep for the operator's moves, but the material
+fills little of it: about 2% of the solver's cells hold particles, and
+while milling their bounding box is about 12% of the domain. The grid
+passes therefore cover a box around the material, not every node
+(`box.wgsl`; a 32-word buffer and indirect dispatch arguments).
+
+- **Bounds.** G2P reduces the particles' cell range every substep: atomic
+  min / max per axis, kinematic particles included, with a plain load first
+  so nearly no particle writes.
+- **The solver's box** (`step_`, one invocation after G2P): the cells'
+  27-node stencils (`c−1 .. c+2`) plus a cell of slack for what the
+  operator's script moves before the next P2G, as an origin the grid update
+  adds to its node index and workgroup counts its
+  `dispatchWorkgroupsIndirect` reads. The bounds are those of the very
+  positions the next P2G scatters from, so nothing is assumed about how
+  fast the material moves. Outside the box nothing was scattered: the
+  accumulators are empty (§3.1) and no particle reads the velocity.
+- **The raster's box** (`frame_`, one invocation before the frame's
+  raster): the cells' 8-node stencils plus the slack, united with the
+  previous frame's own box. The raster's clear and pack cover that union, so
+  nodes the material has left are zeroed once, and the accumulators and the
+  density texture are empty everywhere outside the current box (the
+  dispersion gather, the grid update's packing test and the renderer rely on
+  that).
+- **From the CPU.** Whenever particles are placed without a G2P (seeding,
+  reset, a pigment chunk) the host writes the whole grid into every box
+  (`resetBox`): the whole grid is always a valid box, and the next substep's
+  G2P finds the real bounds.
+
+Nothing about the physics or the density volume changes (a fingerprint run
+hashing the particle state and the density volume through milling, a cut &
+fold and a cut & roll matches bit for bit). On the software GPU the grid
+update and the raster's clear and pack were about 15% of a frame; the box
+takes most of that. The box grows when the operator stands a log up over
+the nip and shrinks again as the nip eats it.
+
 ---
 
 ## 4. Material model: elastoplastic putty (fixed corotated + yield clamp)
@@ -784,7 +822,7 @@ src/gpu/device.ts               WebGPU init + capability report + fallback messa
 src/config/mill.ts              MillConfig, presets, geometry helpers (pure, tested)
 src/sim/types.ts                shared interfaces (GpuMpmSim API, snapshots, stats)
 src/sim/mpm.ts                  GpuMpmSim implementation
-src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, raster, disperse, pack, inject, stamp, fold
+src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, box, raster, disperse, pack, inject, stamp, fold
 src/stamp.ts                    stamping a picture on the bank: raster size, footprint, pixels to latents (pure, tested)
 src/render/renderer.ts          Renderer (ray-march), src/render/camera.ts
 src/render/shaders/raymarch.wgsl, mixbox.wgsl

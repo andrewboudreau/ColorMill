@@ -1,6 +1,11 @@
 // Grid update (design §3.3): momentum -> velocity, gravity, boundaries.
-@group(0) @binding(1) var<storage, read> gmass : array<i32>;
-@group(0) @binding(2) var<storage, read> gmom : array<i32>;
+// The grid clears itself: this kernel is the only reader of the mass and momentum P2G scattered,
+// so it zeroes them as it reads them (only where something was scattered, so empty nodes are not
+// written) and P2G finds them empty next substep; there is no separate clear pass. It writes every
+// node's velocity (zero where there is no mass), and the node's mass in the fourth component for
+// G2P's pile test.
+@group(0) @binding(1) var<storage, read_write> gmass : array<i32>;
+@group(0) @binding(2) var<storage, read_write> gmom : array<i32>;
 @group(0) @binding(3) var<storage, read_write> gvel : array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read> pmass : array<i32>;   // last frame's render raster (density = pmass / 8)
 
@@ -12,13 +17,24 @@ const PEEL_ARC : f32 = 0.7;
 fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   if (gid.x >= P.grid.x || gid.y >= P.grid.y || gid.z >= P.grid.z) { return; }
   let n = nodeIndex(gid.x, gid.y, gid.z);
-  let m = decodeFixed(gmass[n], MASS_SCALE);
-  if (m <= 0.0) { return; }   // gvel was zeroed by clearGrid
+  let mi = gmass[n];
+  let qi = vec3<i32>(gmom[3u * n], gmom[3u * n + 1u], gmom[3u * n + 2u]);
+  if (mi != 0 || any(qi != vec3<i32>(0))) {
+    gmass[n] = 0;
+    gmom[3u * n] = 0;
+    gmom[3u * n + 1u] = 0;
+    gmom[3u * n + 2u] = 0;
+  }
+  let m = decodeFixed(mi, MASS_SCALE);
+  if (m <= 0.0) {
+    gvel[n] = vec4<f32>(0.0);
+    return;
+  }
 
   let h = P.hdt.x;
   let dt = P.hdt.z;
   let g = P.hdt.w;
-  let mom = vec3<f32>(decodeFixed(gmom[3u * n], MOM_SCALE), decodeFixed(gmom[3u * n + 1u], MOM_SCALE), decodeFixed(gmom[3u * n + 2u], MOM_SCALE));
+  let mom = vec3<f32>(decodeFixed(qi.x, MOM_SCALE), decodeFixed(qi.y, MOM_SCALE), decodeFixed(qi.z, MOM_SCALE));
   var v = mom / m;
   v.y -= dt * g;
 
@@ -106,5 +122,5 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     v.z *= max(0.0, 1.0 - P.bands.w);
   }
 
-  gvel[n] = vec4<f32>(v, 0.0);
+  gvel[n] = vec4<f32>(v, m);
 }

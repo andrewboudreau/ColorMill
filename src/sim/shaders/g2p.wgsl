@@ -7,11 +7,10 @@
 @group(0) @binding(4) var<storage, read_write> fbuf : array<f32>;
 @group(0) @binding(5) var<storage, read_write> abuf : array<f32>;   // P2G affine (read by p2g)
 @group(0) @binding(6) var<storage, read> flags : array<u32>;
-@group(0) @binding(7) var<storage, read> gvel : array<vec4<f32>>;
-@group(0) @binding(8) var<storage, read> gmass : array<i32>;
+@group(0) @binding(7) var<storage, read> gvel : array<vec4<f32>>;   // xyz velocity, w the node's mass (grid.wgsl)
 // cut & fold reductions: [0] = live pile top under the standing log (atomicMax on float bits)
-@group(0) @binding(9) var<storage, read_write> foldInfo : array<atomic<u32>>;
-@group(0) @binding(10) var<storage, read> fold0 : array<vec4<f32>>;   // .w = release time of a fed particle
+@group(0) @binding(8) var<storage, read_write> foldInfo : array<atomic<u32>>;
+@group(0) @binding(9) var<storage, read> fold0 : array<vec4<f32>>;   // .w = release time of a fed particle
 
 const FOLD_SETTLE : f32 = 0.5;   // s: material just let go of the log does not count as pile yet
 
@@ -53,7 +52,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   if (P.fold.x > 0.5 && P.fold.y - fold0[p].w >= FOLD_SETTLE
       && abs(x.z - P.fold2.w) < P.fold3.x && abs(x.x - 0.5 * P.fold2.y) < 0.6 && x.y > P.front.x) {
     let cn = clamp(vec3<i32>(round(x * invh)), vec3<i32>(0), vec3<i32>(P.grid.xyz) - vec3<i32>(1));
-    if (decodeFixed(gmass[nodeIndexI(cn)], MASS_SCALE) >= 2.0 * P.part.y) {
+    if (gvel[nodeIndexI(cn)].w >= 2.0 * P.part.y) {
       atomicMax(&foldInfo[0], bitcast<u32>(x.y));
     }
   }

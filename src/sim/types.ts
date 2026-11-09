@@ -163,6 +163,9 @@ export interface GpuMpmSim {
   readParticles(): Promise<ParticleSnapshot>;
   /** Read the packed density volume (volA red channel) back as float32, node-major (i fastest). */
   readDensity(): Promise<Float32Array>;
+  /** Read where the colour raster's box is (design §3.6; tests and diagnostics): the world position of its
+   *  texel 0, its cell size, and that cell in eighths of the finest one (8 = particle resolution). */
+  readColourBox(): Promise<{ origin: [number, number, number]; cell: number; eighths: number }>;
   destroy(): void;
 }
 

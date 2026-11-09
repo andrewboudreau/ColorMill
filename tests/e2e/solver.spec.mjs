@@ -186,6 +186,27 @@ export default async function run() {
     for (let i = 0; i < snap1.count; i++) if (snap1.positions[3 * i + 1] < 3 * dims.h) onTray++;
     assert(onTray === 0, `no material fell onto the tray (${onTray} particles below 3h)`);
 
+    // --- the colour raster's box (design §3.6): laid over the material at particle resolution -------
+    const cbox = await page.evaluate(async () => {
+      const b = await window.__solver.sim.readColourBox();
+      const f = window.__solver.sim.volumes.fineDims;
+      return { ...b, dims: [f.nx, f.ny, f.nz] };
+    });
+    const lo1 = [Infinity, Infinity, Infinity], hi1 = [-Infinity, -Infinity, -Infinity];
+    for (let p = 0; p < snap1.count; p++) for (let c = 0; c < 3; c++) {
+      lo1[c] = Math.min(lo1[c], snap1.positions[3 * p + c]);
+      hi1[c] = Math.max(hi1[c], snap1.positions[3 * p + c]);
+    }
+    console.log(`  colour box: texel 0 at ${cbox.origin.map((v) => v.toFixed(3))}, cell 1/${(1 / cbox.cell).toFixed(1)} (${cbox.eighths}/8 of the finest), ${cbox.dims.join('x')} texels; material ${lo1.map((v) => v.toFixed(2))} .. ${hi1.map((v) => v.toFixed(2))}`);
+    assert(cbox.eighths === 8 && Math.abs(cbox.cell - 1 / q.colourCellsPerUnit) < 1e-6, `while milling the colour raster is at its finest cell, the particle spacing (cell ${cbox.cell}, ${cbox.eighths}/8)`);
+    for (let c = 0; c < 3; c++) {
+      const first = cbox.origin[c], last = cbox.origin[c] + (cbox.dims[c] - 1) * cbox.cell;
+      assert(first >= -1e-6 && first <= lo1[c] && last >= hi1[c], `the colour box holds the material along axis ${c} (${first.toFixed(3)} .. ${last.toFixed(3)} vs ${lo1[c].toFixed(3)} .. ${hi1[c].toFixed(3)})`);
+      // on a world-anchored lattice: texel 0 sits on a multiple of the cell
+      const k = cbox.origin[c] / cbox.cell;
+      assert(Math.abs(k - Math.round(k)) < 1e-3, `texel 0 is on the world lattice along axis ${c} (${k})`);
+    }
+
     // --- 2. sheet on the front roller -------------------------------------
     const sheetFrac = a1.sheetFront / a1.n;
     const backFrac = a1.sheetBack / a1.n;

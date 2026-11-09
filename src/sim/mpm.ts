@@ -1107,6 +1107,18 @@ export class GpuMpm implements GpuMpmSim {
     return snap;
   }
 
+  async readColourBox(): Promise<{ origin: [number, number, number]; cell: number; eighths: number }> {
+    const staging = this.device.createBuffer({ label: 'GpuMpm-fine-box-read', size: 32, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const enc = this.device.createCommandEncoder({ label: 'GpuMpm-fine-box-read' });
+    enc.copyBufferToBuffer(this.bufFineBox, 0, staging, 0, 32);
+    this.device.queue.submit([enc.finish()]);
+    await staging.mapAsync(GPUMapMode.READ);
+    const f = new Float32Array(staging.getMappedRange().slice(0));
+    staging.unmap();
+    staging.destroy();
+    return { origin: [f[0], f[1], f[2]], cell: f[3], eighths: Math.round(f[5]) };
+  }
+
   async readDensity(): Promise<Float32Array> {
     const d = this.dims;
     const bytesPerRow = Math.ceil((d.nx * 8) / 256) * 256;

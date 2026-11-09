@@ -130,8 +130,14 @@ rendered frame. All kernels are WebGPU compute shaders in
 where NX, NY, NZ are **node** counts.
 
 ### 3.1 Clear grid
-Zero the node accumulators: `mass`, `mom.xyz` (i32 fixed point) and the
-velocity output `vel.xyz` (f32).
+There is no clear pass. The node accumulators `mass` and `mom.xyz` (i32
+fixed point) have one reader, the grid update (§3.3), which zeroes them as
+it reads them (only where P2G scattered something, so empty nodes are not
+written) and writes every node's velocity, zero where there is no mass. P2G
+therefore always finds the accumulators empty. The node's mass rides in the
+velocity's fourth component for G2P's pile test (§6). A separate clear pass
+over the whole grid every substep was 8 to 10% of a frame on the software
+GPU, and wrote 32 bytes per node per substep on a grid about 2% occupied.
 
 Fixed-point encoding (WebGPU has no float atomics): `mass` uses scale 2^20,
 momentum uses scale 2^16. Encode with `i32(round(v * scale))`, decode with

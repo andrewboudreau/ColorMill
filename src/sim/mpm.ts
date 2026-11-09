@@ -488,7 +488,7 @@ export class GpuMpm implements GpuMpmSim {
     const injectMod = mod('inject', injectSrc);
     const stampMod = mod('stamp', stampSrc);
     const stampRes: Resource[] = [{ kind: 'uniform', buffer: this.bufStampInfo }, rw(this.bufPos), rw(this.bufLat), rw(this.bufStampTop), ro(this.bufStamp)];
-    const clearRes = [rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGVel), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)];
+    const clearRes = [rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)];
     const foldRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags), rw(this.bufFold),
       rw(this.bufFoldInfo), ro(this.bufPMass), rw(this.bufFoldTables)];
     const volAView = this.volA.createView({ dimension: '3d' });
@@ -499,17 +499,15 @@ export class GpuMpm implements GpuMpmSim {
     const packMod = mod('pack', packSrc);
 
     return {
-      clearGrid: this.makeKernel('clearGrid', clearMod, 'clearGrid', clearRes),
       clearRaster: this.makeKernel('clearRaster', clearMod, 'clearRaster', clearRes),
       clearFine: this.makeKernel('clearFine', clearMod, 'clearFine',
-        [rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGVel), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad),
-          rw(this.bufFCov)]),
+        [rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad), rw(this.bufFCov)]),
       p2g: this.makeKernel('p2g', mod('p2g', p2gSrc), 'main',
         [ro(this.bufPos), ro(this.bufVel), ro(this.bufAff), ro(this.bufFlags), rw(this.bufGMass), rw(this.bufGMom)]),
-      grid: this.makeKernel('grid', mod('grid', gridSrc), 'main', [ro(this.bufGMass), ro(this.bufGMom), rw(this.bufGVel), ro(this.bufPMass)]),
+      grid: this.makeKernel('grid', mod('grid', gridSrc), 'main', [rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGVel), ro(this.bufPMass)]),
       g2p: this.makeKernel('g2p', mod('g2p', g2pSrc), 'main',
         [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), ro(this.bufFlags), ro(this.bufGVel),
-          ro(this.bufGMass), rw(this.bufFoldInfo), ro(this.bufFold)]),
+          rw(this.bufFoldInfo), ro(this.bufFold)]),
       raster: this.makeKernel('raster', rasterMod, 'main',
         [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad), rw(this.bufPCov)]),
       disperse: this.makeKernel('disperse', mod('disperse', disperseSrc), 'main',
@@ -747,7 +745,6 @@ export class GpuMpm implements GpuMpmSim {
     }
     for (let s = 0; s < substeps; s++) {
       if (this.foldActive) this.dispatchParticles(pass, k.foldMove, s);
-      this.dispatchGrid(pass, k.clearGrid, s);
       this.dispatchParticles(pass, k.p2g, s);
       this.dispatchGrid(pass, k.grid, s);
       this.dispatchParticles(pass, k.g2p, s);

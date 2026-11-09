@@ -1,14 +1,18 @@
 // Pack the coarse density volume and the fine pigment volumes.
-@group(0) @binding(1) var<storage, read> pmass : array<i32>;
-@group(0) @binding(2) var<storage, read> plat : array<i32>;
-@group(0) @binding(5) var<storage, read> pload : array<i32>;
-@group(0) @binding(3) var volA : texture_storage_3d<rgba16float, write>;
-@group(0) @binding(4) var volB : texture_storage_3d<rgba16float, write>;
-@group(0) @binding(6) var finC : texture_storage_3d<rgba16float, write>;
-@group(0) @binding(7) var<storage, read> pcov : array<i32>;   // colour raster only (see raster.wgsl)
+@group(0) @binding(1) var<storage, read> box : array<u32>;   // the material's box (box.wgsl)
+@group(0) @binding(2) var<storage, read> pmass : array<i32>;
+@group(0) @binding(3) var<storage, read> plat : array<i32>;
+@group(0) @binding(6) var<storage, read> pload : array<i32>;
+@group(0) @binding(4) var volA : texture_storage_3d<rgba16float, write>;
+@group(0) @binding(5) var volB : texture_storage_3d<rgba16float, write>;
+@group(0) @binding(7) var finC : texture_storage_3d<rgba16float, write>;
+@group(0) @binding(8) var<storage, read> pcov : array<i32>;   // colour raster only (see raster.wgsl)
 
+/// Over BOX_FRAME (this frame's box united with the last one's): texels the material left are
+/// written empty, so the density texture is zero everywhere outside the current box.
 @compute @workgroup_size(4, 4, 4)
-fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
+fn main(@builtin(global_invocation_id) lid : vec3<u32>) {
+  let gid = lid + vec3<u32>(box[BOX_FRAME], box[BOX_FRAME + 1u], box[BOX_FRAME + 2u]);
   if (gid.x >= P.grid.x || gid.y >= P.grid.y || gid.z >= P.grid.z) { return; }
   let n = nodeIndex(gid.x, gid.y, gid.z);
   let m = decodeFixed(pmass[n], MASS_SCALE);

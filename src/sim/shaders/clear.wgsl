@@ -1,12 +1,16 @@
 // Clear kernels (design §3.5): zero the raster accumulators. (The solver grid has no clear pass:
 // the grid update zeroes the mass and momentum it reads, grid.wgsl.)
-@group(0) @binding(1) var<storage, read_write> pmass : array<i32>;
-@group(0) @binding(2) var<storage, read_write> plat : array<i32>;
-@group(0) @binding(3) var<storage, read_write> pload : array<i32>;
-@group(0) @binding(4) var<storage, read_write> pcov : array<i32>;   // colour raster only
+@group(0) @binding(1) var<storage, read> box : array<u32>;   // the material's box (box.wgsl)
+@group(0) @binding(2) var<storage, read_write> pmass : array<i32>;
+@group(0) @binding(3) var<storage, read_write> plat : array<i32>;
+@group(0) @binding(4) var<storage, read_write> pload : array<i32>;
+@group(0) @binding(5) var<storage, read_write> pcov : array<i32>;   // colour raster only
 
+/// The solver-grid raster's accumulators over BOX_FRAME: this frame's box united with the last
+/// one's, so what the material left is zeroed too.
 @compute @workgroup_size(4, 4, 4)
-fn clearRaster(@builtin(global_invocation_id) gid : vec3<u32>) {
+fn clearRaster(@builtin(global_invocation_id) lid : vec3<u32>) {
+  let gid = lid + vec3<u32>(box[BOX_FRAME], box[BOX_FRAME + 1u], box[BOX_FRAME + 2u]);
   if (gid.x >= P.grid.x || gid.y >= P.grid.y || gid.z >= P.grid.z) { return; }
   let n = nodeIndex(gid.x, gid.y, gid.z);
   pmass[n] = 0;

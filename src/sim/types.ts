@@ -52,14 +52,20 @@ export interface RenderVolumes {
   /** Incremented when density changes. Omit to rebuild the density mip on every draw. */
   readonly densityVersion?: number;
   readonly dims: GridDims;
-  /** colour raster (design §3.5), on the finer grid fineDims: rgba16float (pigment load, lat0, lat1, lat2) */
+  /** colour raster (design §3.5), in a box of fineDims nodes laid over the material: rgba16float (pigment load, lat0, lat1, lat2) */
   readonly finA: GPUTexture;
   /** rgba16float (lat3, lat4, lat5, lat6) on fineDims */
   readonly finB: GPUTexture;
   /** rgba16float (mass, coverage, 0, 0) on fineDims, same normalisation as finA.x, so finA.x / finC.x is the load per unit mass
    *  and finC.y / finC.x the share of the mass that carries pigment (0..1) */
   readonly finC: GPUTexture;
+  /** node counts of the colour raster's textures and its finest cell (the cell when texel 0 is at the origin
+   *  and no fineBox says otherwise) */
   readonly fineDims: GridDims;
+  /** Where the colour raster's box is this frame (design §3.6), as a 32-byte uniform buffer the solver
+   *  writes on the GPU: vec4 (world position of texel 0, cell size), vec4 (pack normalisation, cell in
+   *  eighths of the finest, 0, 0). Omit for a raster fixed at the origin with cell fineDims.h. */
+  readonly fineBox?: GPUBuffer;
 }
 
 /**

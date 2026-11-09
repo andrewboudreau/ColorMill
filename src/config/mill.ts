@@ -19,17 +19,22 @@ export interface QualitySettings {
   readonly dt: number;
   /** substeps per rendered frame (fixed, deterministic) */
   readonly substepsPerFrame: number;
-  /** cells per sim unit of the colour raster the renderer reads pigment from (finer than the
-   *  solver grid: the sheet is one or two solver cells thick, and a streak inside it is lost
-   *  at that resolution; the mechanics stay on the solver grid) */
+  /** cells per sim unit of the colour raster the renderer reads pigment from, at its finest: twice
+   *  the solver's, the particle spacing (finer would leave holes between particles). The sheet is
+   *  one or two solver cells thick, and a streak inside it is lost at the solver's resolution; the
+   *  mechanics stay on the solver grid. The raster covers a box around the material, not the
+   *  domain (design §3.6), and its cell grows when the material outgrows the box colourNodes buys. */
   readonly colourCellsPerUnit: number;
+  /** node budget of the colour raster's box: what its accumulators and textures are sized for
+   *  (64 bytes a node; the 7-channel accumulator must fit the default 128 MiB binding limit) */
+  readonly colourNodes: number;
 }
 
 export const QUALITY_PRESETS: Readonly<Record<QualityPreset, QualitySettings>> = {
-  low: { preset: 'low', cellsPerUnit: 32, dt: 1.6e-3, substepsPerFrame: 8, colourCellsPerUnit: 64 },
-  medium: { preset: 'medium', cellsPerUnit: 48, dt: 1.1e-3, substepsPerFrame: 12, colourCellsPerUnit: 80 },
-  high: { preset: 'high', cellsPerUnit: 64, dt: 8e-4, substepsPerFrame: 16, colourCellsPerUnit: 88 },
-  ultra: { preset: 'ultra', cellsPerUnit: 72, dt: 7.1e-4, substepsPerFrame: 18, colourCellsPerUnit: 88 }
+  low: { preset: 'low', cellsPerUnit: 32, dt: 1.6e-3, substepsPerFrame: 8, colourCellsPerUnit: 64, colourNodes: 1.82e6 },
+  medium: { preset: 'medium', cellsPerUnit: 48, dt: 1.1e-3, substepsPerFrame: 12, colourCellsPerUnit: 96, colourNodes: 3.53e6 },
+  high: { preset: 'high', cellsPerUnit: 64, dt: 8e-4, substepsPerFrame: 16, colourCellsPerUnit: 128, colourNodes: 4.69e6 },
+  ultra: { preset: 'ultra', cellsPerUnit: 72, dt: 7.1e-4, substepsPerFrame: 18, colourCellsPerUnit: 144, colourNodes: 4.69e6 }
 };
 
 export interface MaterialConstants {
@@ -211,9 +216,19 @@ export function gridDims(q: QualitySettings): GridDims {
   return gridDimsFor(q.cellsPerUnit);
 }
 
-/** Node grid of the colour raster (design §3.5): the same rule at colourCellsPerUnit. */
+/**
+ * Node counts of the colour raster's box (design §3.5 / §3.6) and its finest cell: the whole
+ * roll length along x, and as much of the domain's height and depth as colourNodes buys (both
+ * scaled alike), all of it when the budget allows. The box follows the material; when the
+ * material needs more than these nodes at the finest cell, the cell grows (box.wgsl).
+ */
 export function colourGridDims(q: QualitySettings): GridDims {
-  return gridDimsFor(q.colourCellsPerUnit);
+  const full = gridDimsFor(q.colourCellsPerUnit);
+  if (full.nodeCount <= q.colourNodes) return full;
+  const s = Math.sqrt(q.colourNodes / full.nodeCount);
+  const ny = Math.max(8, Math.floor(full.ny * s));
+  const nz = Math.max(8, Math.floor(full.nz * s));
+  return { h: full.h, nx: full.nx, ny, nz, nodeCount: full.nx * ny * nz };
 }
 
 function gridDimsFor(cellsPerUnit: number): GridDims {

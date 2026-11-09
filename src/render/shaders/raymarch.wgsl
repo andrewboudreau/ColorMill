@@ -27,7 +27,13 @@ struct Uniforms {
   misc: vec4f,        // resolution.xy, exposure, flags (bit0 = volumes bound, bit1 = target is sRGB-encoded already, bit2 = surface colour mode)
   mip: vec4f,         // coarse max-density mip dims (cx, cy, cz), w = block edge in texels
   guides: vec4f,      // end-guide plates: bank top y, bank half depth (z), plate thickness, enabled
-  fine: vec4f,        // colour raster (design §3.5): node counts (nxF, nyF, nzF), w = its cell size hF
+  fine: vec4f,        // colour raster (design §3.5): node counts of its textures (nxF, nyF, nzF), w = its finest cell
+};
+
+// where the colour raster's box is this frame (design §3.6; written on the GPU by the solver)
+struct FineBox {
+  origin: vec4f,      // xyz = world position of texel 0, w = the cell size hF
+  info: vec4f,        // pack normalisation, cell in eighths of the finest, 0, 0
 };
 
 @group(0) @binding(0) var<uniform> U: Uniforms;
@@ -42,6 +48,7 @@ struct Uniforms {
 // found on volA's density
 @group(0) @binding(7) var finA: texture_3d<f32>;   // (load, lat0, lat1, lat2), load normalised like finC's mass
 @group(0) @binding(8) var finB: texture_3d<f32>;   // (lat3, lat4, lat5, lat6)
+@group(0) @binding(10) var<uniform> FB: FineBox;
 @group(0) @binding(9) var finC: texture_3d<f32>;   // (mass, coverage); finA.x / finC.x = load per unit mass,
                                                    // finC.y / finC.x = share of the mass carrying pigment
 
@@ -273,9 +280,10 @@ fn volUvw(p: vec3f) -> vec3f {
   return (p / U.camForward.w + vec3f(0.5)) / U.dims.xyz;
 }
 
-// Texture coordinate of world point p on the colour raster (texel i sits at world i*hF).
+// Texture coordinate of world point p on the colour raster (texel i sits at world origin + i*hF).
+// Outside the box the lookup clamps to an edge texel, which the raster leaves empty.
 fn fineUvw(p: vec3f) -> vec3f {
-  return (p / U.fine.w + vec3f(0.5)) / U.fine.xyz;
+  return ((p - FB.origin.xyz) / FB.origin.w + vec3f(0.5)) / U.fine.xyz;
 }
 
 fn density(p: vec3f) -> f32 {
@@ -745,7 +753,7 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     // cell away along the surface, no depth; depth mode: five samples down the normal with a
     // depth decay
     let surfaceMode = (flags & 4u) != 0u;
-    let hF = U.fine.w;
+    let hF = FB.origin.w;
     let tx = normalize(cross(n, select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(n.y) > 0.9)));
     let ty = cross(n, tx);
     for (var k = 0; k < 5; k++) {

@@ -34,9 +34,10 @@ struct Params {
   // fold slab: bank half depth (z window for the live bank-top estimate), slab clearance above the bank,
   // arc -> z scale (0.6), max y any folded particle may reach (domain.y - 3h)
   fold3 : vec4<f32>,
-  // colour raster (design §3.5): node counts nxF, nyF, nzF, 0
+  // colour raster (design §3.5): the node counts of its box nxF, nyF, nzF, 0
   fine : vec4<u32>,
-  // colour raster: hF, 1/hF, normalisation (h/hF)^3 / 8 so a packed fine cell reads ~1, 0
+  // colour raster at its finest cell: hF, 1/hF, normalisation (h/hF)^3 / 8 so a packed fine cell reads ~1, 0
+  // (the cell in use is FINE_K / 8 of this, box.wgsl)
   fineH : vec4<f32>,
   // cut & roll, peel and wind (fold.wgsl): wind speed along the arc, T_wind, T_double, T_lift
   fold4 : vec4<f32>,
@@ -61,6 +62,12 @@ const BOX_LAST : u32 = 12u;   // min cell xyz, max cell xyz of the last finished
 const BOX_FRAME : u32 = 18u;  // origin xyz, size xyz: the nodes the frame's raster clear and pack cover
 const BOX_PREV : u32 = 24u;   // origin xyz, size xyz of the previous frame's own raster box
 const BOX_SLACK : i32 = 1;    // extra cells around every box
+// the colour raster's box (finer lattice, design §3.6): its cell is FINE_K / 8 finest cells
+const BOX_FINE : u32 = 32u;        // lattice index xyz of its texel 0, FINE_K
+const BOX_FINE_RANGE : u32 = 36u;  // texels xyz its clear and pack cover (this frame's range and the last one's)
+const BOX_FINE_PREV : u32 = 40u;   // texels xyz of the previous frame's own range
+const FINE_K_MIN : i32 = 8;
+const FINE_K_MAX : i32 = 64;
 
 fn nodeIndex(i : u32, j : u32, k : u32) -> u32 {
   return (k * P.grid.y + j) * P.grid.x + i;

@@ -96,6 +96,7 @@ export class RayMarchRenderer implements Renderer {
   private mipBindGroup: GPUBindGroup;
   private mipSize: [number, number, number] = [1, 1, 1];
   private readonly uniformData = new Float32Array(UNIFORM_FLOATS);
+  private readonly fineBoxDefault: GPUBuffer;
   private readonly sampler: GPUSampler;
   private readonly placeholder: GPUTexture;
   private bindGroup: GPUBindGroup;
@@ -127,7 +128,8 @@ export class RayMarchRenderer implements Renderer {
         { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
         { binding: 7, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
         { binding: 8, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
-        { binding: 9, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } }
+        { binding: 9, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
+        { binding: 10, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }
       ]
     });
 
@@ -178,7 +180,10 @@ export class RayMarchRenderer implements Renderer {
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
     });
     this.mipBuffer = this.makeMipBuffer(1);
-    this.bindGroup = this.makeBindGroup(this.placeholder, this.placeholder, this.placeholder, this.placeholder);
+    // the colour raster's box for volumes that do not bring one: texel 0 at the origin, the cell set in setVolumes
+    this.fineBoxDefault = this.device.createBuffer({ label: 'raymarch-fine-box', size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.device.queue.writeBuffer(this.fineBoxDefault, 0, new Float32Array([0, 0, 0, 1, 1, 8, 0, 0]));
+    this.bindGroup = this.makeBindGroup(this.placeholder, this.placeholder, this.placeholder, this.placeholder, this.fineBoxDefault);
     this.mipBindGroup = this.makeMipBindGroup(this.placeholder);
     this.resize();
   }
@@ -208,7 +213,7 @@ export class RayMarchRenderer implements Renderer {
     return this.module.getCompilationInfo();
   }
 
-  private makeBindGroup(volA: GPUTexture, finA: GPUTexture, finB: GPUTexture, finC: GPUTexture): GPUBindGroup {
+  private makeBindGroup(volA: GPUTexture, finA: GPUTexture, finB: GPUTexture, finC: GPUTexture, fineBox: GPUBuffer): GPUBindGroup {
     return this.device.createBindGroup({
       label: 'raymarch-bg',
       layout: this.pipeline.getBindGroupLayout(0),
@@ -219,7 +224,8 @@ export class RayMarchRenderer implements Renderer {
         { binding: 4, resource: { buffer: this.mipBuffer } },
         { binding: 7, resource: finA.createView({ dimension: '3d' }) },
         { binding: 8, resource: finB.createView({ dimension: '3d' }) },
-        { binding: 9, resource: finC.createView({ dimension: '3d' }) }
+        { binding: 9, resource: finC.createView({ dimension: '3d' }) },
+        { binding: 10, resource: { buffer: fineBox } }
       ]
     });
   }
@@ -235,7 +241,8 @@ export class RayMarchRenderer implements Renderer {
       this.mipBuffer = this.makeMipBuffer(cells);
     }
     this.mipSize = m;
-    this.bindGroup = this.makeBindGroup(volumes.volA, volumes.finA, volumes.finB, volumes.finC);
+    if (!volumes.fineBox) this.device.queue.writeBuffer(this.fineBoxDefault, 0, new Float32Array([0, 0, 0, volumes.fineDims.h, 1, 8, 0, 0]));
+    this.bindGroup = this.makeBindGroup(volumes.volA, volumes.finA, volumes.finB, volumes.finC, volumes.fineBox ?? this.fineBoxDefault);
     this.mipBindGroup = this.makeMipBindGroup(volumes.volA);
   }
 
@@ -416,6 +423,7 @@ export class RayMarchRenderer implements Renderer {
     if (this.destroyed) return;
     this.destroyed = true;
     this.uniformBuffer.destroy();
+    this.fineBoxDefault.destroy();
     this.mipBuffer.destroy();
     this.placeholder.destroy();
     this.offscreen?.destroy();

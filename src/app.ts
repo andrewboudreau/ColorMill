@@ -17,7 +17,7 @@
 import './styles.css';
 import { BASE_LATENT, PIGMENTS, findPigment, loadMixbox, rgbToLatentAsync } from './color/pigments';
 import { parseDrops, type Drop } from './drops';
-import { clampParam, formatMillQuery, parseExperimental, parseInk, parseMillParams, parseRollStyle } from './config/link';
+import { clampParam, formatMillQuery, isDefaultParam, parseExperimental, parseInk, parseMillParams, parseRollStyle } from './config/link';
 import { fitStamp, parseStampText, rgbaToStamp, stampDims } from './stamp';
 import {
   BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres,
@@ -169,7 +169,14 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   let stampedText = parseStampText(query.get('stamp'));
   let stampedInk = parseInk(query.get('ink'));
   // mill parameters from the URL (?gap=0.06&omega=2 …; src/config/link.ts), the rest default
-  const initialParams: MillParams = { ...DEFAULT_PARAMS, ...parseMillParams(query, experimental) };
+  // The nip gap starts at the preset's (about 1.3 cells of its grid) and follows the preset when that changes,
+  // until the gap is set on purpose: by the URL (even to the value that is the default elsewhere) or the slider.
+  const gapQuery = parseFloat(query.get('gap') ?? '');
+  let gapPinned = Number.isFinite(gapQuery);
+  const initialParams: MillParams = {
+    ...DEFAULT_PARAMS, gap: QUALITY_PRESETS[preset].gap, ...parseMillParams(query, experimental),
+    ...(gapPinned ? { gap: clampParam('gap', gapQuery, experimental) } : {})
+  };
   // the preset goes into the start link when it was chosen on purpose (URL or panel), not auto-selected
   let presetPinned = chosen.reason === 'query parameter';
 
@@ -212,6 +219,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   const wideScreen = window.matchMedia('(min-width: 900px)').matches;
   const panel = new Panel(root, {
     onParam: (key, value) => {
+      if (key === 'gap') gapPinned = true;
       if (sim) sim.params[key] = value;
     },
     onQuality: (p) => { adaptive = false; presetPinned = true; void rebuildSim(p, batch); },
@@ -320,8 +328,14 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   /** index.html URL that reproduces this session's start: the drop log, plus batch/preset when set. */
   const startLink = (): string => {
     // drops, batch, preset (when pinned), the stamped text and every mill parameter that differs from its default
-    const settings = formatMillQuery({ experimental, drops: dropLog, batch, preset: presetPinned ? preset : undefined, params: sim ? sim.params : initialParams, roll: longRoll ? 'long' : 'double',
-      stamp: stampedText, ink: stampedInk });
+    // The gap is written only when it was set on purpose: left alone it is the preset's, which the link's
+    // reader gets for its own preset. A gap pinned to the value formatMillQuery takes for the default is passed
+    // beside the parameters so it is not dropped.
+    const live = sim ? sim.params : initialParams;
+    const pinnedDefault = gapPinned && isDefaultParam('gap', live.gap);
+    const settings = formatMillQuery({ experimental, drops: dropLog, batch, preset: presetPinned ? preset : undefined,
+      params: gapPinned ? live : { ...live, gap: DEFAULT_PARAMS.gap }, roll: longRoll ? 'long' : 'double',
+      stamp: stampedText, ink: stampedInk }, pinnedDefault ? [['gap', String(live.gap)]] : []);
     const q = settings + (renderScale !== 1 ? `${settings ? '&' : ''}scale=${renderScale}` : '');
     return `${location.origin}${location.pathname}${q ? `?${q}` : ''}`;
   };
@@ -468,6 +482,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   const nudge = (key: 'omega' | 'gap', dir: 1 | -1): void => {
     if (!sim) return;
     const notch = key === 'omega' ? 0.25 : 0.005;
+    if (key === 'gap') gapPinned = true;
     sim.params[key] = clampParam(key, sim.params[key] + dir * notch, experimental);
     panel.setParams(sim.params);
   };
@@ -644,7 +659,9 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     hud.setText(`rebuilding at ${p}, batch ${b}× (~${estimateParticleCount(QUALITY_PRESETS[p], b).toLocaleString()} particles)…`);
     await nextPaint();
     try {
-      const next = opts.makeSim(device, buildConfig(p, old.params, b));
+      // an unpinned gap follows the preset's grid
+      const params = gapPinned || p === preset ? old.params : { ...old.params, gap: QUALITY_PRESETS[p].gap };
+      const next = opts.makeSim(device, buildConfig(p, params, b));
       next.rollStyle = longRoll ? 'long' : 'double';
       try {
         await next.ready;

@@ -498,6 +498,17 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   off; a chunk added during a move goes in whole. Held particles take no
   part in P2G or G2P, so material passes through the lump; the raster
   draws them like any others.
+- **A softer paste was tried and does nothing.** Lowering a particle's
+  shear modulus with its pigment load (to 30% of the base's at a
+  masterbatch chunk's load, the bulk term left alone) was meant to let a
+  chunk take the shear and smear between stiffer layers. Measured against
+  the same run at full stiffness, with the chunk feed on: the spread around
+  the roll, the share of the pigment in the sheet's outer skin and the
+  surface area it colours were the same within noise at 4 and 8 s, and the
+  renders match. The putty yields everywhere in the nip and the rolls
+  dictate the motion, so a softer inclusion deforms like its neighbours;
+  and with one velocity field per cell there is no slip between a chunk and
+  the base inside a cell for softness to exploit. The change was not kept.
 - **Inject** kernel: `addPigment(center, radius, latent, strength)` blends
   particle latents inside the sphere: `z = mix(z, zPigment, strength·t)`,
   `t = 1 − |d|/radius`.
@@ -803,6 +814,24 @@ Simulated time per rendered frame is `dt·substepsPerFrame` (≈13 ms at
 "sim speed" in the HUD; do not vary substeps with frame time (determinism).
 Everything rate-dependent (dispersion included) advances by sim time, never
 by wall-clock frame time.
+
+**The nip gap follows the preset** (`QualitySettings.gap`: 0.04 at low,
+0.028 at medium, 0.02 at high and ultra; about 1.3 cells, the thinnest sheet
+a grid carries, which the low preset's long-standing 0.04 already is). A
+real mill's nip is far narrower for its rolls than 0.04 is for these (an
+eighth of the roll's radius), and the gap sets how thin a chunk is spread.
+Measured at medium with the chunk feed on, 0.028 against 0.04: the sheet
+covered the roll face 81% against 46% after 2.6 s and 100% against 96%
+three seconds later, and after 9 s the pigment coloured 36% of the roll's
+surface against 16%; at 0.04 two of three chunks had hardly reached the
+visible surface. The sheet came out 1.3 cells thick against 1.8. At high
+with 0.02 the sheet covered the whole roll face within 1.9 s, 1.7 to 1.9
+cells thick, at ordinary speeds (a short run: 3.3 s). The gap
+is a live parameter: it starts at the preset's and follows the preset when
+that changes, until it is set on purpose (the slider, the arrow keys or
+`?gap=`, which pins it even at 0.04); the start link carries it only when
+pinned, so a link's reader gets the gap of their own preset. `defaultConfig`
+starts with the preset's gap too.
 
 The app also steps the preset **down** automatically when the average frame
 time stays above 45 ms for 3 s, unless the preset was pinned by the user or

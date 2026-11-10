@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_CHUNK_SIZE, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PIGMENT_CHUNK_RADIUS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, bankTopY, bankVolumeBelow, colourGridDims, dropSlotX, gridDims,
+  DEFAULT_CHUNK_SIZE, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_RADIUS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, bankTopY, bankVolumeBelow, colourGridDims, defaultConfig, dropSlotX, gridDims,
   lameParameters, millTopSurfaceY, rollerAxisDistance, rollerPoses, rollerSurfaceVelocity, seedBankPositions
 } from '../src/config/mill';
 
@@ -126,6 +126,22 @@ describe('pigment chunk sizes', () => {
     const rMax = r[r.length - 1];
     expect(dropSlotX(0) - rMax).toBeGreaterThan(0);
     expect(dropSlotX(DROP_SLOTS - 1) + rMax).toBeLessThan(GEOMETRY.length);
+  });
+});
+
+describe('nip gap per preset', () => {
+  it('is about 1.3 cells of the preset\'s grid, within the slider\'s range, and what defaultConfig starts with', () => {
+    for (const [name, q] of Object.entries(QUALITY_PRESETS)) {
+      const cells = q.gap * q.cellsPerUnit;
+      expect(cells).toBeGreaterThanOrEqual(1.25);
+      expect(cells).toBeLessThanOrEqual(1.5);
+      expect(q.gap).toBeGreaterThanOrEqual(PARAM_LIMITS.gap.min);
+      expect(q.gap).toBeLessThanOrEqual(DEFAULT_PARAMS.gap);
+      expect(defaultConfig(name as keyof typeof QUALITY_PRESETS).params.gap).toBe(q.gap);
+    }
+    // the coarsest grid carries nothing thinner than the long-standing default
+    expect(QUALITY_PRESETS.low.gap).toBe(DEFAULT_PARAMS.gap);
+    expect(QUALITY_PRESETS.high.gap).toBe(0.02);
   });
 });
 

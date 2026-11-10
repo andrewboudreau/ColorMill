@@ -110,7 +110,7 @@ readback helper `GpuMpmSim.readParticles()` must return the layout in
 | `C` | mat3 | APIC affine velocity (row-major, `C[i][j] = ∂v_i/∂x_j`) |
 | `F` | mat3 | elastic deformation gradient (row-major) |
 | `latent` | 7 floats | Mixbox latent of the particle's pigment mix |
-| `flags` | 1 float (bit field as int) | bit0 = kinematic (under operator control); bit1 = in the operator's hand (kinematic, but scattered to the grid in P2G) |
+| `flags` | 1 float (bit field as int) | bit0 = kinematic (under operator control); bit1 = in the operator's hand (kinematic, but scattered to the grid in P2G); bit2 = a held pigment chunk's (kinematic, feeding in, §5) |
 | pad | to 32 floats |
 
 All particles have equal mass `pMass = 1` and equal rest volume
@@ -467,6 +467,37 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   masstones (a phthalo blue chunk here is near-navy; a phthalo blue paste in
   the footage is a bright blue). Modelling the paste as pigment + white at a
   fixed loading is the natural next step and is not done yet.
+- **A chunk feeds in, it is not swallowed** (`chunk.wgsl`). Let go whole on
+  a running mill, a chunk sinks into the pool between the rolls and comes
+  out as one patch a third to a half of the circumference long, mostly in
+  the sheet's outer skin, which then circles for many revolutions without
+  spreading (measured per chunk in twelve sectors around the roll at 2, 4,
+  6 and 8 s): on screen a band flashes past every revolution and the rest
+  of the roll stays white. On a real mill the chunk sits in the bank and
+  every pass of the sheet takes a little of it. So a dropped chunk is held:
+  its particles are kinematic (flags bit 0) and marked a chunk's (bit 2),
+  and the lump sinks at the feed speed through a level, the top of the
+  material it was set down on; a particle is let go as it crosses the
+  level, with the lump's velocity. The feed is even and lasts
+  `2r / speed`: `chunkFeed` seconds for a medium chunk (default 6, about
+  three revolutions; a drawer slider and a link key; 0 lets chunks go
+  whole). The same pigment is then laid around the whole circumference as
+  a layer several times thinner, which is where the streak lines and the
+  unequal ink show. The level is per chunk, in a small table (first
+  particle, count, level, footprint; 32 chunks, beyond that a chunk is let
+  go whole) the host fills when it adds the chunk. It only moves down:
+  `settle_`, one invocation a frame, looks for material just under each
+  chunk (node mass at the middle of its footprint and four points around)
+  and lowers the level and the lump together where there is none, so a
+  chunk follows the bank down as it drains. Letting a particle go when it
+  touched material was tried first and fed most of a chunk in within a
+  second: particles just let go raise the grid's mass under the lump and
+  set off the layer above. A level fixed at the drop left chunks hanging
+  in the air once the bank sank. An operator move (cut & fold, cut & roll)
+  lets every held chunk go at once (`drop_`), as does switching the feed
+  off; a chunk added during a move goes in whole. Held particles take no
+  part in P2G or G2P, so material passes through the lump; the raster
+  draws them like any others.
 - **Inject** kernel: `addPigment(center, radius, latent, strength)` blends
   particle latents inside the sphere: `z = mix(z, zPigment, strength·t)`,
   `t = 1 − |d|/radius`.
@@ -530,11 +561,10 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   Its cost is the extra taps, so it grows with the share of the batch that
   carries pigment: nothing measurable with a chunk or two, and on the
   software GPU at low roughly 10 to 15% of a frame with 85% of the particles
-  pigmented (28% with taps one cell apart, which is why they are two). What it does not give is the
-  slow feeding of a real mill, where a chunk sits in a large bank for many
-  revolutions and paints a stripe on every pass: here the bank drains in
-  about a second and a chunk goes through the nip as one patch (a bigger
-  batch buries the pigment inside a thick sheet instead).
+  pigmented (28% with taps one cell apart, which is why they are two). The slow feeding of a real mill, where a chunk sits in the bank for many
+  revolutions and paints a stripe on every pass, is the chunk feed above
+  (a bigger batch does not give it: it buries the pigment inside a thick
+  sheet).
 - **Pigment load.** Each particle carries a pigment load in `pos.w` (clear
   base 0, a masterbatch chunk `PIGMENT_LOAD` = 12). The raster accumulates
   per node the mass, the load and the load-weighted latent. The fine raster's
@@ -899,7 +929,7 @@ src/gpu/device.ts               WebGPU init + capability report + fallback messa
 src/config/mill.ts              MillConfig, presets, geometry helpers (pure, tested)
 src/sim/types.ts                shared interfaces (GpuMpmSim API, snapshots, stats)
 src/sim/mpm.ts                  GpuMpmSim implementation
-src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, box, raster, disperse, streak, pack, inject, stamp, fold
+src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, box, chunk, raster, disperse, streak, pack, inject, stamp, fold
 src/stamp.ts                    stamping a picture on the bank: raster size, footprint, pixels to latents (pure, tested)
 src/render/renderer.ts          Renderer (ray-march), src/render/camera.ts
 src/render/shaders/raymarch.wgsl, mixbox.wgsl

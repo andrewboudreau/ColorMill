@@ -324,6 +324,21 @@ export default async function run() {
     console.log(`  pigment chunk: +${chunk.added} particles (${chunk.n0} -> ${chunk.count}, capacity ${chunk.capacity})`);
     assert(!chunk.error && chunk.bad === 0, 'chunk particles are finite: ' + chunk.error);
     assert(chunk.added > 500 && chunk.count === chunk.n0 + chunk.added && chunk.statCount === chunk.count, `chunk added particles consistently (${JSON.stringify(chunk)})`);
+    // the chunk is held and feeds in from the bottom (design §5): a few frames on nearly all of it is still
+    // held, half a second later some more has been let go, and most of it is still to come
+    const feed = await page.evaluate(async (n0) => {
+      const held = (s) => { let n = 0; for (let p = n0; p < s.count; p++) if ((s.flags[p] & 5) === 5) n++; return n; };
+      const h0 = held(await window.__solver.snapshot());
+      await window.__solver.stepFrames(40);
+      const s1 = await window.__solver.snapshot();
+      let bad = 0;
+      for (let p = n0; p < s1.count; p++) for (let c = 0; c < 3; c++) if (!Number.isFinite(s1.positions[3 * p + c]) || !Number.isFinite(s1.velocities[3 * p + c])) bad++;
+      return { h0, h1: held(s1), bad, error: window.__solver.error };
+    }, chunk.n0);
+    console.log(`  chunk feed: ${feed.h0} of ${chunk.added} held after 3 frames, ${feed.h1} after 43`);
+    assert(!feed.error && feed.bad === 0, 'the feeding chunk stays finite: ' + feed.error);
+    assert(feed.h0 > 0.8 * chunk.added, `a fresh chunk is held, not dropped whole (${feed.h0} of ${chunk.added})`);
+    assert(feed.h1 < feed.h0 && feed.h1 > 0.5 * chunk.added, `the chunk feeds in gradually (${feed.h0} -> ${feed.h1} held of ${chunk.added})`);
 
     // --- cut & fold: the hand takes the band of sheet at the cut, lifts it off the crown, pulls it just past the
     // crown and drops it, foldPasses times; the rest of the sheet follows in the solver and flops back onto the roll ---
@@ -345,6 +360,9 @@ export default async function run() {
       let sumX0 = 0, hand0 = 0;
       for (let p = 0; p < s.count; p++) if (s.flags[p] & 1) { idx.push(p); sumX0 += s.positions[3 * p]; if (s.flags[p] & 2) hand0++; }
       const over0 = overTop(s);
+      // an operator move lets every held chunk go (chunk.wgsl drop_)
+      let chunkHeld = 0;
+      for (let p = 0; p < s.count; p++) if (s.flags[p] & 4) chunkHeld++;
       // the lift is over: the band is up off the crown
       await window.__solver.stepFrames(nLift - 4);
       const m = await window.__solver.snapshot();
@@ -370,12 +388,13 @@ export default async function run() {
       let kin = 0, sumX1 = 0, sumY1 = 0, sumZ1 = 0;
       for (let p = 0; p < e.count; p++) if (e.flags[p] & 1) kin++;
       for (const p of idx) { sumX1 += e.positions[3 * p]; sumY1 += e.positions[3 * p + 1]; sumZ1 += e.positions[3 * p + 2]; }
-      return { lifted: idx.length, hand0, count: s.count, meanX0: sumX0 / idx.length, over0, kinM, up, inFront, kinB, meanZb: sumZb / Math.max(kinB, 1), overB, steps, busy: window.__solver.sim.operatorBusy, kin, meanX1: sumX1 / idx.length, meanY1: sumY1 / idx.length, meanZ1: sumZ1 / idx.length,
+      return { chunkHeld, lifted: idx.length, hand0, count: s.count, meanX0: sumX0 / idx.length, over0, kinM, up, inFront, kinB, meanZb: sumZb / Math.max(kinB, 1), overB, steps, busy: window.__solver.sim.operatorBusy, kin, meanX1: sumX1 / idx.length, meanY1: sumY1 / idx.length, meanZ1: sumZ1 / idx.length,
         positions: Array.from(e.positions), velocities: Array.from(e.velocities), latents: Array.from(e.latents), deformation: Array.from(e.deformation), flags: Array.from(e.flags), error: window.__solver.error };
     }, [4, framesFor(handT.lift + 0.05), framesFor(0.5 * (handT.lift + handT.pass)), framesFor(handT.pass - 0.02), framesFor(handT.end), framesFor(handT.end + 2)]);
     const aFlop = analyse(flop, dims);
     console.log(`  cut & fold (lift ${handT.lift.toFixed(2)} s, ${handT.passes} passes of ${handT.pass.toFixed(2)} s, drops at ${handT.drops.map((x) => x.toFixed(2)).join(' / ')} s): the hand took ${flop.lifted} of ${flop.count} (${flop.hand0} hand, mean x ${flop.meanX0.toFixed(3)}); after the lift ${flop.kinM} held, ${flop.up} up, ${flop.inFront} in front of the face; free material over the top of the mill ${flop.over0} -> ${flop.overB} half-way back; at the drop ${flop.kinB} held at mean z ${flop.meanZb.toFixed(3)}; done after ${flop.steps} more frames: mean x ${flop.meanX1.toFixed(3)}, y ${flop.meanY1.toFixed(3)}, z ${flop.meanZ1.toFixed(3)}; ${flop.kin} still held; ${JSON.stringify({ bad: aFlop.bad, outside: aFlop.outside, inRoller: aFlop.inRoller })}`);
     assert(!flop.error, 'no WebGPU errors during cut & fold: ' + flop.error);
+    assert(flop.chunkHeld === 0, `the operator's move let the feeding chunk go (${flop.chunkHeld} particles still held)`);
     assert(flop.lifted > 0.01 * flop.count && flop.lifted < 0.15 * flop.count, `the hand takes a band of sheet at the cut, not the sheet (${flop.lifted} of ${flop.count})`);
     assert(flop.hand0 === flop.lifted, `everything held is in the hand (${flop.hand0} of ${flop.lifted})`);
     assert(flop.kinM === flop.lifted, `the band is still held after the lift (${flop.kinM} of ${flop.lifted})`);

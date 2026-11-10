@@ -824,7 +824,9 @@ Measured at medium with the chunk feed on, 0.028 against 0.04: the sheet
 covered the roll face 81% against 46% after 2.6 s and 100% against 96%
 three seconds later, and after 9 s the pigment coloured 36% of the roll's
 surface against 16%; at 0.04 two of three chunks had hardly reached the
-visible surface. The sheet came out 1.3 cells thick against 1.8. The gap
+visible surface. The sheet came out 1.3 cells thick against 1.8. At high
+with 0.02 the sheet covered the whole roll face within 1.9 s, 1.7 to 1.9
+cells thick, at ordinary speeds (a short run: 3.3 s). The gap
 is a live parameter: it starts at the preset's and follows the preset when
 that changes, until it is set on purpose (the slider, the arrow keys or
 `?gap=`, which pins it even at 0.04); the start link carries it only when

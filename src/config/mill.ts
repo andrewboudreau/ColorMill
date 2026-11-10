@@ -110,6 +110,9 @@ export interface MillParams {
   /** pigment chunks: how long a medium chunk takes to feed into the bank, in seconds (it is held and sinks in,
    *  let go where it touches material; bigger chunks take longer in proportion); 0 lets a chunk go whole */
   chunkFeed: number;
+  /** pigment paste: its shear stiffness as a share of the base's (1 = the same putty); a particle's falls with
+   *  its pigment load, to this at a masterbatch chunk's */
+  pasteStiffness: number;
 }
 
 export const DEFAULT_PARAMS: Readonly<MillParams> = {
@@ -130,7 +133,8 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
   streak: 12,
   /* about three revolutions of the front roll at the default speed: let go whole, a chunk went round as one
      patch a third to a half of the circumference long and stayed one for many revolutions */
-  chunkFeed: 6
+  chunkFeed: 6,
+  pasteStiffness: 1
 };
 
 export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max: number; step: number }>> = {
@@ -144,7 +148,8 @@ export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max:
   logFeed: { min: 0, max: 0.6, step: 0.05 },
   foldPasses: { min: 1, max: 3, step: 1 },
   streak: { min: 0, max: 12, step: 1 },
-  chunkFeed: { min: 0, max: 15, step: 0.5 }
+  chunkFeed: { min: 0, max: 15, step: 0.5 },
+  pasteStiffness: { min: 0.1, max: 1, step: 0.05 }
 };
 
 /** Fixed geometry (sim units). */

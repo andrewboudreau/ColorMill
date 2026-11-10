@@ -293,7 +293,7 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufBox: GPUBuffer;
   /** indirect dispatch arguments written by box.wgsl: [0..2] the grid update, [4..6] the raster's clear and pack */
   private readonly bufBoxArgs: GPUBuffer;
-  /** held pigment chunks (chunk.wgsl): which particles each chunk is, and whether it touched the bank last frame */
+  /** held pigment chunks (chunk.wgsl): which particles each chunk is, and the level it feeds in at */
   private readonly bufChunks: GPUBuffer;
   /** chunks in the table since the last reset */
   private chunkCount = 0;
@@ -536,7 +536,7 @@ export class GpuMpm implements GpuMpmSim {
     const stampRes: Resource[] = [{ kind: 'uniform', buffer: this.bufStampInfo }, rw(this.bufPos), rw(this.bufLat), rw(this.bufStampTop), ro(this.bufStamp), rw(this.bufStreak)];
     const clearRes = [ro(this.bufBox), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)];
     const chunkMod = mod('chunk', chunkSrc);
-    const chunkRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufFlags), ro(this.bufGVel), rw(this.bufChunks)];
+    const chunkRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufFlags), ro(this.bufChunks)];
     const boxMod = mod('box', boxSrc);
     const boxRes = [rw(this.bufBox), rw(this.bufBoxArgs), rw(this.bufFineBox)];
     const foldRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags), rw(this.bufFold),
@@ -553,7 +553,6 @@ export class GpuMpm implements GpuMpmSim {
       clearFine: this.makeKernel('clearFine', clearMod, 'clearFine',
         [ro(this.bufBox), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad), rw(this.bufFCov)]),
       chunkStep: this.makeKernel('chunkStep', chunkMod, 'step_', chunkRes),
-      chunkEnd: this.makeKernel('chunkEnd', chunkMod, 'end_', chunkRes),
       chunkDrop: this.makeKernel('chunkDrop', chunkMod, 'drop_', chunkRes),
       boxStep: this.makeKernel('boxStep', boxMod, 'step_', boxRes),
       boxFrame: this.makeKernel('boxFrame', boxMod, 'frame_', boxRes),
@@ -714,13 +713,9 @@ export class GpuMpm implements GpuMpmSim {
     // cut & fold: the hand's pulling speed and how far back it pulls (fold.wgsl)
     if (this.foldMode === 1) f.set([this.foldWindSpeed, this.foldWindSeconds, this.foldLong ? -1 : DOUBLE_SECONDS, LIFT_SECONDS], o + 52);
     else f.set([this.hand.speed, handPull(gap), 0, 0], o + 52);
-    // held pigment chunks (chunk.wgsl): a medium chunk sinks its own height in chunkFeed seconds; a node
+    // held pigment chunks (chunk.wgsl): a medium chunk sinks its own height in chunkFeed seconds
     // carrying two particles' mass is the bank
-    // carrying two particles' mass is the bank; it stays in touch for the time the next layer of particles
-    // (half a cell up) takes to sink in, and half as long again
-    const feedSpeed = p.chunkFeed > 0 ? (2 * PIGMENT_CHUNK_RADIUS) / p.chunkFeed : 0;
-    const touchFrames = feedSpeed > 0 ? Math.ceil((1.5 * 0.5 * h) / (feedSpeed * q.dt * q.substepsPerFrame)) : 0;
-    f.set([feedSpeed, 2 * pMass, touchFrames, 0], o + 56);
+    f.set([p.chunkFeed > 0 ? (2 * PIGMENT_CHUNK_RADIUS) / p.chunkFeed : 0, 0, 0, 0], o + 56);
   }
 
   // ---------------------------------------------------------------------------
@@ -833,7 +828,6 @@ export class GpuMpm implements GpuMpmSim {
         this.chunksHeld = false;
       } else {
         this.dispatchParticles(pass, k.chunkStep, frameSlot);
-        this.dispatchOne(pass, k.chunkEnd, frameSlot);
       }
     }
     if (this.foldPending) {
@@ -1002,8 +996,10 @@ export class GpuMpm implements GpuMpmSim {
     const held = this.params.chunkFeed > 0 && !this.operatorBusy && this.chunkCount < CHUNK_MAX;
     q.writeBuffer(this.bufFlags, 4 * base, new Uint32Array(m).fill(held ? CHUNK_HELD : 0));
     if (held) {
-      // its entry: first particle, count, touched this frame, frames left in touch (none: it comes down onto the bank)
-      q.writeBuffer(this.bufChunks, 4 * (CHUNK_HEADER + CHUNK_WORDS * this.chunkCount), new Uint32Array([base, m, 0, 0]));
+      // its entry: first particle, count, and the level it feeds in at: where its bottom was set down
+      const entry = new Uint32Array([base, m, 0, 0]);
+      new Float32Array(entry.buffer)[2] = cy - r;
+      q.writeBuffer(this.bufChunks, 4 * (CHUNK_HEADER + CHUNK_WORDS * this.chunkCount), entry);
       this.chunkCount++;
       q.writeBuffer(this.bufChunks, 0, new Uint32Array([this.chunkCount]));
       this.chunksHeld = true;

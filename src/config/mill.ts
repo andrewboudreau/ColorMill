@@ -107,6 +107,9 @@ export interface MillParams {
   foldPasses: number;
   /** colour streaks: the longest line a pigment particle is drawn as, in particle spacings; 0 draws particles as points */
   streak: number;
+  /** pigment chunks: how long a medium chunk takes to feed into the bank, in seconds (it is held and sinks in,
+   *  let go where it touches material; bigger chunks take longer in proportion); 0 lets a chunk go whole */
+  chunkFeed: number;
 }
 
 export const DEFAULT_PARAMS: Readonly<MillParams> = {
@@ -124,7 +127,10 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
      tore each slice before the rest arrived; the whole log set down at once holds together */
   logFeed: 0,
   foldPasses: 2,
-  streak: 12
+  streak: 12,
+  /* about three revolutions of the front roll at the default speed: let go whole, a chunk went round as one
+     patch a third to a half of the circumference long and stayed one for many revolutions */
+  chunkFeed: 6
 };
 
 export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max: number; step: number }>> = {
@@ -137,7 +143,8 @@ export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max:
   tackCells: { min: 0, max: 6, step: 0.1 },
   logFeed: { min: 0, max: 0.6, step: 0.05 },
   foldPasses: { min: 1, max: 3, step: 1 },
-  streak: { min: 0, max: 12, step: 1 }
+  streak: { min: 0, max: 12, step: 1 },
+  chunkFeed: { min: 0, max: 15, step: 0.5 }
 };
 
 /** Fixed geometry (sim units). */

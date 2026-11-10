@@ -28,13 +28,18 @@ export interface QualitySettings {
   /** node budget of the colour raster's box: what its accumulators and textures are sized for
    *  (64 bytes a node; the 7-channel accumulator must fit the default 128 MiB binding limit) */
   readonly colourNodes: number;
+  /** the nip gap this preset starts with: about 1.3 cells, the thinnest sheet the grid carries (the low
+   *  preset's 0.04 is that already). A real mill's nip is far narrower for its rolls than 0.04 is for these;
+   *  a finer grid can afford to be nearer to it, and the narrower the nip, the thinner the sheet and the wider
+   *  a chunk's pigment is spread (design §7). */
+  readonly gap: number;
 }
 
 export const QUALITY_PRESETS: Readonly<Record<QualityPreset, QualitySettings>> = {
-  low: { preset: 'low', cellsPerUnit: 32, dt: 1.6e-3, substepsPerFrame: 8, colourCellsPerUnit: 64, colourNodes: 1.82e6 },
-  medium: { preset: 'medium', cellsPerUnit: 48, dt: 1.1e-3, substepsPerFrame: 12, colourCellsPerUnit: 96, colourNodes: 3.53e6 },
-  high: { preset: 'high', cellsPerUnit: 64, dt: 8e-4, substepsPerFrame: 16, colourCellsPerUnit: 128, colourNodes: 4.69e6 },
-  ultra: { preset: 'ultra', cellsPerUnit: 72, dt: 7.1e-4, substepsPerFrame: 18, colourCellsPerUnit: 144, colourNodes: 4.69e6 }
+  low: { preset: 'low', cellsPerUnit: 32, dt: 1.6e-3, substepsPerFrame: 8, colourCellsPerUnit: 64, colourNodes: 1.82e6, gap: 0.04 },
+  medium: { preset: 'medium', cellsPerUnit: 48, dt: 1.1e-3, substepsPerFrame: 12, colourCellsPerUnit: 96, colourNodes: 3.53e6, gap: 0.028 },
+  high: { preset: 'high', cellsPerUnit: 64, dt: 8e-4, substepsPerFrame: 16, colourCellsPerUnit: 128, colourNodes: 4.69e6, gap: 0.02 },
+  ultra: { preset: 'ultra', cellsPerUnit: 72, dt: 7.1e-4, substepsPerFrame: 18, colourCellsPerUnit: 144, colourNodes: 4.69e6, gap: 0.02 }
 };
 
 export interface MaterialConstants {
@@ -453,6 +458,6 @@ export function defaultConfig(preset: QualityPreset = 'high'): MillConfig {
   return {
     quality: QUALITY_PRESETS[preset],
     material: DEFAULT_MATERIAL,
-    params: { ...DEFAULT_PARAMS }
+    params: { ...DEFAULT_PARAMS, gap: QUALITY_PRESETS[preset].gap }
   };
 }

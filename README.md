@@ -219,12 +219,17 @@ dither between, so a chunk sheared into laminae thinner than a cell reads as
 marbling with sharp edges rather than a tinted wash.
 
 
-| Preset | Cells / unit | Grid (cells) | Colour raster | Particles at 1× batch | Substep `dt` | Substeps / frame | Target |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| low | 32 | 49 × 73 × 65 | 64 / unit, box 97 × 145 × 129 (the whole domain) | 39k | 1.6e-3 | 8 | integrated / mobile GPU |
-| medium | 48 | 73 × 109 × 97 | 96 / unit, box 145 × 165 × 147 | 133k | 1.1e-3 | 12 | laptop GPU |
-| high (default) | 64 | 97 × 145 × 129 | 128 / unit, box 193 × 165 × 147 | 315k | 8e-4 | 16 | desktop GPU |
-| ultra | 72 | 109 × 163 × 145 | 144 / unit, box 217 × 155 × 138 | 448k | 7.1e-4 | 18 | discrete GPU |
+| Preset | Cells / unit | Grid (cells) | Nip gap | Colour raster | Particles at 1× batch | Substep `dt` | Substeps / frame | Target |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| low | 32 | 49 × 73 × 65 | 0.04 | 64 / unit, box 97 × 145 × 129 (the whole domain) | 39k | 1.6e-3 | 8 | integrated / mobile GPU |
+| medium | 48 | 73 × 109 × 97 | 0.028 | 96 / unit, box 145 × 165 × 147 | 133k | 1.1e-3 | 12 | laptop GPU |
+| high (default) | 64 | 97 × 145 × 129 | 0.02 | 128 / unit, box 193 × 165 × 147 | 315k | 8e-4 | 16 | desktop GPU |
+| ultra | 72 | 109 × 163 × 145 | 0.02 | 144 / unit, box 217 × 155 × 138 | 448k | 7.1e-4 | 18 | discrete GPU |
+
+The **nip gap** starts at about 1.3 cells of the preset's grid, the thinnest
+sheet the grid carries, so a finer preset has a narrower nip: a thinner sheet
+that forms sooner and spreads a chunk's pigment over more of the roll. It
+follows the preset until you set it (slider, `←` / `→`, or `?gap=`).
 
 The default batch is about 1.2 L of putty; the batch-size control (0.5×–3×,
 or `?batch=1.5`) rebuilds the bank with more or less material and scales the

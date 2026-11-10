@@ -490,30 +490,47 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   stamped text goes into the start link.
 - **Colour streaks** (`streak.wgsl`, the line raster in `raster.wgsl`): colour
   lives on particles, so it can neither smear thinner nor longer than the
-  particles reach, and a real chunk, which becomes a lamina many times its
+  particles reach, and a real chunk, which becomes laminae many times its
   area, would turn to speckle. Every particle carries a unit direction `d`
   and a length `L` in particle spacings (one `vec4`). The direction is a
   material line element turned by the velocity gradient, `ds/dt = C s`,
-  integrated once a frame to second order and renormalised. The length is a
-  separate ratchet: `L *= exp(STREAK_GAIN · max(d·C·d − STREAK_RATE_MIN, 0) · dt)`,
-  capped at 16, and it never shrinks. A reversible material line is the wrong
-  length model: a real sheet folds like a jelly roll and keeps its laminae,
-  while the sim's under-resolved flow un-stretches material when the sheet
-  re-enters the bank. `STREAK_GAIN` = 2 because the sim's nip is several
-  times wider for its rolls than a real one (about 5x stretch where a real
-  nip gives 20x or more); `STREAK_RATE_MIN` = 1.5 /s drops the solver's
-  elastic chatter (the nip runs at 10 to 25 /s). A fresh particle starts at
-  0.5 spacing in a direction hashed from its index. The colour raster (fine
-  lattice only) draws each pigment-carrying particle (load above 0.05) as a
-  line: `K` taps along `d`, `K = ceil(length / fine cell)` up to 8, each of
-  weight `1/K`, the length capped by the `streak` parameter (0 = points, the
-  old picture exactly). The colour box (`box.wgsl`) is widened by half the
-  longest line so no tap lands on its empty edge texels. Inject and stamp
-  scale a particle's length by `1 - a`, so a fresh dollop or picture is not
-  pre-smeared (a zero length is reseeded). The `streak` mill parameter
-  (drawer slider "Colour streaks", link key `streak`, default 8 spacings) is
-  a picture setting: the physics and the solver-grid density volume are
-  unchanged.
+  integrated once a frame to second order and renormalised, so on the sheet
+  it lies along the roll's circumference. The length is not the line
+  element's: `L += STREAK_GAIN · max(γ − STREAK_RATE_MIN, 0) · dt` with
+  `γ = ‖(C + Cᵀ)/2‖_F`, capped at 16, never shrinking, because a smear in
+  shear lengthens in proportion to the strain. Two things rule the line
+  element's own length out. A real sheet folds like a jelly roll and keeps
+  its laminae, while the under-resolved flow here un-stretches material when
+  the sheet re-enters the bank (measured: a median of 1.3 spacings on the
+  sheet, and falling). And there is little stretch along the line to begin
+  with: material beside a roll enters the nip already at the roll's speed,
+  so the nip is shear, not extension, and it is several times wider for its
+  rolls than a real one. `STREAK_GAIN` = 6 spacings per unit of strain
+  brings a particle to full length in one pass of the nip;
+  `STREAK_RATE_MIN` = 2 /s leaves the bank at rest and the solver's elastic
+  chatter out (the nip runs at 10 to 25 /s), so a chunk sitting on the bank
+  keeps its seed length of 0.5. The colour raster (fine lattice only) draws
+  each pigment-carrying particle (load above 0.05) as a line: `K` taps along
+  `d`, `K = ceil(length / fine cell)` up to 12, each of weight `1/K`, the
+  length capped by the `streak` parameter (0 = points, the old picture
+  exactly). **Unequal ink**: a smeared chunk is laminae of unequal
+  thickness, not an even film, so one particle in four draws its pigment
+  3.4 times over and the other three 0.2 times (a mean of one; by a hash of
+  the particle's index, coming in as its length passes 0.5 to 3.5). Lines
+  lying side by side then differ, and where the colour is thin the smear
+  reads as threads with clear gaps instead of an even wash (lines alone
+  only softened the speckle; a dense band is opaque either way). The colour
+  box (`box.wgsl`) is widened by half the longest line so no tap lands on
+  its empty edge texels. Inject and stamp scale a particle's length by
+  `1 - a`, so a fresh dollop or picture is neither pre-smeared nor uneven
+  (a zero length is reseeded). The `streak` mill parameter (drawer slider
+  "Colour streaks", link key `streak`, default 12 spacings) is a picture
+  setting: the physics and the solver-grid density volume are unchanged,
+  and the cost is within the noise of a frame. What it does not give is the
+  slow feeding of a real mill, where a chunk sits in a large bank for many
+  revolutions and paints a stripe on every pass: here the bank drains in
+  about a second and a chunk goes through the nip as one patch (a bigger
+  batch buries the pigment inside a thick sheet instead).
 - **Pigment load.** Each particle carries a pigment load in `pos.w` (clear
   base 0, a masterbatch chunk `PIGMENT_LOAD` = 12). The raster accumulates
   per node the mass, the load and the load-weighted latent. The fine raster's

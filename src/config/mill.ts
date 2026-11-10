@@ -124,7 +124,7 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
      tore each slice before the rest arrived; the whole log set down at once holds together */
   logFeed: 0,
   foldPasses: 2,
-  streak: 8
+  streak: 12
 };
 
 export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max: number; step: number }>> = {

@@ -24,13 +24,14 @@
 // mix reads solid; only near-clear base (0, or the faint trace a chunk sheds into it) is uncovered.
 const COVERAGE_MIN_LOAD : f32 = 0.3;
 
-/// Scatter particle p, as if it sat at x and with every term times `scale`, onto the node lattice
+/// Scatter particle p, as if it sat at x, with every term times `scale` and its pigment (load and
+/// latent, not its mass or coverage) times `ink` besides, onto the node lattice
 /// of spacing 1/invh whose node `origin` is index 0 of a grid of node counts dims (the accumulators
 /// bound to pmass / plat / pload / pcov are that grid's); withCov adds the coverage term (the
 /// colour raster only).
-fn scatterAt(p : u32, x : vec3<f32>, scale : f32, invh : f32, origin : vec3<i32>, dims : vec3<i32>, withCov : bool) {
+fn scatterAt(p : u32, x : vec3<f32>, scale : f32, ink : f32, invh : f32, origin : vec3<i32>, dims : vec3<i32>, withCov : bool) {
   let pMass = P.part.y;
-  let load = max(pos[p].w, 1e-3);
+  let load = max(pos[p].w, 1e-3) * ink;
   let covered = withCov && pos[p].w > COVERAGE_MIN_LOAD;
   var z : array<f32, 7>;
   for (var c = 0u; c < 7u; c++) { z[c] = lat[7u * p + c]; }
@@ -60,7 +61,7 @@ fn scatterAt(p : u32, x : vec3<f32>, scale : f32, invh : f32, origin : vec3<i32>
 }
 
 fn scatter(p : u32, invh : f32, origin : vec3<i32>, dims : vec3<i32>, withCov : bool) {
-  scatterAt(p, pos[p].xyz, 1.0, invh, origin, dims, withCov);
+  scatterAt(p, pos[p].xyz, 1.0, 1.0, invh, origin, dims, withCov);
 }
 
 /// The solver-grid raster (read by disperse and pack).
@@ -72,7 +73,9 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
 }
 
 const STREAK_MIN_LOAD : f32 = 0.05;  // clear base is not streaked
-const STREAK_TAPS : i32 = 8;         // most taps along a line
+const STREAK_TAPS : i32 = 12;        // most taps along a line
+const STREAK_INK_RICH : f32 = 3.4;   // the ink of one particle in four ...
+const STREAK_INK_LEAN : f32 = 0.2;   // ... and of the other three: 0.25 * 3.4 + 0.75 * 0.2 = 1
 
 /// The colour raster (design §3.5): the same scatter onto the finer lattice the renderer reads
 /// pigment from, so streaks thinner than a solver cell survive to the picture, plus coverage.
@@ -90,6 +93,7 @@ fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgro
   let cap = P.fineH.w;              // user's cap in particle spacings; 0 = off
   let spacing = 0.5 * P.hdt.x;      // particle spacing in world units
   var K = 1;
+  var ink = 1.0;
   var span = vec3<f32>(0.0);
   if (cap > 0.0 && pos[p].w > STREAK_MIN_LOAD) {
     let st = streak[p];
@@ -99,6 +103,15 @@ fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgro
       span = (st.xyz / dl) * len * spacing;
       let cell = 1.0 / invh;        // this frame's fine cell
       K = clamp(i32(ceil(len * spacing / cell)), 1, STREAK_TAPS);
+      // unequal ink: a smeared chunk is laminae of unequal thickness, not an even film. One particle
+      // in four draws its pigment STREAK_INK_RICH times over and the rest STREAK_INK_LEAN (a mean of
+      // one), so lines lying side by side differ and the smear reads as threads where it is thin.
+      // It comes in as the particle smears: unsmeared pigment (a fresh dollop, a stamp) is even.
+      var hsh = p * 747796405u + 2891336453u;
+      hsh = ((hsh >> ((hsh >> 28u) + 4u)) ^ hsh) * 277803737u;
+      hsh = (hsh >> 22u) ^ hsh;
+      let uneven = select(STREAK_INK_LEAN, STREAK_INK_RICH, (hsh & 3u) == 0u);
+      ink = mix(1.0, uneven, clamp((len - 0.5) / 3.0, 0.0, 1.0));
     }
   }
   let lo = vec3<f32>(spacing);
@@ -106,6 +119,6 @@ fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgro
   for (var i = 0; i < K; i++) {
     var xi = x;
     if (K > 1) { xi = clamp(x + span * ((f32(i) + 0.5) / f32(K) - 0.5), lo, hi); }
-    scatterAt(p, xi, 1.0 / f32(K), invh, origin, vec3<i32>(P.fine.xyz), true);
+    scatterAt(p, xi, 1.0 / f32(K), ink, invh, origin, vec3<i32>(P.fine.xyz), true);
   }
 }

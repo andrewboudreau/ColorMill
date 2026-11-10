@@ -25,7 +25,7 @@ import {
 
 /** Mill parameters that a link may carry, in the order they are written (and shown in the drawer). */
 export const LINK_PARAM_KEYS: readonly (keyof MillParams)[] = [
-  'omega', 'frictionRatio', 'gap', 'dispersion', 'gravity', 'backFriction', 'logFeed', 'foldPasses'
+  'omega', 'frictionRatio', 'gap', 'dispersion', 'gravity', 'backFriction', 'logFeed', 'foldPasses', 'streak'
 ];
 
 /** Label and readout for each linkable parameter (the drawer and the mixer's mill settings share these). */
@@ -38,6 +38,7 @@ export const PARAM_LABELS: Readonly<Record<keyof MillParams, { label: string; fo
   backFriction: { label: 'Back-roll friction', format: (v) => v.toFixed(2) },
   logFeed: { label: 'Log feed', format: (v) => (v > 0 ? `lower in ${v.toFixed(2)}/s` : 'drop') },
   foldPasses: { label: 'Cut & fold passes', format: (v) => `${Math.round(v)} × lift, pull, drop` },
+  streak: { label: 'Colour streaks', format: (v) => (v > 0 ? `${Math.round(v)} spacings` : 'off') },
   tackCells: { label: 'Tack band', format: (v) => (v > 0 ? `${v.toFixed(1)} cells` : 'auto') }
 };
 

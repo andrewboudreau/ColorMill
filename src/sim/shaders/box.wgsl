@@ -119,8 +119,10 @@ fn frame_() {
 
   // the colour raster: the world box of the particles' cells, on the finest lattice that fits
   let h = P.hdt.x;
-  let wlo = vec3<f32>(mn) * h;
-  let whi = vec3<f32>(mx + vec3<i32>(1)) * h;
+  // widened by half the longest colour streak line (raster.wgsl) so no tap lands on the box's empty edge
+  let margin = vec3<f32>(0.5 * P.fineH.w * 0.5 * h);
+  let wlo = max(vec3<f32>(mn) * h - margin, vec3<f32>(0.0));
+  let whi = min(vec3<f32>(mx + vec3<i32>(1)) * h + margin, P.domain.xyz);
   let pad = vec3<f32>(2.0 * h);
   let kPrev = i32(atomicLoad(&box[BOX_FINE + 3u]));
   let kFit = fineFit(wlo, whi);

@@ -36,7 +36,8 @@ struct Params {
   fold3 : vec4<f32>,
   // colour raster (design §3.5): the node counts of its box nxF, nyF, nzF, 0
   fine : vec4<u32>,
-  // colour raster at its finest cell: hF, 1/hF, normalisation (h/hF)^3 / 8 so a packed fine cell reads ~1, 0
+  // colour raster at its finest cell: hF, 1/hF, normalisation (h/hF)^3 / 8 so a packed fine cell reads ~1,
+  // the longest colour streak line in particle spacings (0 = points)
   // (the cell in use is FINE_K / 8 of this, box.wgsl)
   fineH : vec4<f32>,
   // cut & roll, peel and wind (fold.wgsl): wind speed along the arc, T_wind, T_double, T_lift

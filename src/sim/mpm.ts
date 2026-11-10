@@ -28,6 +28,7 @@ import gridSrc from './shaders/grid.wgsl?raw';
 import g2pSrc from './shaders/g2p.wgsl?raw';
 import rasterSrc from './shaders/raster.wgsl?raw';
 import disperseSrc from './shaders/disperse.wgsl?raw';
+import streakSrc from './shaders/streak.wgsl?raw';
 import packSrc from './shaders/pack.wgsl?raw';
 import injectSrc from './shaders/inject.wgsl?raw';
 import resetSrc from './shaders/reset.wgsl?raw';
@@ -260,6 +261,8 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufAff: GPUBuffer;
   private readonly bufLat: GPUBuffer;
   private readonly bufFlags: GPUBuffer;
+  /** colour streak per particle: unit direction xyz, length w in particle spacings (streak.wgsl) */
+  private readonly bufStreak: GPUBuffer;
   private readonly bufFold: GPUBuffer;
   /** cut & fold reductions (live pile top, x range, count, per-bin histogram); zeroed on the CPU before each selection */
   private readonly bufFoldInfo: GPUBuffer;
@@ -377,6 +380,7 @@ export class GpuMpm implements GpuMpmSim {
     this.bufAff = mk(9 * n);
     this.bufLat = mk(7 * n);
     this.bufFlags = mk(n);
+    this.bufStreak = mk(4 * n);
     this.bufFold = mk(4 * n);
     this.bufFoldInfo = mk(8 + 2 * FOLD_BINS + 2 * FOLD_BINS * FOLD_SLICES);
     this.bufFoldTables = mk(FOLD_TABLE_STRIDE * FOLD_BINS + 8 + 2 * FOLD_BINS * (FOLD_SLICES + 1));
@@ -515,7 +519,7 @@ export class GpuMpm implements GpuMpmSim {
     const foldMod = mod('fold', foldSrc);
     const injectMod = mod('inject', injectSrc);
     const stampMod = mod('stamp', stampSrc);
-    const stampRes: Resource[] = [{ kind: 'uniform', buffer: this.bufStampInfo }, rw(this.bufPos), rw(this.bufLat), rw(this.bufStampTop), ro(this.bufStamp)];
+    const stampRes: Resource[] = [{ kind: 'uniform', buffer: this.bufStampInfo }, rw(this.bufPos), rw(this.bufLat), rw(this.bufStampTop), ro(this.bufStamp), rw(this.bufStreak)];
     const clearRes = [ro(this.bufBox), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)];
     const boxMod = mod('box', boxSrc);
     const boxRes = [rw(this.bufBox), rw(this.bufBoxArgs), rw(this.bufFineBox)];
@@ -541,21 +545,22 @@ export class GpuMpm implements GpuMpmSim {
         [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), ro(this.bufFlags), ro(this.bufGVel),
           rw(this.bufFoldInfo), ro(this.bufFold), rw(this.bufBox)]),
       raster: this.makeKernel('raster', rasterMod, 'main',
-        [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad), rw(this.bufPCov), ro(this.bufBox)]),
+        [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad), rw(this.bufPCov), ro(this.bufBox), ro(this.bufStreak)]),
       disperse: this.makeKernel('disperse', mod('disperse', disperseSrc), 'main',
         [rw(this.bufPos), ro(this.bufC), rw(this.bufLat), ro(this.bufPMass), ro(this.bufPLat), ro(this.bufFlags), ro(this.bufPLoad)]),
+      streak: this.makeKernel('streak', mod('streak', streakSrc), 'main', [ro(this.bufC), ro(this.bufFlags), rw(this.bufStreak)]),
       pack: this.makeKernel('pack', packMod, 'main',
         [ro(this.bufBox), ro(this.bufPMass), ro(this.bufPLat), { kind: 'storageTexture', view: volAView }]),
       // the colour raster: the same scatter and pack onto the finer grid, its accumulators bound
       // where the solver grid's are
       rasterFine: this.makeKernel('rasterFine', rasterMod, 'mainFine',
-        [ro(this.bufPos), ro(this.bufLat), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad), rw(this.bufFCov), ro(this.bufBox)]),
+        [ro(this.bufPos), ro(this.bufLat), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad), rw(this.bufFCov), ro(this.bufBox), ro(this.bufStreak)]),
       packFine: this.makeKernel('packFine', packMod, 'mainFine',
         [ro(this.bufBox), ro(this.bufFMass), ro(this.bufFLat), { kind: 'storageTexture', view: finAView }, { kind: 'storageTexture', view: finBView }, ro(this.bufFLoad),
           { kind: 'storageTexture', view: finCView }, ro(this.bufFCov)]),
-      inject: this.makeKernel('inject', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
-      probe: this.makeKernel('probe', injectMod, 'probeColumn', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
-      injectAll: this.makeKernel('injectAll', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInjectAll }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe)]),
+      inject: this.makeKernel('inject', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe), rw(this.bufStreak)]),
+      probe: this.makeKernel('probe', injectMod, 'probeColumn', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe), rw(this.bufStreak)]),
+      injectAll: this.makeKernel('injectAll', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInjectAll }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe), rw(this.bufStreak)]),
       stampProbe: this.makeKernel('stampProbe', stampMod, 'probeTop', stampRes),
       stamp: this.makeKernel('stamp', stampMod, 'main', stampRes),
       reset: this.makeKernel('reset', mod('reset', resetSrc), 'main',
@@ -620,6 +625,7 @@ export class GpuMpm implements GpuMpmSim {
       pos4[4 * i + 3] = 0; // clear base: no pigment load (colour comes only from masterbatch)
     }
     q.writeBuffer(this.bufPos, 0, pos4);
+    q.writeBuffer(this.bufStreak, 0, new Float32Array(4 * this.capacity));
     // "set all" inject uniform: white base
     const inj = new Float32Array(16);
     inj.set([0, 0, 0, 1e9], 0);
@@ -684,7 +690,7 @@ export class GpuMpm implements GpuMpmSim {
     const fd = this.fineDims;
     const ratio = h / fd.h;
     u[o + 44] = fd.nx; u[o + 45] = fd.ny; u[o + 46] = fd.nz; u[o + 47] = 0;
-    f.set([fd.h, 1 / fd.h, (ratio * ratio * ratio) / 8, 0], o + 48);
+    f.set([fd.h, 1 / fd.h, (ratio * ratio * ratio) / 8, p.streak], o + 48);
     // cut & roll: peel and wind, double, lift (a negative double time keeps the roll long: no fold in half);
     // cut & fold: the hand's pulling speed and how far back it pulls (fold.wgsl)
     if (this.foldMode === 1) f.set([this.foldWindSpeed, this.foldWindSeconds, this.foldLong ? -1 : DOUBLE_SECONDS, LIFT_SECONDS], o + 52);
@@ -819,6 +825,7 @@ export class GpuMpm implements GpuMpmSim {
         }
       }
     }
+    this.dispatchParticles(pass, k.streak, frameSlot);
     this.encodeFrameKernels(pass, frameSlot, true);
     pass.end();
 
@@ -953,6 +960,7 @@ export class GpuMpm implements GpuMpmSim {
     q.writeBuffer(this.bufLat, 28 * base, lat);
     q.writeBuffer(this.bufFlags, 4 * base, new Uint32Array(m));
     q.writeBuffer(this.bufFold, 16 * base, new Float32Array(4 * m));
+    q.writeBuffer(this.bufStreak, 16 * base, new Float32Array(4 * m));
     this.setCount(base + m);
     // refresh the uniform's particle count and the render volume right away
     this.writeParams(0, 0);
@@ -1067,7 +1075,7 @@ export class GpuMpm implements GpuMpmSim {
   async readParticles(): Promise<ParticleSnapshot> {
     const n = this.count;
     // positions / velocities are vec4 on the GPU; the snapshot is xyz-interleaved
-    const sizes = [4 * n, 4 * n, 7 * n, 9 * n, n].map((f) => f * 4);
+    const sizes = [4 * n, 4 * n, 7 * n, 9 * n, n, 4 * n].map((f) => f * 4);
     const total = sizes.reduce((a, b) => a + b, 0);
     if (!this.readbackStaging || this.readbackStaging.size < total) {
       this.readbackStaging?.destroy();
@@ -1076,7 +1084,7 @@ export class GpuMpm implements GpuMpmSim {
     const staging = this.readbackStaging;
     const enc = this.device.createCommandEncoder();
     let off = 0;
-    for (const [buf, size] of [[this.bufPos, sizes[0]], [this.bufVel, sizes[1]], [this.bufLat, sizes[2]], [this.bufF, sizes[3]], [this.bufFlags, sizes[4]]] as [GPUBuffer, number][]) {
+    for (const [buf, size] of [[this.bufPos, sizes[0]], [this.bufVel, sizes[1]], [this.bufLat, sizes[2]], [this.bufF, sizes[3]], [this.bufFlags, sizes[4]], [this.bufStreak, sizes[5]]] as [GPUBuffer, number][]) {
       if (size > 0) enc.copyBufferToBuffer(buf, 0, staging, off, size);
       off += size;
     }
@@ -1101,7 +1109,8 @@ export class GpuMpm implements GpuMpmSim {
       loads,
       latents: new Float32Array(take(sizes[2])),
       deformation: new Float32Array(take(sizes[3])),
-      flags: new Uint32Array(take(sizes[4]))
+      flags: new Uint32Array(take(sizes[4])),
+      streaks: new Float32Array(take(sizes[5]))
     };
     staging.unmap();
     return snap;
@@ -1146,7 +1155,7 @@ export class GpuMpm implements GpuMpmSim {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufFold, this.bufFoldInfo, this.bufFoldTables,
+    for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufStreak, this.bufFold, this.bufFoldInfo, this.bufFoldTables,
       this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll, this.bufProbe, this.bufPLoad,
       this.bufStamp, this.bufStampTop, this.bufStampInfo, this.bufBox, this.bufBoxArgs, this.bufFineBox]) {
       b.destroy();

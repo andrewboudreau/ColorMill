@@ -488,6 +488,53 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   on a canvas, converts the pixels with mixbox.js once per distinct colour
   (text in a palette pigment uses its latent directly), and stamps them; the
   stamped text goes into the start link.
+- **Colour streaks** (`streak.wgsl`, the line raster in `raster.wgsl`): colour
+  lives on particles, so it can neither smear thinner nor longer than the
+  particles reach, and a real chunk, which becomes laminae many times its
+  area, would turn to speckle. Every particle carries a unit direction `d`
+  and a length `L` in particle spacings (one `vec4`). The direction is a
+  material line element turned by the velocity gradient, `ds/dt = C s`,
+  integrated once a frame to second order and renormalised, so on the sheet
+  it lies along the roll's circumference. The length is not the line
+  element's: `L += STREAK_GAIN · max(γ − STREAK_RATE_MIN, 0) · dt` with
+  `γ = ‖(C + Cᵀ)/2‖_F`, capped at 16, never shrinking, because a smear in
+  shear lengthens in proportion to the strain. Two things rule the line
+  element's own length out. A real sheet folds like a jelly roll and keeps
+  its laminae, while the under-resolved flow here un-stretches material when
+  the sheet re-enters the bank (measured: a median of 1.3 spacings on the
+  sheet, and falling). And there is little stretch along the line to begin
+  with: material beside a roll enters the nip already at the roll's speed,
+  so the nip is shear, not extension, and it is several times wider for its
+  rolls than a real one. `STREAK_GAIN` = 6 spacings per unit of strain
+  brings a particle to full length in one pass of the nip;
+  `STREAK_RATE_MIN` = 2 /s leaves the bank at rest and the solver's elastic
+  chatter out (the nip runs at 10 to 25 /s), so a chunk sitting on the bank
+  keeps its seed length of 0.5. The colour raster (fine lattice only) draws
+  each pigment-carrying particle (load above 0.05) as a line: `K` taps along
+  `d`, two fine cells apart (a tap's trilinear footprint is two cells wide,
+  so the line stays continuous), up to 6, each of weight `1/K`, the
+  length capped by the `streak` parameter (0 = points, the old picture
+  exactly). **Unequal ink**: a smeared chunk is laminae of unequal
+  thickness, not an even film, so one particle in four draws its pigment
+  3.4 times over and the other three 0.2 times (a mean of one; by a hash of
+  the particle's index, coming in as its length passes 0.5 to 3.5). Lines
+  lying side by side then differ, and where the colour is thin the smear
+  reads as threads with clear gaps instead of an even wash (lines alone
+  only softened the speckle; a dense band is opaque either way). The colour
+  box (`box.wgsl`) is widened by half the longest line so no tap lands on
+  its empty edge texels. Inject and stamp scale a particle's length by
+  `1 - a`, so a fresh dollop or picture is neither pre-smeared nor uneven
+  (a zero length is reseeded). The `streak` mill parameter (drawer slider
+  "Colour streaks", link key `streak`, default 12 spacings) is a picture
+  setting: the physics and the solver-grid density volume are unchanged.
+  Its cost is the extra taps, so it grows with the share of the batch that
+  carries pigment: nothing measurable with a chunk or two, and on the
+  software GPU at low roughly 10 to 15% of a frame with 85% of the particles
+  pigmented (28% with taps one cell apart, which is why they are two). What it does not give is the
+  slow feeding of a real mill, where a chunk sits in a large bank for many
+  revolutions and paints a stripe on every pass: here the bank drains in
+  about a second and a chunk goes through the nip as one patch (a bigger
+  batch buries the pigment inside a thick sheet instead).
 - **Pigment load.** Each particle carries a pigment load in `pos.w` (clear
   base 0, a masterbatch chunk `PIGMENT_LOAD` = 12). The raster accumulates
   per node the mass, the load and the load-weighted latent. The fine raster's
@@ -852,7 +899,7 @@ src/gpu/device.ts               WebGPU init + capability report + fallback messa
 src/config/mill.ts              MillConfig, presets, geometry helpers (pure, tested)
 src/sim/types.ts                shared interfaces (GpuMpmSim API, snapshots, stats)
 src/sim/mpm.ts                  GpuMpmSim implementation
-src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, box, raster, disperse, pack, inject, stamp, fold
+src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, box, raster, disperse, streak, pack, inject, stamp, fold
 src/stamp.ts                    stamping a picture on the bank: raster size, footprint, pixels to latents (pure, tested)
 src/render/renderer.ts          Renderer (ray-march), src/render/camera.ts
 src/render/shaders/raymarch.wgsl, mixbox.wgsl

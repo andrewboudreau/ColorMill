@@ -20,6 +20,8 @@ struct Inject {
 @group(0) @binding(3) var<storage, read_write> lat : array<f32>;
 // probe[0] = float bits of the highest y in the column (0 = nothing found)
 @group(0) @binding(4) var<storage, read_write> probe : array<atomic<u32>>;
+// colour streaks (streak.wgsl): a fresh dollop is not pre-smeared
+@group(0) @binding(5) var<storage, read_write> streak : array<vec4<f32>>;
 
 @compute @workgroup_size(128)
 fn probeColumn(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
@@ -57,6 +59,8 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
     let z = lat[7u * p + c];
     lat[7u * p + c] = z + a * (zp[c] - z);
   }
+  let st = streak[p];
+  streak[p] = vec4<f32>(st.xyz, st.w * (1.0 - a));
   // pigment load: the clear base carries none (set-all mode); tinted particles move toward a chunk's load
   if (I.mode.x == 1u) {
     pos[p].w = 0.0;

@@ -627,7 +627,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   // experiment: the colour raster's resolution in cells per unit (?colour=32 puts it on the
   // solver grid, the look before the colour raster existed; the preset's value otherwise)
   const colourQuery = parseFloat(query.get('colour') ?? '');
-  const colourCells = Number.isFinite(colourQuery) && colourQuery >= 16 && colourQuery <= 128 ? colourQuery : undefined;
+  const colourCells = Number.isFinite(colourQuery) && colourQuery >= 16 && colourQuery <= 160 ? colourQuery : undefined;
   const buildConfig = (p: QualityPreset, params: MillParams, b: number = batch): MillConfig => ({
     quality: colourCells !== undefined ? { ...QUALITY_PRESETS[p], colourCellsPerUnit: colourCells } : QUALITY_PRESETS[p],
     material,

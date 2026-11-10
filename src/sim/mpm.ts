@@ -42,14 +42,21 @@ export const WHITE_LATENT: Latent = [0, 0, 0, 1, 0.00481862, 0.00021851, 0.00295
 export const PARTICLE_WG = 128;
 export const GRID_WG = 4;
 /** The material's box buffer (box.wgsl; the word offsets mirror common.wgsl). */
-const BOX_WORDS = 32;
+const BOX_WORDS = 48;
+const BOX_FINE = 32;
+const BOX_FINE_RANGE = 36;
+const BOX_FINE_PREV = 40;
+/** The colour raster's cell is FINE_K / 8 finest cells; 8 is the finest (common.wgsl). */
+const FINE_K_MIN = 8;
 const BOX_ACC = 0;
 const BOX_GRID = 6;
 const BOX_LAST = 12;
 const BOX_FRAME = 18;
 const BOX_PREV = 24;
-/** Indirect dispatch arguments box.wgsl writes: the grid update's at word 0, the raster clear and pack's at word 4. */
-const BOX_ARG_WORDS = 8;
+/** Indirect dispatch arguments box.wgsl writes: the grid update's at word 0, the raster clear and pack's at word 4,
+ *  the colour raster's at word 8. */
+const BOX_ARG_WORDS = 12;
+const BOX_ARG_FINE = 8;
 const BOX_ARG_GRID = 0;
 const BOX_ARG_FRAME = 4;
 /** Uniform ring stride (>= minUniformBufferOffsetAlignment). */
@@ -276,6 +283,8 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufBox: GPUBuffer;
   /** indirect dispatch arguments written by box.wgsl: [0..2] the grid update, [4..6] the raster's clear and pack */
   private readonly bufBoxArgs: GPUBuffer;
+  /** where the colour raster's box is this frame (box.wgsl fineOut): written by the solver as storage, read by the renderer as a uniform */
+  private readonly bufFineBox: GPUBuffer;
   // stamp (stamp.wgsl): the picture's latents, the per-column surface, its uniform
   private readonly bufStamp: GPUBuffer;
   private readonly bufStampTop: GPUBuffer;
@@ -391,6 +400,7 @@ export class GpuMpm implements GpuMpmSim {
     this.bufInjectAll = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bufProbe = device.createBuffer({ label: 'GpuMpm-probe', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
     this.bufBox = device.createBuffer({ label: 'GpuMpm-box', size: 4 * BOX_WORDS, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+    this.bufFineBox = device.createBuffer({ label: 'GpuMpm-fine-box', size: 32, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
     this.bufBoxArgs = device.createBuffer({ label: 'GpuMpm-box-args', size: 4 * BOX_ARG_WORDS, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST });
     this.bufStamp = device.createBuffer({ label: 'GpuMpm-stamp', size: 4 * STAMP_FLOATS_PER_PIXEL * STAMP_MAX_PIXELS, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.bufStampTop = device.createBuffer({ label: 'GpuMpm-stamp-top', size: 4 * this.dims.nx * this.dims.nz, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -403,7 +413,7 @@ export class GpuMpm implements GpuMpmSim {
     this.finC = device.createTexture({ size: [fd.nx, fd.ny, fd.nz], dimension: '3d', format: 'rgba16float', usage: texUsage, label: 'finC' });
     const sim = this;
     this.volumes = {
-      volA: this.volA, dims: d, finA: this.finA, finB: this.finB, finC: this.finC, fineDims: fd,
+      volA: this.volA, dims: d, finA: this.finA, finB: this.finB, finC: this.finC, fineDims: fd, fineBox: this.bufFineBox,
       get version() { return sim.volumeVersion; },
       get densityVersion() { return sim.densityVersion; }
     };
@@ -508,7 +518,7 @@ export class GpuMpm implements GpuMpmSim {
     const stampRes: Resource[] = [{ kind: 'uniform', buffer: this.bufStampInfo }, rw(this.bufPos), rw(this.bufLat), rw(this.bufStampTop), ro(this.bufStamp)];
     const clearRes = [ro(this.bufBox), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)];
     const boxMod = mod('box', boxSrc);
-    const boxRes = [rw(this.bufBox), rw(this.bufBoxArgs)];
+    const boxRes = [rw(this.bufBox), rw(this.bufBoxArgs), rw(this.bufFineBox)];
     const foldRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags), rw(this.bufFold),
       rw(this.bufFoldInfo), ro(this.bufPMass), rw(this.bufFoldTables)];
     const volAView = this.volA.createView({ dimension: '3d' });
@@ -531,7 +541,7 @@ export class GpuMpm implements GpuMpmSim {
         [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), ro(this.bufFlags), ro(this.bufGVel),
           rw(this.bufFoldInfo), ro(this.bufFold), rw(this.bufBox)]),
       raster: this.makeKernel('raster', rasterMod, 'main',
-        [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad), rw(this.bufPCov)]),
+        [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad), rw(this.bufPCov), ro(this.bufBox)]),
       disperse: this.makeKernel('disperse', mod('disperse', disperseSrc), 'main',
         [rw(this.bufPos), ro(this.bufC), rw(this.bufLat), ro(this.bufPMass), ro(this.bufPLat), ro(this.bufFlags), ro(this.bufPLoad)]),
       pack: this.makeKernel('pack', packMod, 'main',
@@ -539,7 +549,7 @@ export class GpuMpm implements GpuMpmSim {
       // the colour raster: the same scatter and pack onto the finer grid, its accumulators bound
       // where the solver grid's are
       rasterFine: this.makeKernel('rasterFine', rasterMod, 'mainFine',
-        [ro(this.bufPos), ro(this.bufLat), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad), rw(this.bufFCov)]),
+        [ro(this.bufPos), ro(this.bufLat), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad), rw(this.bufFCov), ro(this.bufBox)]),
       packFine: this.makeKernel('packFine', packMod, 'mainFine',
         [ro(this.bufBox), ro(this.bufFMass), ro(this.bufFLat), { kind: 'storageTexture', view: finAView }, { kind: 'storageTexture', view: finBView }, ro(this.bufFLoad),
           { kind: 'storageTexture', view: finCView }, ro(this.bufFCov)]),
@@ -586,9 +596,15 @@ export class GpuMpm implements GpuMpmSim {
     box.set([0xffffffff, 0xffffffff, 0xffffffff, 0, 0, 0], BOX_ACC);
     for (const at of [BOX_GRID, BOX_FRAME, BOX_PREV]) box.set([0, 0, 0, d.nx, d.ny, d.nz], at);
     box.set([0, 0, 0, d.nx - 1, d.ny - 1, d.nz - 1], BOX_LAST);
+    // the colour raster: every texel in range once (the next frame_ lays its box over the whole domain)
+    const fd = this.fineDims;
+    box.set([0, 0, 0, FINE_K_MIN], BOX_FINE);
+    box.set([fd.nx, fd.ny, fd.nz], BOX_FINE_RANGE);
+    box.set([fd.nx, fd.ny, fd.nz], BOX_FINE_PREV);
     const args = new Uint32Array(BOX_ARG_WORDS);
     args.set(this.gridDispatch, 0);
     args.set(this.gridDispatch, 4);
+    args.set(this.fineDispatch, BOX_ARG_FINE);
     this.device.queue.writeBuffer(this.bufBox, 0, box);
     this.device.queue.writeBuffer(this.bufBoxArgs, 0, args);
   }
@@ -719,15 +735,9 @@ export class GpuMpm implements GpuMpmSim {
     if (disperse) this.dispatchParticles(pass, k.disperse, slot);
     this.dispatchBox(pass, k.pack, slot, BOX_ARG_FRAME);
     // the colour raster after disperse, so the picture carries this frame's mixing
-    this.dispatchFine(pass, k.clearFine, slot);
+    this.dispatchBox(pass, k.clearFine, slot, BOX_ARG_FINE);
     this.dispatchParticles(pass, k.rasterFine, slot);
-    this.dispatchFine(pass, k.packFine, slot);
-  }
-
-  private dispatchFine(pass: GPUComputePassEncoder, k: Kernel, slot: number): void {
-    pass.setPipeline(k.pipeline);
-    pass.setBindGroup(0, k.bindGroup, [slot * UNIFORM_STRIDE]);
-    pass.dispatchWorkgroups(this.fineDispatch[0], this.fineDispatch[1], this.fineDispatch[2]);
+    this.dispatchBox(pass, k.packFine, slot, BOX_ARG_FINE);
   }
 
   // ---------------------------------------------------------------------------
@@ -1097,6 +1107,18 @@ export class GpuMpm implements GpuMpmSim {
     return snap;
   }
 
+  async readColourBox(): Promise<{ origin: [number, number, number]; cell: number; eighths: number }> {
+    const staging = this.device.createBuffer({ label: 'GpuMpm-fine-box-read', size: 32, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const enc = this.device.createCommandEncoder({ label: 'GpuMpm-fine-box-read' });
+    enc.copyBufferToBuffer(this.bufFineBox, 0, staging, 0, 32);
+    this.device.queue.submit([enc.finish()]);
+    await staging.mapAsync(GPUMapMode.READ);
+    const f = new Float32Array(staging.getMappedRange().slice(0));
+    staging.unmap();
+    staging.destroy();
+    return { origin: [f[0], f[1], f[2]], cell: f[3], eighths: Math.round(f[5]) };
+  }
+
   async readDensity(): Promise<Float32Array> {
     const d = this.dims;
     const bytesPerRow = Math.ceil((d.nx * 8) / 256) * 256;
@@ -1126,7 +1148,7 @@ export class GpuMpm implements GpuMpmSim {
     this.destroyed = true;
     for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufFold, this.bufFoldInfo, this.bufFoldTables,
       this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll, this.bufProbe, this.bufPLoad,
-      this.bufStamp, this.bufStampTop, this.bufStampInfo, this.bufBox, this.bufBoxArgs]) {
+      this.bufStamp, this.bufStampTop, this.bufStampInfo, this.bufBox, this.bufBoxArgs, this.bufFineBox]) {
       b.destroy();
     }
     this.readbackStaging?.destroy();

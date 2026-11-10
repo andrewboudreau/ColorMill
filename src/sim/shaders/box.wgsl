@@ -13,11 +13,51 @@
 // material has left are zeroed once and the accumulators and the density texture are empty
 // everywhere outside the current box.
 //
+// The colour raster (design §3.5) has a box of its own, of fixed node counts (a budget, not the
+// domain): `frame_` lays it over the material on a world-anchored lattice whose cell is the
+// finest one (the particle spacing) times FINE_K / 8, the smallest FINE_K whose range fits the
+// node counts. So the colour is at particle resolution whenever the material fits the budget
+// (milling), and coarsens by eighths when it does not (a log standing over the nip). The lattice
+// is anchored at the world origin, so texels do not swim as the box moves; a change of FINE_K
+// re-rasters everything, and it has a little hysteresis (the finer cell must fit with room to
+// spare before the raster goes back to it). The renderer reads where texel 0 is and the cell
+// from `fineOut`, a uniform to it.
+//
 // When particles are placed from the CPU (seeding, reset, a pigment chunk) the host writes the
 // whole grid into every box (mpm.ts resetBox): the full grid is always a valid box.
 @group(0) @binding(1) var<storage, read_write> box : array<atomic<u32>>;
-// indirect dispatch arguments: [0..2] the solver's grid update, [4..6] the raster's clear and pack
+// indirect dispatch arguments: [0..2] the solver's grid update, [4..6] the raster's clear and pack,
+// [8..10] the colour raster's clear and pack
 @group(0) @binding(2) var<storage, read_write> args : array<u32>;
+// for the renderer: [0] = world position of the colour raster's texel 0 (xyz) and its cell (w),
+// [1] = (the pack normalisation at that cell, FINE_K, 0, 0)
+@group(0) @binding(3) var<storage, read_write> fineOut : array<vec4<f32>>;
+
+struct FineRange {
+  origin : vec3<i32>,   // lattice index of texel 0
+  size : vec3<i32>,     // texels in use
+};
+
+/// The colour raster's range over the world box lo..hi at cell hF: a particle at x rasters to
+/// lattice nodes floor(x / hF - 0.5) and the next, so two nodes before lo and two after hi leave an
+/// empty texel at each end (what a clamped lookup outside the range reads), within the domain.
+fn fineRange(lo : vec3<f32>, hi : vec3<f32>, hF : f32) -> FineRange {
+  var r : FineRange;
+  r.origin = max(vec3<i32>(floor(lo / hF)) - vec3<i32>(2), vec3<i32>(0));
+  let last = min(vec3<i32>(floor(hi / hF)) + vec3<i32>(2), vec3<i32>(ceil(P.domain.xyz / hF)));
+  r.size = last - r.origin + vec3<i32>(1);
+  return r;
+}
+
+/// The smallest FINE_K whose range over lo..hi fits the colour raster's node counts.
+fn fineFit(lo : vec3<f32>, hi : vec3<f32>) -> i32 {
+  let tex = vec3<i32>(P.fine.xyz);
+  for (var k = FINE_K_MIN; k < FINE_K_MAX; k++) {
+    let r = fineRange(lo, hi, P.fineH.x * f32(k) / 8.0);
+    if (all(r.size <= tex)) { return k; }
+  }
+  return FINE_K_MAX;
+}
 
 fn loadCells(at : u32) -> vec3<i32> {
   return vec3<i32>(i32(atomicLoad(&box[at])), i32(atomicLoad(&box[at + 1u])), i32(atomicLoad(&box[at + 2u])));
@@ -76,4 +116,32 @@ fn frame_() {
   storeBox(BOX_FRAME, 4u, min(lo, plo), min(max(hi, phi), top));
   storeCells(BOX_PREV, lo);
   storeCells(BOX_PREV + 3u, hi - lo + vec3<i32>(1));
+
+  // the colour raster: the world box of the particles' cells, on the finest lattice that fits
+  let h = P.hdt.x;
+  let wlo = vec3<f32>(mn) * h;
+  let whi = vec3<f32>(mx + vec3<i32>(1)) * h;
+  let pad = vec3<f32>(2.0 * h);
+  let kPrev = i32(atomicLoad(&box[BOX_FINE + 3u]));
+  let kFit = fineFit(wlo, whi);
+  let kRoomy = fineFit(wlo - pad, whi + pad);
+  var k = kFit;
+  if (kPrev >= kRoomy) { k = kRoomy; } else if (kPrev > kFit) { k = kPrev; }
+  let hF = P.fineH.x * f32(k) / 8.0;
+  let tex = vec3<i32>(P.fine.xyz);
+  let r = fineRange(wlo, whi, hF);
+  let size = min(r.size, tex);
+  let prev = loadCells(BOX_FINE_PREV);
+  storeCells(BOX_FINE, r.origin);
+  atomicStore(&box[BOX_FINE + 3u], u32(k));
+  let cover = min(max(size, prev), tex);
+  storeCells(BOX_FINE_RANGE, cover);
+  storeCells(BOX_FINE_PREV, size);
+  let groups = (cover + vec3<i32>(3)) / 4;
+  args[8] = u32(groups.x);
+  args[9] = u32(groups.y);
+  args[10] = u32(groups.z);
+  let s = 8.0 / f32(k);
+  fineOut[0] = vec4<f32>(vec3<f32>(r.origin) * hF, hF);
+  fineOut[1] = vec4<f32>(P.fineH.z * s * s * s, f32(k), 0.0, 0.0);
 }

@@ -18,10 +18,11 @@ fn clearRaster(@builtin(global_invocation_id) lid : vec3<u32>) {
   for (var c = 0u; c < 7u; c++) { plat[7u * n + c] = 0; }
 }
 
-/// The colour raster's accumulators (bound in place of pmass / plat / pload, plus pcov), over the
-/// fine grid.
+/// The colour raster's accumulators (bound in place of pmass / plat / pload, plus pcov), over
+/// BOX_FINE_RANGE: the texels this frame's range and the last one's use.
 @compute @workgroup_size(4, 4, 4)
 fn clearFine(@builtin(global_invocation_id) gid : vec3<u32>) {
+  if (any(gid >= vec3<u32>(box[BOX_FINE_RANGE], box[BOX_FINE_RANGE + 1u], box[BOX_FINE_RANGE + 2u]))) { return; }
   if (gid.x >= P.fine.x || gid.y >= P.fine.y || gid.z >= P.fine.z) { return; }
   let n = (gid.z * P.fine.y + gid.y) * P.fine.x + gid.x;
   pmass[n] = 0;

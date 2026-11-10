@@ -257,9 +257,14 @@ x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.2
   (so a fully packed cell ≈ 1). Coarse pigment accumulators remain inputs to
   dispersion; only the fine raster's pigment is packed into render textures.
 - **Colour raster**: the same scatter and pack a second time onto a finer
-  grid (`colourCellsPerUnit`: 64 at low, 80 at medium, 88 at high and ultra,
-  the most whose 7-channel accumulator fits the default 128 MiB storage-binding limit;
-  `colourGridDims`), into its own accumulators and three `rgba16float`
+  lattice, in a box laid over the material each frame (§3.6). Its finest
+  cell is the particle spacing, `colourCellsPerUnit` = twice the solver's
+  cells per unit (64 / 96 / 128 / 144 at low / medium / high / ultra); its
+  node counts are a budget (`colourNodes`, `colourGridDims`: the roll's
+  whole length and as much height and depth as the budget buys, kept to the
+  memory the raster used when it covered the domain and under the default
+  128 MiB storage-binding limit for the 7-channel accumulator). It has its
+  own accumulators and three `rgba16float`
   textures `finA = (load, lat0..2)`, `finB = (lat3..6)`, `finC = (mass,
   coverage)`, load, mass and coverage normalised by `(h/hF)³/8` so a packed
   fine cell reads ≈ 1, `finA.x / finC.x` is the load per unit mass and
@@ -275,12 +280,13 @@ x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.2
   pigment colour and load from these (§8) while the surface and the sample
   weights still come from `volA`: the sheet the nip makes is one or two
   solver cells thick, and a streak inside it was averaged into its cell
-  before it was drawn; on the finer grid the colour's detail limit is the
-  fine cell and, below that, the particle spacing. Costs one more raster
-  pass per frame (per particle, so independent of the fine grid's size) and
+  before it was drawn; on the finer lattice the colour's detail limit is
+  the particle spacing. Costs one more raster
+  pass per frame (per particle, so independent of the box's size), a clear
+  and a pack over the box's range in use, and
   the fine buffers and textures (64 bytes per fine node: 40 in the i32
   accumulators, coverage included, and 24 in the three textures; about
-  116 MB at low, 226 MB at medium, 300 MB at high and ultra); a
+  116 MB at low, 225 MB at medium, 300 MB at high and ultra); a
   device whose storage-binding limit cannot hold the 7-channel accumulator
   falls back to the solver grid with a console warning. The dispersion
   kernel keeps reading the solver-grid raster.
@@ -311,6 +317,28 @@ passes therefore cover a box around the material, not every node
   density texture are empty everywhere outside the current box (the
   dispersion gather, the grid update's packing test and the renderer rely on
   that).
+- **The colour raster's box** (`frame_` again). The colour raster used to
+  be a dense grid over the domain: 4.7 million nodes at high, about 1% of
+  them holding material, cleared and repacked every frame, and capped at 88
+  cells per unit by the binding limit while the particles are 128 per unit
+  apart. It is now a box of fixed node counts (§3.5) laid over the
+  particles' world bounds on a lattice anchored at the world origin, with
+  cell `hF = finest · FINE_K / 8`. `frame_` takes the smallest `FINE_K ≥ 8`
+  whose range (two lattice nodes of margin at each end, so a clamped lookup
+  outside reads an empty texel) fits the node counts: at `FINE_K = 8` the
+  colour is at particle resolution, which milling fits on every preset; a
+  log standing over the nip can outgrow the box at the finer presets, and
+  the cell then grows by eighths and shrinks back after, with a little
+  hysteresis (the finer cell must fit with two solver cells to spare before
+  the raster returns to it). Because the lattice is world-anchored, texels
+  do not swim as the box follows the material. The raster reads the lattice
+  from the box buffer; its clear and pack cover this frame's range and the
+  last one's through an indirect dispatch; and `frame_` writes the world
+  position of texel 0 and the cell into a 32-byte buffer the renderer binds
+  as a uniform (`RenderVolumes.fineBox`), so the lookup needs no readback.
+  At low the budget buys the whole domain at the particle spacing and the
+  picture is unchanged, pixel for pixel; the gain there is the cropped
+  clear and pack.
 - **From the CPU.** Whenever particles are placed without a G2P (seeding,
   reset, a pigment chunk) the host writes the whole grid into every box
   (`resetBox`): the whole grid is always a valid box, and the next substep's
@@ -319,8 +347,10 @@ passes therefore cover a box around the material, not every node
 Nothing about the physics or the density volume changes (a fingerprint run
 hashing the particle state and the density volume through milling, a cut &
 fold and a cut & roll matches bit for bit). On the software GPU the grid
-update and the raster's clear and pack were about 15% of a frame; the box
-takes most of that. The box grows when the operator stands a log up over
+update and the raster's clear and pack were about 15% of a frame, and the
+colour raster's clear and pack 10 to 20%; the boxes take most of both (the
+fingerprint run went from 455 to 293 ms a frame at low with the
+self-clearing grid of §3.1). The box grows when the operator stands a log up over
 the nip and shrinks again as the nip eats it.
 
 ---

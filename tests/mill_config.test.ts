@@ -130,18 +130,26 @@ describe('pigment chunk sizes', () => {
 });
 
 describe('colour raster grid', () => {
-  it('is finer than the solver grid at every preset and its buffers stay under 128 MB', () => {
+  it('is at the particle spacing at every preset, within its node budget and under 128 MB a buffer', () => {
     for (const q of Object.values(QUALITY_PRESETS)) {
       const d = gridDims(q);
       const f = colourGridDims(q);
-      expect(q.colourCellsPerUnit).toBeGreaterThan(q.cellsPerUnit);
+      // the finest colour cell is the particle spacing: two particles per solver cell per axis
+      expect(q.colourCellsPerUnit).toBe(GEOMETRY.seedPerAxis * q.cellsPerUnit);
       expect(f.h).toBeCloseTo(1 / q.colourCellsPerUnit, 12);
-      expect(f.nx).toBeGreaterThan(d.nx);
+      // the whole roll length at that cell, and at least the mill's working height and depth
+      expect(f.nx).toBe(2 * (d.nx - 1) + 1);
+      expect((f.ny - 1) * f.h).toBeGreaterThan(1.0);
+      expect((f.nz - 1) * f.h).toBeGreaterThan(0.9);
       expect(f.nodeCount).toBe(f.nx * f.ny * f.nz);
+      expect(f.nodeCount).toBeLessThanOrEqual(q.colourNodes);
       // the 7-channel latent accumulator is the biggest buffer; the default binding limit is 128 MiB
       expect(7 * 4 * f.nodeCount).toBeLessThan(128 * 1024 * 1024);
     }
+    // low: the budget buys the whole domain at the particle spacing
     expect(colourGridDims(QUALITY_PRESETS.low)).toMatchObject({ nx: 97, ny: 145, nz: 129 });
-    expect(colourGridDims(QUALITY_PRESETS.high)).toMatchObject({ nx: 133, ny: 199, nz: 177 });
+    // high: the roll length, and the height and depth the budget buys
+    expect(colourGridDims(QUALITY_PRESETS.high)).toMatchObject({ nx: 193, ny: 165, nz: 147 });
+    expect(colourGridDims(QUALITY_PRESETS.ultra).nx).toBe(217);
   });
 });

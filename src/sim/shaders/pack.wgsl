@@ -25,12 +25,15 @@ fn main(@builtin(global_invocation_id) lid : vec3<u32>) {
 // of pmass / plat / pload: finA = (load, lat0, lat1, lat2), finB = (lat3, lat4, lat5, lat6),
 // finC = (mass, coverage, 0, 0), load, mass and coverage normalised by (h/hF)^3 / 8 so a packed
 // fine cell reads ~1, finA.x / finC.x is the load per unit mass and finC.y / finC.x
-// is the share of the cell's mass that carries pigment.
+// is the share of the cell's mass that carries pigment. Over BOX_FINE_RANGE (this frame's range
+// and the last one's), at this frame's cell hF = finest * FINE_K / 8.
 @compute @workgroup_size(4, 4, 4)
 fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>) {
+  if (any(gid >= vec3<u32>(box[BOX_FINE_RANGE], box[BOX_FINE_RANGE + 1u], box[BOX_FINE_RANGE + 2u]))) { return; }
   if (gid.x >= P.fine.x || gid.y >= P.fine.y || gid.z >= P.fine.z) { return; }
   let n = (gid.z * P.fine.y + gid.y) * P.fine.x + gid.x;
-  let norm = P.fineH.z;
+  let ks = 8.0 / f32(box[BOX_FINE + 3u]);
+  let norm = P.fineH.z * ks * ks * ks;
   let m = decodeFixed(pmass[n], MASS_SCALE);
   let w = decodeFixed(pload[n], MASS_SCALE);
   let cov = decodeFixed(pcov[n], MASS_SCALE);

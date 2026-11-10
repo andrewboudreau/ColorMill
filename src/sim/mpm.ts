@@ -13,7 +13,7 @@
  * xyz-interleaved ParticleSnapshot layout.
  */
 import {
-  DEFAULT_PARAMS, PIGMENT_POOL_FRACTION,
+  DEFAULT_PARAMS, PIGMENT_CHUNK_RADIUS, PIGMENT_POOL_FRACTION,
   GEOMETRY, bankTopY, colourGridDims, gridDims, lameParameters, rollerPoses, seedBankPositions,
   type GridDims, type MillConfig, type MillParams, type QualitySettings, type RollStyle
 } from '../config/mill';
@@ -35,6 +35,7 @@ import resetSrc from './shaders/reset.wgsl?raw';
 import foldSrc from './shaders/fold.wgsl?raw';
 import stampSrc from './shaders/stamp.wgsl?raw';
 import boxSrc from './shaders/box.wgsl?raw';
+import chunkSrc from './shaders/chunk.wgsl?raw';
 
 /** Titanium White base latent (src/sim/mixbox.c MB_WHITE). */
 export const WHITE_LATENT: Latent = [0, 0, 0, 1, 0.00481862, 0.00021851, 0.00295198];
@@ -43,6 +44,12 @@ export const WHITE_LATENT: Latent = [0, 0, 0, 1, 0.00481862, 0.00021851, 0.00295
 export const PARTICLE_WG = 128;
 export const GRID_WG = 4;
 /** The material's box buffer (box.wgsl; the word offsets mirror common.wgsl). */
+/** Held pigment chunks (chunk.wgsl): the table's header words, words a chunk, and how many it holds. */
+const CHUNK_HEADER = 4;
+const CHUNK_WORDS = 8;
+const CHUNK_MAX = 32;
+/** flags of a held chunk particle: kinematic (bit 0) and a chunk's (bit 2) */
+const CHUNK_HELD = 5;
 const BOX_WORDS = 48;
 const BOX_FINE = 32;
 const BOX_FINE_RANGE = 36;
@@ -286,6 +293,12 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufBox: GPUBuffer;
   /** indirect dispatch arguments written by box.wgsl: [0..2] the grid update, [4..6] the raster's clear and pack */
   private readonly bufBoxArgs: GPUBuffer;
+  /** held pigment chunks (chunk.wgsl): which particles each chunk is, the level it feeds in at and its footprint */
+  private readonly bufChunks: GPUBuffer;
+  /** chunks in the table since the last reset */
+  private chunkCount = 0;
+  /** a held chunk may still be feeding in (the chunk kernels run each frame while set) */
+  private chunksHeld = false;
   /** where the colour raster's box is this frame (box.wgsl fineOut): written by the solver as storage, read by the renderer as a uniform */
   private readonly bufFineBox: GPUBuffer;
   // stamp (stamp.wgsl): the picture's latents, the per-column surface, its uniform
@@ -405,6 +418,7 @@ export class GpuMpm implements GpuMpmSim {
     this.bufProbe = device.createBuffer({ label: 'GpuMpm-probe', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
     this.bufBox = device.createBuffer({ label: 'GpuMpm-box', size: 4 * BOX_WORDS, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
     this.bufFineBox = device.createBuffer({ label: 'GpuMpm-fine-box', size: 32, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+    this.bufChunks = device.createBuffer({ label: 'GpuMpm-chunks', size: 4 * (CHUNK_HEADER + CHUNK_WORDS * CHUNK_MAX), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
     this.bufBoxArgs = device.createBuffer({ label: 'GpuMpm-box-args', size: 4 * BOX_ARG_WORDS, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST });
     this.bufStamp = device.createBuffer({ label: 'GpuMpm-stamp', size: 4 * STAMP_FLOATS_PER_PIXEL * STAMP_MAX_PIXELS, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.bufStampTop = device.createBuffer({ label: 'GpuMpm-stamp-top', size: 4 * this.dims.nx * this.dims.nz, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -521,6 +535,8 @@ export class GpuMpm implements GpuMpmSim {
     const stampMod = mod('stamp', stampSrc);
     const stampRes: Resource[] = [{ kind: 'uniform', buffer: this.bufStampInfo }, rw(this.bufPos), rw(this.bufLat), rw(this.bufStampTop), ro(this.bufStamp), rw(this.bufStreak)];
     const clearRes = [ro(this.bufBox), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)];
+    const chunkMod = mod('chunk', chunkSrc);
+    const chunkRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufFlags), rw(this.bufChunks), ro(this.bufGVel)];
     const boxMod = mod('box', boxSrc);
     const boxRes = [rw(this.bufBox), rw(this.bufBoxArgs), rw(this.bufFineBox)];
     const foldRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags), rw(this.bufFold),
@@ -536,6 +552,9 @@ export class GpuMpm implements GpuMpmSim {
       clearRaster: this.makeKernel('clearRaster', clearMod, 'clearRaster', clearRes),
       clearFine: this.makeKernel('clearFine', clearMod, 'clearFine',
         [ro(this.bufBox), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad), rw(this.bufFCov)]),
+      chunkStep: this.makeKernel('chunkStep', chunkMod, 'step_', chunkRes),
+      chunkSettle: this.makeKernel('chunkSettle', chunkMod, 'settle_', chunkRes),
+      chunkDrop: this.makeKernel('chunkDrop', chunkMod, 'drop_', chunkRes),
       boxStep: this.makeKernel('boxStep', boxMod, 'step_', boxRes),
       boxFrame: this.makeKernel('boxFrame', boxMod, 'frame_', boxRes),
       p2g: this.makeKernel('p2g', mod('p2g', p2gSrc), 'main',
@@ -695,6 +714,10 @@ export class GpuMpm implements GpuMpmSim {
     // cut & fold: the hand's pulling speed and how far back it pulls (fold.wgsl)
     if (this.foldMode === 1) f.set([this.foldWindSpeed, this.foldWindSeconds, this.foldLong ? -1 : DOUBLE_SECONDS, LIFT_SECONDS], o + 52);
     else f.set([this.hand.speed, handPull(gap), 0, 0], o + 52);
+    // held pigment chunks (chunk.wgsl): a medium chunk sinks its own height in chunkFeed seconds
+    // carrying two particles' mass is the bank
+    // (two particles' mass at a node is the bank under it)
+    f.set([p.chunkFeed > 0 ? (2 * PIGMENT_CHUNK_RADIUS) / p.chunkFeed : 0, 2 * pMass, 0, 0], o + 56);
   }
 
   // ---------------------------------------------------------------------------
@@ -799,6 +822,17 @@ export class GpuMpm implements GpuMpmSim {
       ? { querySet: this.querySet, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 }
       : undefined;
     const pass = encoder.beginComputePass({ label: 'GpuMpm-step', timestampWrites });
+    if (this.chunksHeld) {
+      if (this.foldPending || this.params.chunkFeed <= 0) {
+        // an operator move takes everything on the mill, and with the feed off there is nothing to wait for:
+        // every held chunk is let go where it is
+        this.dispatchParticles(pass, k.chunkDrop, frameSlot);
+        this.chunksHeld = false;
+      } else {
+        this.dispatchOne(pass, k.chunkSettle, frameSlot);
+        this.dispatchParticles(pass, k.chunkStep, frameSlot);
+      }
+    }
     if (this.foldPending) {
       this.dispatchParticles(pass, k.foldSelect, 0);
       pass.setPipeline(k.foldTables.pipeline);
@@ -874,6 +908,8 @@ export class GpuMpm implements GpuMpmSim {
     this.statsData.rollerAngleFront = 0;
     this.statsData.rollerAngleBack = 0;
     this.setCount(this.seedCount);
+    this.chunkCount = 0;
+    this.chunksHeld = false;
     this.uploadInitialState();
   }
 
@@ -958,7 +994,21 @@ export class GpuMpm implements GpuMpmSim {
     q.writeBuffer(this.bufF, 36 * base, F);
     q.writeBuffer(this.bufAff, 36 * base, new Float32Array(9 * m));
     q.writeBuffer(this.bufLat, 28 * base, lat);
-    q.writeBuffer(this.bufFlags, 4 * base, new Uint32Array(m));
+    // held, to feed in from the bottom (chunk.wgsl), unless the feed is off, an operator move is under way
+    // or the chunk table is full: then it is let go whole
+    const held = this.params.chunkFeed > 0 && !this.operatorBusy && this.chunkCount < CHUNK_MAX;
+    q.writeBuffer(this.bufFlags, 4 * base, new Uint32Array(m).fill(held ? CHUNK_HELD : 0));
+    if (held) {
+      // its entry: first particle, count, the level it feeds in at (where its bottom was set down), how far
+      // that was lowered this frame, and its footprint
+      const entry = new Uint32Array(CHUNK_WORDS);
+      entry.set([base, m]);
+      new Float32Array(entry.buffer).set([cy - r, 0, cx, cz, r], 2);
+      q.writeBuffer(this.bufChunks, 4 * (CHUNK_HEADER + CHUNK_WORDS * this.chunkCount), entry);
+      this.chunkCount++;
+      q.writeBuffer(this.bufChunks, 0, new Uint32Array([this.chunkCount]));
+      this.chunksHeld = true;
+    }
     q.writeBuffer(this.bufFold, 16 * base, new Float32Array(4 * m));
     q.writeBuffer(this.bufStreak, 16 * base, new Float32Array(4 * m));
     this.setCount(base + m);
@@ -1157,7 +1207,7 @@ export class GpuMpm implements GpuMpmSim {
     this.destroyed = true;
     for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufStreak, this.bufFold, this.bufFoldInfo, this.bufFoldTables,
       this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll, this.bufProbe, this.bufPLoad,
-      this.bufStamp, this.bufStampTop, this.bufStampInfo, this.bufBox, this.bufBoxArgs, this.bufFineBox]) {
+      this.bufStamp, this.bufStampTop, this.bufStampInfo, this.bufBox, this.bufBoxArgs, this.bufFineBox, this.bufChunks]) {
       b.destroy();
     }
     this.readbackStaging?.destroy();

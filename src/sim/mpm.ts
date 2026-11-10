@@ -46,7 +46,7 @@ export const GRID_WG = 4;
 /** The material's box buffer (box.wgsl; the word offsets mirror common.wgsl). */
 /** Held pigment chunks (chunk.wgsl): the table's header words, words a chunk, and how many it holds. */
 const CHUNK_HEADER = 4;
-const CHUNK_WORDS = 4;
+const CHUNK_WORDS = 8;
 const CHUNK_MAX = 32;
 /** flags of a held chunk particle: kinematic (bit 0) and a chunk's (bit 2) */
 const CHUNK_HELD = 5;
@@ -293,7 +293,7 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufBox: GPUBuffer;
   /** indirect dispatch arguments written by box.wgsl: [0..2] the grid update, [4..6] the raster's clear and pack */
   private readonly bufBoxArgs: GPUBuffer;
-  /** held pigment chunks (chunk.wgsl): which particles each chunk is, and the level it feeds in at */
+  /** held pigment chunks (chunk.wgsl): which particles each chunk is, the level it feeds in at and its footprint */
   private readonly bufChunks: GPUBuffer;
   /** chunks in the table since the last reset */
   private chunkCount = 0;
@@ -536,7 +536,7 @@ export class GpuMpm implements GpuMpmSim {
     const stampRes: Resource[] = [{ kind: 'uniform', buffer: this.bufStampInfo }, rw(this.bufPos), rw(this.bufLat), rw(this.bufStampTop), ro(this.bufStamp), rw(this.bufStreak)];
     const clearRes = [ro(this.bufBox), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)];
     const chunkMod = mod('chunk', chunkSrc);
-    const chunkRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufFlags), ro(this.bufChunks)];
+    const chunkRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufFlags), rw(this.bufChunks), ro(this.bufGVel)];
     const boxMod = mod('box', boxSrc);
     const boxRes = [rw(this.bufBox), rw(this.bufBoxArgs), rw(this.bufFineBox)];
     const foldRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags), rw(this.bufFold),
@@ -553,6 +553,7 @@ export class GpuMpm implements GpuMpmSim {
       clearFine: this.makeKernel('clearFine', clearMod, 'clearFine',
         [ro(this.bufBox), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad), rw(this.bufFCov)]),
       chunkStep: this.makeKernel('chunkStep', chunkMod, 'step_', chunkRes),
+      chunkSettle: this.makeKernel('chunkSettle', chunkMod, 'settle_', chunkRes),
       chunkDrop: this.makeKernel('chunkDrop', chunkMod, 'drop_', chunkRes),
       boxStep: this.makeKernel('boxStep', boxMod, 'step_', boxRes),
       boxFrame: this.makeKernel('boxFrame', boxMod, 'frame_', boxRes),
@@ -715,7 +716,8 @@ export class GpuMpm implements GpuMpmSim {
     else f.set([this.hand.speed, handPull(gap), 0, 0], o + 52);
     // held pigment chunks (chunk.wgsl): a medium chunk sinks its own height in chunkFeed seconds
     // carrying two particles' mass is the bank
-    f.set([p.chunkFeed > 0 ? (2 * PIGMENT_CHUNK_RADIUS) / p.chunkFeed : 0, 0, 0, 0], o + 56);
+    // (two particles' mass at a node is the bank under it)
+    f.set([p.chunkFeed > 0 ? (2 * PIGMENT_CHUNK_RADIUS) / p.chunkFeed : 0, 2 * pMass, 0, 0], o + 56);
   }
 
   // ---------------------------------------------------------------------------
@@ -827,6 +829,7 @@ export class GpuMpm implements GpuMpmSim {
         this.dispatchParticles(pass, k.chunkDrop, frameSlot);
         this.chunksHeld = false;
       } else {
+        this.dispatchOne(pass, k.chunkSettle, frameSlot);
         this.dispatchParticles(pass, k.chunkStep, frameSlot);
       }
     }
@@ -996,9 +999,11 @@ export class GpuMpm implements GpuMpmSim {
     const held = this.params.chunkFeed > 0 && !this.operatorBusy && this.chunkCount < CHUNK_MAX;
     q.writeBuffer(this.bufFlags, 4 * base, new Uint32Array(m).fill(held ? CHUNK_HELD : 0));
     if (held) {
-      // its entry: first particle, count, and the level it feeds in at: where its bottom was set down
-      const entry = new Uint32Array([base, m, 0, 0]);
-      new Float32Array(entry.buffer)[2] = cy - r;
+      // its entry: first particle, count, the level it feeds in at (where its bottom was set down), how far
+      // that was lowered this frame, and its footprint
+      const entry = new Uint32Array(CHUNK_WORDS);
+      entry.set([base, m]);
+      new Float32Array(entry.buffer).set([cy - r, 0, cx, cz, r], 2);
       q.writeBuffer(this.bufChunks, 4 * (CHUNK_HEADER + CHUNK_WORDS * this.chunkCount), entry);
       this.chunkCount++;
       q.writeBuffer(this.bufChunks, 0, new Uint32Array([this.chunkCount]));

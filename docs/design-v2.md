@@ -498,6 +498,17 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   off; a chunk added during a move goes in whole. Held particles take no
   part in P2G or G2P, so material passes through the lump; the raster
   draws them like any others.
+- **A softer paste was tried and does nothing.** Lowering a particle's
+  shear modulus with its pigment load (to 30% of the base's at a
+  masterbatch chunk's load, the bulk term left alone) was meant to let a
+  chunk take the shear and smear between stiffer layers. Measured against
+  the same run at full stiffness, with the chunk feed on: the spread around
+  the roll, the share of the pigment in the sheet's outer skin and the
+  surface area it colours were the same within noise at 4 and 8 s, and the
+  renders match. The putty yields everywhere in the nip and the rolls
+  dictate the motion, so a softer inclusion deforms like its neighbours;
+  and with one velocity field per cell there is no slip between a chunk and
+  the base inside a cell for softness to exploit. The change was not kept.
 - **Inject** kernel: `addPigment(center, radius, latent, strength)` blends
   particle latents inside the sphere: `z = mix(z, zPigment, strength·t)`,
   `t = 1 − |d|/radius`.

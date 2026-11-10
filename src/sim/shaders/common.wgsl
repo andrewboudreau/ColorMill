@@ -42,8 +42,8 @@ struct Params {
   fineH : vec4<f32>,
   // cut & roll, peel and wind (fold.wgsl): wind speed along the arc, T_wind, T_double, T_lift
   fold4 : vec4<f32>,
-  // pigment chunks: feed speed (chunk.wgsl: how fast a held chunk sinks through its level), the node mass that
-  // counts as material under it, the paste's shear stiffness as a share of the base's (g2p.wgsl), 0
+  // held pigment chunks (chunk.wgsl): feed speed (how fast a chunk sinks through its level), the node mass that
+  // counts as material under it, 0, 0
   chunk : vec4<f32>,
 };
 

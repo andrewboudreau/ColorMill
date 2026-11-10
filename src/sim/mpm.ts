@@ -717,7 +717,7 @@ export class GpuMpm implements GpuMpmSim {
     // held pigment chunks (chunk.wgsl): a medium chunk sinks its own height in chunkFeed seconds
     // carrying two particles' mass is the bank
     // (two particles' mass at a node is the bank under it)
-    f.set([p.chunkFeed > 0 ? (2 * PIGMENT_CHUNK_RADIUS) / p.chunkFeed : 0, 2 * pMass, Math.min(Math.max(p.pasteStiffness, 0.05), 1), 0], o + 56);
+    f.set([p.chunkFeed > 0 ? (2 * PIGMENT_CHUNK_RADIUS) / p.chunkFeed : 0, 2 * pMass, 0, 0], o + 56);
   }
 
   // ---------------------------------------------------------------------------

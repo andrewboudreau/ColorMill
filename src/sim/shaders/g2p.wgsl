@@ -132,13 +132,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   F = d.U * Sig * transpose(d.V);
   let Rot = d.U * transpose(d.V);
   J = d.S.x * d.S.y * d.S.z;
-  // Pigment paste is softer than the base (design §4): a particle's shear modulus falls with its
-  // pigment load, to P.chunk.z of the base's at a masterbatch chunk's load, so a chunk takes the
-  // shear and smears between stiffer layers instead of riding through the nip as a lump of the
-  // same putty. Its yield stress falls with it (the yield strains are the base's). The bulk term is
-  // the base's: a softer bulk would let the nip pack the paste denser.
-  let soft = mix(1.0, P.chunk.z, clamp(pw / PIGMENT_LOAD, 0.0, 1.0));
-  let tau = kirchhoffStress(F, Rot, J, P.mat.x * soft, P.mat.y);
+  let tau = kirchhoffStress(F, Rot, J, P.mat.x, P.mat.y);
   let affine = p2gAffine(tau, C);
 
   // advection, clamp, hard push-out of the rollers

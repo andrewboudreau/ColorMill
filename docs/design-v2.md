@@ -511,7 +511,8 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   chatter out (the nip runs at 10 to 25 /s), so a chunk sitting on the bank
   keeps its seed length of 0.5. The colour raster (fine lattice only) draws
   each pigment-carrying particle (load above 0.05) as a line: `K` taps along
-  `d`, `K = ceil(length / fine cell)` up to 12, each of weight `1/K`, the
+  `d`, two fine cells apart (a tap's trilinear footprint is two cells wide,
+  so the line stays continuous), up to 6, each of weight `1/K`, the
   length capped by the `streak` parameter (0 = points, the old picture
   exactly). **Unequal ink**: a smeared chunk is laminae of unequal
   thickness, not an even film, so one particle in four draws its pigment
@@ -525,8 +526,11 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   `1 - a`, so a fresh dollop or picture is neither pre-smeared nor uneven
   (a zero length is reseeded). The `streak` mill parameter (drawer slider
   "Colour streaks", link key `streak`, default 12 spacings) is a picture
-  setting: the physics and the solver-grid density volume are unchanged,
-  and the cost is within the noise of a frame. What it does not give is the
+  setting: the physics and the solver-grid density volume are unchanged.
+  Its cost is the extra taps, so it grows with the share of the batch that
+  carries pigment: nothing measurable with a chunk or two, and on the
+  software GPU at low roughly 10 to 15% of a frame with 85% of the particles
+  pigmented (28% with taps one cell apart, which is why they are two). What it does not give is the
   slow feeding of a real mill, where a chunk sits in a large bank for many
   revolutions and paints a stripe on every pass: here the bank drains in
   about a second and a chunk goes through the nip as one patch (a bigger

@@ -73,7 +73,8 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
 }
 
 const STREAK_MIN_LOAD : f32 = 0.05;  // clear base is not streaked
-const STREAK_TAPS : i32 = 12;        // most taps along a line
+const STREAK_TAPS : i32 = 6;         // most taps along a line
+const STREAK_TAP_CELLS : f32 = 2.0;  // taps this many fine cells apart: a tap's trilinear footprint is two cells wide, so the line stays continuous
 const STREAK_INK_RICH : f32 = 3.4;   // the ink of one particle in four ...
 const STREAK_INK_LEAN : f32 = 0.2;   // ... and of the other three: 0.25 * 3.4 + 0.75 * 0.2 = 1
 
@@ -102,7 +103,7 @@ fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgro
     if (len > 1e-3 && dl > 1e-3 && !isBad3(st.xyz)) {
       span = (st.xyz / dl) * len * spacing;
       let cell = 1.0 / invh;        // this frame's fine cell
-      K = clamp(i32(ceil(len * spacing / cell)), 1, STREAK_TAPS);
+      K = clamp(i32(ceil(len * spacing / (STREAK_TAP_CELLS * cell))), 1, STREAK_TAPS);
       // unequal ink: a smeared chunk is laminae of unequal thickness, not an even film. One particle
       // in four draws its pigment STREAK_INK_RICH times over and the rest STREAK_INK_LEAN (a mean of
       // one), so lines lying side by side differ and the smear reads as threads where it is thin.

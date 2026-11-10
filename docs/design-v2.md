@@ -488,6 +488,32 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   on a canvas, converts the pixels with mixbox.js once per distinct colour
   (text in a palette pigment uses its latent directly), and stamps them; the
   stamped text goes into the start link.
+- **Colour streaks** (`streak.wgsl`, the line raster in `raster.wgsl`): colour
+  lives on particles, so it can neither smear thinner nor longer than the
+  particles reach, and a real chunk, which becomes a lamina many times its
+  area, would turn to speckle. Every particle carries a unit direction `d`
+  and a length `L` in particle spacings (one `vec4`). The direction is a
+  material line element turned by the velocity gradient, `ds/dt = C s`,
+  integrated once a frame to second order and renormalised. The length is a
+  separate ratchet: `L *= exp(STREAK_GAIN · max(d·C·d − STREAK_RATE_MIN, 0) · dt)`,
+  capped at 16, and it never shrinks. A reversible material line is the wrong
+  length model: a real sheet folds like a jelly roll and keeps its laminae,
+  while the sim's under-resolved flow un-stretches material when the sheet
+  re-enters the bank. `STREAK_GAIN` = 2 because the sim's nip is several
+  times wider for its rolls than a real one (about 5x stretch where a real
+  nip gives 20x or more); `STREAK_RATE_MIN` = 1.5 /s drops the solver's
+  elastic chatter (the nip runs at 10 to 25 /s). A fresh particle starts at
+  0.5 spacing in a direction hashed from its index. The colour raster (fine
+  lattice only) draws each pigment-carrying particle (load above 0.05) as a
+  line: `K` taps along `d`, `K = ceil(length / fine cell)` up to 8, each of
+  weight `1/K`, the length capped by the `streak` parameter (0 = points, the
+  old picture exactly). The colour box (`box.wgsl`) is widened by half the
+  longest line so no tap lands on its empty edge texels. Inject and stamp
+  scale a particle's length by `1 - a`, so a fresh dollop or picture is not
+  pre-smeared (a zero length is reseeded). The `streak` mill parameter
+  (drawer slider "Colour streaks", link key `streak`, default 8 spacings) is
+  a picture setting: the physics and the solver-grid density volume are
+  unchanged.
 - **Pigment load.** Each particle carries a pigment load in `pos.w` (clear
   base 0, a masterbatch chunk `PIGMENT_LOAD` = 12). The raster accumulates
   per node the mass, the load and the load-weighted latent. The fine raster's
@@ -852,7 +878,7 @@ src/gpu/device.ts               WebGPU init + capability report + fallback messa
 src/config/mill.ts              MillConfig, presets, geometry helpers (pure, tested)
 src/sim/types.ts                shared interfaces (GpuMpmSim API, snapshots, stats)
 src/sim/mpm.ts                  GpuMpmSim implementation
-src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, box, raster, disperse, pack, inject, stamp, fold
+src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, box, raster, disperse, streak, pack, inject, stamp, fold
 src/stamp.ts                    stamping a picture on the bank: raster size, footprint, pixels to latents (pure, tested)
 src/render/renderer.ts          Renderer (ray-march), src/render/camera.ts
 src/render/shaders/raymarch.wgsl, mixbox.wgsl

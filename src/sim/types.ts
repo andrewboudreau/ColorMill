@@ -39,6 +39,8 @@ export interface ParticleSnapshot {
   readonly deformation: Float32Array;
   /** 1 uint per particle */
   readonly flags: Uint32Array;
+  /** 4 floats per particle: colour streak, xyz unit direction then w length in particle spacings */
+  readonly streaks: Float32Array;
   /** 1 float per particle: pigment load (0 = clear base, PIGMENT_LOAD = pure masterbatch) */
   readonly loads: Float32Array;
 }

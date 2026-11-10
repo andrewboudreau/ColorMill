@@ -105,6 +105,8 @@ export interface MillParams {
   /** cut & fold: how many passes one press makes (each a cut at the crown, the edge lifted, pulled back over
    *  the mill and dropped), 1 to 3 */
   foldPasses: number;
+  /** colour streaks: the longest line a pigment particle is drawn as, in particle spacings; 0 draws particles as points */
+  streak: number;
 }
 
 export const DEFAULT_PARAMS: Readonly<MillParams> = {
@@ -121,7 +123,8 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
   /* drop: lowering the log in released it a thin slice at a time, and the nip spread and
      tore each slice before the rest arrived; the whole log set down at once holds together */
   logFeed: 0,
-  foldPasses: 2
+  foldPasses: 2,
+  streak: 8
 };
 
 export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max: number; step: number }>> = {
@@ -133,7 +136,8 @@ export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max:
   backFriction: { min: 0, max: 1, step: 0.02 },
   tackCells: { min: 0, max: 6, step: 0.1 },
   logFeed: { min: 0, max: 0.6, step: 0.05 },
-  foldPasses: { min: 1, max: 3, step: 1 }
+  foldPasses: { min: 1, max: 3, step: 1 },
+  streak: { min: 0, max: 12, step: 1 }
 };
 
 /** Fixed geometry (sim units). */

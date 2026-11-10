@@ -16,18 +16,20 @@
 @group(0) @binding(6) var<storage, read_write> pcov : array<atomic<i32>>;
 // the material's box (box.wgsl): the colour raster's lattice (BOX_FINE)
 @group(0) @binding(7) var<storage, read> box : array<u32>;
+// the streak per particle: unit direction xyz, length w in particle spacings (streak.wgsl); only the colour raster reads it
+@group(0) @binding(8) var<storage, read> streak : array<vec4<f32>>;
 
 // A particle counts as covered (pigment) above this load. Dispersion relaxes every particle of a
 // milled few-percent batch toward load ~1, and that must still count as covered so a homogeneous
 // mix reads solid; only near-clear base (0, or the faint trace a chunk sheds into it) is uncovered.
 const COVERAGE_MIN_LOAD : f32 = 0.3;
 
-/// Scatter particle p onto the node lattice of spacing 1/invh whose node `origin` is index 0 of a
-/// grid of node counts dims (the accumulators bound to pmass / plat / pload / pcov are that
-/// grid's); withCov adds the coverage term (the colour raster only).
-fn scatter(p : u32, invh : f32, origin : vec3<i32>, dims : vec3<i32>, withCov : bool) {
+/// Scatter particle p, as if it sat at x and with every term times `scale`, onto the node lattice
+/// of spacing 1/invh whose node `origin` is index 0 of a grid of node counts dims (the accumulators
+/// bound to pmass / plat / pload / pcov are that grid's); withCov adds the coverage term (the
+/// colour raster only).
+fn scatterAt(p : u32, x : vec3<f32>, scale : f32, invh : f32, origin : vec3<i32>, dims : vec3<i32>, withCov : bool) {
   let pMass = P.part.y;
-  let x = pos[p].xyz;
   let load = max(pos[p].w, 1e-3);
   let covered = withCov && pos[p].w > COVERAGE_MIN_LOAD;
   var z : array<f32, 7>;
@@ -43,7 +45,7 @@ fn scatter(p : u32, invh : f32, origin : vec3<i32>, dims : vec3<i32>, withCov : 
       for (var i = 0; i < 2; i++) {
         let o = vec3<i32>(i, j, k);
         let w = select(vec3<f32>(1.0) - f, f, o == vec3<i32>(1));
-        let wgt = w.x * w.y * w.z * pMass;
+        let wgt = w.x * w.y * w.z * pMass * scale;
         let c = clamp(base + o, vec3<i32>(0), nmax);
         let n = (u32(c.z) * u32(dims.y) + u32(c.y)) * u32(dims.x) + u32(c.x);
         atomicAdd(&pmass[n], encodeFixed(wgt, MASS_SCALE));
@@ -57,6 +59,10 @@ fn scatter(p : u32, invh : f32, origin : vec3<i32>, dims : vec3<i32>, withCov : 
   }
 }
 
+fn scatter(p : u32, invh : f32, origin : vec3<i32>, dims : vec3<i32>, withCov : bool) {
+  scatterAt(p, pos[p].xyz, 1.0, invh, origin, dims, withCov);
+}
+
 /// The solver-grid raster (read by disperse and pack).
 @compute @workgroup_size(128)
 fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
@@ -64,6 +70,9 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   if (p >= P.grid.w) { return; }
   scatter(p, P.hdt.y, vec3<i32>(0), vec3<i32>(P.grid.xyz), false);
 }
+
+const STREAK_MIN_LOAD : f32 = 0.05;  // clear base is not streaked
+const STREAK_TAPS : i32 = 8;         // most taps along a line
 
 /// The colour raster (design §3.5): the same scatter onto the finer lattice the renderer reads
 /// pigment from, so streaks thinner than a solver cell survive to the picture, plus coverage.
@@ -73,5 +82,30 @@ fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgro
   let p = particleIndex(gid, nwg);
   if (p >= P.grid.w) { return; }
   let origin = vec3<i32>(vec3<u32>(box[BOX_FINE], box[BOX_FINE + 1u], box[BOX_FINE + 2u]));
-  scatter(p, P.fineH.y * 8.0 / f32(box[BOX_FINE + 3u]), origin, vec3<i32>(P.fine.xyz), true);
+  let invh = P.fineH.y * 8.0 / f32(box[BOX_FINE + 3u]);
+  let x = pos[p].xyz;
+
+  // colour streaks (design §5): a pigment-carrying particle is drawn as a short line along its
+  // streak direction for its streak length, K taps of weight 1/K; K = 1 is the particle's own position
+  let cap = P.fineH.w;              // user's cap in particle spacings; 0 = off
+  let spacing = 0.5 * P.hdt.x;      // particle spacing in world units
+  var K = 1;
+  var span = vec3<f32>(0.0);
+  if (cap > 0.0 && pos[p].w > STREAK_MIN_LOAD) {
+    let st = streak[p];
+    let len = min(st.w, cap);
+    let dl = length(st.xyz);
+    if (len > 1e-3 && dl > 1e-3 && !isBad3(st.xyz)) {
+      span = (st.xyz / dl) * len * spacing;
+      let cell = 1.0 / invh;        // this frame's fine cell
+      K = clamp(i32(ceil(len * spacing / cell)), 1, STREAK_TAPS);
+    }
+  }
+  let lo = vec3<f32>(spacing);
+  let hi = P.domain.xyz - vec3<f32>(spacing);
+  for (var i = 0; i < K; i++) {
+    var xi = x;
+    if (K > 1) { xi = clamp(x + span * ((f32(i) + 0.5) / f32(K) - 0.5), lo, hi); }
+    scatterAt(p, xi, 1.0 / f32(K), invh, origin, vec3<i32>(P.fine.xyz), true);
+  }
 }

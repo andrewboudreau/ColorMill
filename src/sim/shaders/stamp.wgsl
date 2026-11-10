@@ -20,6 +20,8 @@ struct Stamp {
 // per column k * nx + i: float bits of the highest y seen (0 = nothing), zeroed on the CPU before each stamp
 @group(0) @binding(4) var<storage, read_write> top : array<atomic<u32>>;
 @group(0) @binding(5) var<storage, read> img : array<f32>;
+// colour streaks (streak.wgsl): a stamped picture is not pre-smeared
+@group(0) @binding(6) var<storage, read_write> streak : array<vec4<f32>>;
 
 /// Picture coordinates of a particle: 0..1 across the footprint, outside it otherwise.
 fn stampUv(x : vec3<f32>) -> vec2<f32> {
@@ -64,6 +66,8 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
     let z = lat[7u * p + c];
     lat[7u * p + c] = z + a * (img[base + c] - z);
   }
+  let st = streak[p];
+  streak[p] = vec4<f32>(st.xyz, st.w * (1.0 - a));
   let w = pos[p].w;
   pos[p].w = w + a * (PIGMENT_LOAD - w);
 }

@@ -84,7 +84,7 @@ describe('experimental mode', () => {
   it('lifts the upper caps in the URL but keeps the floors and the step', () => {
     const q = new URLSearchParams('experimental=1&omega=50&gap=0.4&frictionRatio=0.2&dispersion=1.2345');
     expect(parseExperimental(q)).toBe(true);
-    expect(parseMillParams(q)).toEqual({ omega: 50, gap: 0.4, frictionRatio: PARAM_LIMITS.frictionRatio.min, dispersion: 1.235 });
+    expect(parseMillParams(q)).toEqual({ omega: 50, gap: 0.4, frictionRatio: PARAM_LIMITS.frictionRatio.min, dispersion: 1.25 });
     expect(parseExperimental(new URLSearchParams('x=1'))).toBe(true);
     expect(parseExperimental(new URLSearchParams('experimental=0'))).toBe(false);
     // without the flag the same values are capped as before

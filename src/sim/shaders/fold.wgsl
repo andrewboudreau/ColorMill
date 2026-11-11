@@ -64,7 +64,8 @@
 // (init +inf bits), [3] selected count, [8 + k*NB + b] particle count per (half k, bin b),
 // [8 + 2NB + (k*NB + b)*NS + j] particle count per (half, bin, depth slice j)
 @group(0) @binding(8) var<storage, read_write> info : array<atomic<u32>>;
-@group(0) @binding(9) var<storage, read> pmass : array<i32>;   // last raster (unused here, kept for the bind group)
+// lamina state (lamina.wgsl): the normal xyz and q. The roll-up turns the normal with the material when it lets go.
+@group(0) @binding(9) var<storage, read_write> lam : array<vec4<f32>>;
 // per bin (TS floats): for each half k at 8k: rhoStart, phiStart, rhoEnd, rMax (the half's
 // spiral's outer radius once wound up to and including this bin); shared at 4: t0, t1, ell;
 // (cut & fold needs no tables; it only fills the count); header at NB*TS: rLog (the larger
@@ -451,7 +452,31 @@ fn tables_(@builtin(local_invocation_id) lid : vec3<u32>) {
   }
 }
 
+/** The lamina normal of a particle the roll-up lets go, turned as the script turned the material round it:
+    from the sheet on the roll at p0 (across the sheet, along its arc, along the axis) to the same three
+    directions in the wound coil, then with its half if the roll was doubled, then with the lift to the
+    standing log. The script's map is orthogonal, so the thickness q is left alone. (The wind lays the
+    arc on the coil the other way round from the roll: a reflection, which is what the material did.) */
+fn rollNormal(n : vec3<f32>, p0 : vec3<f32>, sRel : f32) -> vec3<f32> {
+  let k = halfOf(p0);
+  let r0 = rollerNormal(P.front.x, P.front.y, p0);     // across the sheet, outward
+  let t0 = vec3<f32>(0.0, -r0.z, r0.y);                // along the arc, the way sRel grows
+  let psi = PI + windPhi(arcTotal(), k) - windPhi(sRel, k);
+  let e = vec3<f32>(0.0, cos(psi), sin(psi));          // outward on the coil
+  let tc = vec3<f32>(0.0, sin(psi), -cos(psi));        // along the wound arc
+  var m = vec3<f32>(n.x, 0.0, 0.0) + dot(n, r0) * e + dot(n, t0) * tc;
+  if (P.fold4.z > 0.0 && k == 1u) { m = vec3<f32>(-m.x, -m.y, m.z); }   // the half turn of the doubling
+  m = liftFrame(0.5 * PI) * m;
+  if (isBad3(m) || dot(m, m) < 0.25) { return n; }
+  return normalize(m);
+}
+
 fn release(p : u32, v : vec3<f32>) {
+  if (!isFlop()) {
+    // (the hand of cut & fold only carries its band: a translation, the normals are as they were)
+    let l = lam[p];
+    lam[p] = vec4<f32>(rollNormal(l.xyz, fold0[p].xyz, fold0[p].w), l.w);
+  }
   vel[p] = vec4<f32>(v, 0.0);
   fold0[p].w = P.fold.y;   // release time: g2p leaves it out of the pile-top estimate while it settles
   // the log was placed kinematically, so the particle's old F says nothing about

@@ -23,7 +23,7 @@ struct Params {
   front : vec4<f32>,
   // material (design §4): shear modulus mu, bulk modulus K, yield stress tau_y, Herschel-Bulkley consistency k
   mat : vec4<f32>,
-  // pVol, pMass, stressScale, dispersion k
+  // pVol, pMass, stressScale, the exchange closure's exponent k (disperse.wgsl)
   part : vec4<f32>,
   // fold script: active (0/1), s, ds/dt, lift height
   fold : vec4<f32>,
@@ -37,7 +37,7 @@ struct Params {
   // colour raster (design §3.5): the node counts of its box nxF, nyF, nzF, 0
   fine : vec4<u32>,
   // colour raster at its finest cell: hF, 1/hF, normalisation (h/hF)^3 / 8 so a packed fine cell reads ~1,
-  // the longest colour streak line in particle spacings (0 = points)
+  // the longest colour thread in particle spacings (0 = points)
   // (the cell in use is FINE_K / 8 of this, box.wgsl)
   fineH : vec4<f32>,
   // cut & roll, peel and wind (fold.wgsl): wind speed along the arc, T_wind, T_double, T_lift

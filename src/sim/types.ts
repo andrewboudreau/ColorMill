@@ -41,8 +41,11 @@ export interface ParticleSnapshot {
   readonly deformation: Float32Array;
   /** 1 uint per particle */
   readonly flags: Uint32Array;
-  /** 4 floats per particle: colour streak, xyz unit direction then w length in particle spacings */
-  readonly streaks: Float32Array;
+  /** 4 floats per particle: the pigment laminae's unit normal xyz, then q = ln(s / s0), the log of their thickness
+   *  over the thickness they arrived with (src/sim/lamina.ts) */
+  readonly laminae: Float32Array;
+  /** 2 floats per particle: ln s0 (world units), then ln of the thickness the pigment is already blended down to */
+  readonly mixState: Float32Array;
   /** 1 float per particle: pigment load (0 = clear base, PIGMENT_LOAD = pure masterbatch) */
   readonly loads: Float32Array;
 }
@@ -120,8 +123,9 @@ export interface GpuMpmSim {
   step(encoder: GPUCommandEncoder, frameDtSeconds: number): void;
   /** Re-seed the bank as fresh white silicone. */
   reset(): void;
-  /** Blend a pigment into particles inside a sphere (design §5). */
-  addPigment(center: readonly [number, number, number], radius: number, latent: Latent, strength?: number): void;
+  /** Blend a pigment into particles inside a sphere (design §5). `striation` is the thickness its laminae are
+   *  laid down with (world units); 0 or omitted = one blob, the sphere's diameter. */
+  addPigment(center: readonly [number, number, number], radius: number, latent: Latent, strength?: number, striation?: number): void;
   /**
    * Blend a pigment into a sphere sitting just under the material surface at
    * (x, z): the GPU probes the highest particle in the column, so the dollop
@@ -193,7 +197,7 @@ export interface DebugApi {
   /** Total pigment and its colour over the particles (sum of load x mass, and of load x mass x latent per channel):
    *  conserved by milling, dispersion and the operator's moves; only a drop, an inject, a stamp or a reset changes it. */
   inventory(): Promise<PigmentInventory>;
-  /** Mixing measures of the pigment load: Danckwerts' intensity of segregation at boxes of h, 2h and 4h, and the axial segregation. */
+  /** Mixing measures of the pigment load: Danckwerts' intensity of segregation at boxes of 1/32, 1/16 and 1/8 of a sim unit (the same at every preset), and the axial segregation. */
   mixing(): Promise<MixingMetrics>;
   /** Step `frames` frames and measure the nip over them (src/sim/diagnostics.ts; tools/perf/nip.mjs prints the table). */
   nipDiagnostics(frames: number): Promise<NipDiagnostics>;

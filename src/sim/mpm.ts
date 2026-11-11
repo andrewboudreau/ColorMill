@@ -28,7 +28,8 @@ import gridSrc from './shaders/grid.wgsl?raw';
 import g2pSrc from './shaders/g2p.wgsl?raw';
 import rasterSrc from './shaders/raster.wgsl?raw';
 import disperseSrc from './shaders/disperse.wgsl?raw';
-import streakSrc from './shaders/streak.wgsl?raw';
+import laminaSrc from './shaders/lamina.wgsl?raw';
+import laminaCommonSrc from './shaders/lamina_common.wgsl?raw';
 import packSrc from './shaders/pack.wgsl?raw';
 import injectSrc from './shaders/inject.wgsl?raw';
 import resetSrc from './shaders/reset.wgsl?raw';
@@ -39,6 +40,14 @@ import chunkSrc from './shaders/chunk.wgsl?raw';
 
 /** Titanium White base latent (src/sim/mixbox.c MB_WHITE). */
 export const WHITE_LATENT: Latent = [0, 0, 0, 1, 0.00481862, 0.00021851, 0.00295198];
+
+/**
+ * Lamina kinematics (lamina.wgsl) once a substep, from that substep's C, or once a frame from the
+ * last substep's C over the whole frame. Per substep is the integral the model means; per frame costs
+ * one dispatch instead of 8 to 16 and measured the same (mean ln(s0 / s) of the pigment after 20 s of
+ * milling: 1.88 against 1.88 at low, 3.22 against 3.25 at high; a bank at rest does not thin either way).
+ */
+export const LAMINA_PER_SUBSTEP = false;
 
 /** Workgroup sizes shared with the shaders (particleIndex() assumes 128). */
 export const PARTICLE_WG = 128;
@@ -270,8 +279,10 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufAff: GPUBuffer;
   private readonly bufLat: GPUBuffer;
   private readonly bufFlags: GPUBuffer;
-  /** colour streak per particle: unit direction xyz, length w in particle spacings (streak.wgsl) */
-  private readonly bufStreak: GPUBuffer;
+  /** lamina state per particle (lamina.wgsl): the laminae's unit normal xyz, w = q = ln(s / s0) */
+  private readonly bufLamina: GPUBuffer;
+  /** ... and ln s0 (world units), then ln of the thickness the pigment is already blended down to (disperse.wgsl) */
+  private readonly bufMix: GPUBuffer;
   private readonly bufFold: GPUBuffer;
   /** cut & fold reductions (live pile top, x range, count, per-bin histogram); zeroed on the CPU before each selection */
   private readonly bufFoldInfo: GPUBuffer;
@@ -324,6 +335,9 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufPCov: GPUBuffer;
   /** dispersion exchange (disperse.wgsl): each node's capacity; its pools are bufPLoad and bufPLat */
   private readonly bufXCap: GPUBuffer;
+  /** ... the lamina state that travels with the pigment (2 per node) and the mark of where laminae are thinning */
+  private readonly bufXQ: GPUBuffer;
+  private readonly bufXBeta: GPUBuffer;
   private readonly finA: GPUTexture;
   private readonly finB: GPUTexture;
   private readonly finC: GPUTexture;
@@ -399,7 +413,8 @@ export class GpuMpm implements GpuMpmSim {
     this.bufAff = mk(9 * n);
     this.bufLat = mk(7 * n);
     this.bufFlags = mk(n);
-    this.bufStreak = mk(4 * n);
+    this.bufLamina = mk(4 * n);
+    this.bufMix = mk(2 * n);
     this.bufFold = mk(4 * n);
     this.bufFoldInfo = mk(8 + 2 * FOLD_BINS + 2 * FOLD_BINS * FOLD_SLICES);
     this.bufFoldTables = mk(FOLD_TABLE_STRIDE * FOLD_BINS + 8 + 2 * FOLD_BINS * (FOLD_SLICES + 1));
@@ -415,13 +430,15 @@ export class GpuMpm implements GpuMpmSim {
     this.bufFCov = mk(fd.nodeCount);
     this.bufPCov = mk(4);
     this.bufXCap = mk(d.nodeCount);
+    this.bufXQ = mk(2 * d.nodeCount);
+    this.bufXBeta = mk(d.nodeCount);
 
     this.uniformSlots = config.quality.substepsPerFrame + 1;
     this.bufParams = device.createBuffer({ size: UNIFORM_STRIDE * this.uniformSlots, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.paramsData = new Float32Array((UNIFORM_STRIDE / 4) * this.uniformSlots);
     this.paramsU32 = new Uint32Array(this.paramsData.buffer);
-    this.bufInject = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.bufInjectAll = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.bufInject = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.bufInjectAll = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bufProbe = device.createBuffer({ label: 'GpuMpm-probe', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
     this.bufBox = device.createBuffer({ label: 'GpuMpm-box', size: 4 * BOX_WORDS, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
     this.bufBoxLast = device.createBuffer({ label: 'GpuMpm-box-last', size: 4 * 8, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -529,8 +546,8 @@ export class GpuMpm implements GpuMpmSim {
 
   private buildKernels(): Record<string, Kernel> {
     const device = this.device;
-    const mod = (name: string, src: string): GPUShaderModule => {
-      const m = device.createShaderModule({ label: name, code: commonSrc + '\n' + src });
+    const mod = (name: string, src: string, lamina = false): GPUShaderModule => {
+      const m = device.createShaderModule({ label: name, code: commonSrc + '\n' + (lamina ? laminaCommonSrc + '\n' : '') + src });
       this.modules.push(m);
       return m;
     };
@@ -539,24 +556,28 @@ export class GpuMpm implements GpuMpmSim {
 
     const clearMod = mod('clear', clearSrc);
     const foldMod = mod('fold', foldSrc);
-    const injectMod = mod('inject', injectSrc);
-    const stampMod = mod('stamp', stampSrc);
-    const stampRes: Resource[] = [{ kind: 'uniform', buffer: this.bufStampInfo }, rw(this.bufPos), rw(this.bufLat), rw(this.bufStampTop), ro(this.bufStamp), rw(this.bufStreak)];
-    const clearRes = [ro(this.bufBox), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad), rw(this.bufXCap)];
+    const injectMod = mod('inject', injectSrc, true);
+    const stampMod = mod('stamp', stampSrc, true);
+    const stampRes: Resource[] = [{ kind: 'uniform', buffer: this.bufStampInfo }, rw(this.bufPos), rw(this.bufLat), rw(this.bufStampTop), ro(this.bufStamp), rw(this.bufLamina), rw(this.bufMix)];
+    const clearRes = [ro(this.bufBox), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad), rw(this.bufXCap), rw(this.bufXQ), rw(this.bufXBeta)];
     // dispersion: a conservative exchange through the solver grid's nodes, scatter then gather (disperse.wgsl)
-    const disperseMod = mod('disperse', disperseSrc);
-    const disperseRes = [rw(this.bufPos), ro(this.bufC), rw(this.bufLat), ro(this.bufFlags), rw(this.bufXCap), rw(this.bufPLoad), rw(this.bufPLat)];
+    const disperseMod = mod('disperse', disperseSrc, true);
+    const disperseRes = [rw(this.bufPos), rw(this.bufLat), ro(this.bufFlags), rw(this.bufLamina), rw(this.bufMix), rw(this.bufXCap), rw(this.bufPLoad), rw(this.bufPLat),
+      rw(this.bufXQ), rw(this.bufXBeta)];
     const chunkMod = mod('chunk', chunkSrc);
     const chunkRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufFlags), rw(this.bufChunks), ro(this.bufGVel)];
     const boxMod = mod('box', boxSrc);
     const boxRes = [rw(this.bufBox), rw(this.bufBoxArgs), rw(this.bufFineBox), rw(this.bufBoxLast)];
     const foldRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags), rw(this.bufFold),
-      rw(this.bufFoldInfo), ro(this.bufPMass), rw(this.bufFoldTables)];
+      rw(this.bufFoldInfo), rw(this.bufLamina), rw(this.bufFoldTables)];
     const volAView = this.volA.createView({ dimension: '3d' });
     const finAView = this.finA.createView({ dimension: '3d' });
     const finBView = this.finB.createView({ dimension: '3d' });
     const finCView = this.finC.createView({ dimension: '3d' });
-    const rasterMod = mod('raster', rasterSrc);
+    const rasterMod = mod('raster', rasterSrc, true);
+    const laminaMod = mod('lamina', laminaSrc, true);
+    const laminaRes = [ro(this.bufC), ro(this.bufFlags), rw(this.bufLamina)];
+    const injectRes = (uniform: GPUBuffer): Resource[] => [{ kind: 'uniform', buffer: uniform }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe), rw(this.bufLamina), rw(this.bufMix)];
     const packMod = mod('pack', packSrc);
 
     return {
@@ -575,22 +596,24 @@ export class GpuMpm implements GpuMpmSim {
         [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), ro(this.bufFlags), ro(this.bufGVel),
           rw(this.bufFoldInfo), ro(this.bufFold), rw(this.bufBox), ro(this.bufBoxLast)]),
       raster: this.makeKernel('raster', rasterMod, 'main',
-        [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad), rw(this.bufPCov), ro(this.bufBox), ro(this.bufStreak)]),
+        [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad), rw(this.bufPCov), ro(this.bufBox), ro(this.bufLamina), ro(this.bufMix)]),
+      disperseMark: this.makeKernel('disperseMark', disperseMod, 'mark_', disperseRes),
       disperseGive: this.makeKernel('disperseGive', disperseMod, 'give_', disperseRes),
       disperse: this.makeKernel('disperse', disperseMod, 'take_', disperseRes),
-      streak: this.makeKernel('streak', mod('streak', streakSrc), 'main', [ro(this.bufC), ro(this.bufFlags), rw(this.bufStreak)]),
+      lamina: this.makeKernel('lamina', laminaMod, 'main', laminaRes),
+      laminaFrame: this.makeKernel('laminaFrame', laminaMod, 'frame_', laminaRes),
       pack: this.makeKernel('pack', packMod, 'main',
         [ro(this.bufBox), ro(this.bufPMass), ro(this.bufPLat), { kind: 'storageTexture', view: volAView }]),
       // the colour raster: the same scatter and pack onto the finer grid, its accumulators bound
       // where the solver grid's are
       rasterFine: this.makeKernel('rasterFine', rasterMod, 'mainFine',
-        [ro(this.bufPos), ro(this.bufLat), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad), rw(this.bufFCov), ro(this.bufBox), ro(this.bufStreak)]),
+        [ro(this.bufPos), ro(this.bufLat), rw(this.bufFMass), rw(this.bufFLat), rw(this.bufFLoad), rw(this.bufFCov), ro(this.bufBox), ro(this.bufLamina), ro(this.bufMix)]),
       packFine: this.makeKernel('packFine', packMod, 'mainFine',
         [ro(this.bufBox), ro(this.bufFMass), ro(this.bufFLat), { kind: 'storageTexture', view: finAView }, { kind: 'storageTexture', view: finBView }, ro(this.bufFLoad),
           { kind: 'storageTexture', view: finCView }, ro(this.bufFCov)]),
-      inject: this.makeKernel('inject', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe), rw(this.bufStreak)]),
-      probe: this.makeKernel('probe', injectMod, 'probeColumn', [{ kind: 'uniform', buffer: this.bufInject }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe), rw(this.bufStreak)]),
-      injectAll: this.makeKernel('injectAll', injectMod, 'main', [{ kind: 'uniform', buffer: this.bufInjectAll }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe), rw(this.bufStreak)]),
+      inject: this.makeKernel('inject', injectMod, 'main', injectRes(this.bufInject)),
+      probe: this.makeKernel('probe', injectMod, 'probeColumn', injectRes(this.bufInject)),
+      injectAll: this.makeKernel('injectAll', injectMod, 'main', injectRes(this.bufInjectAll)),
       stampProbe: this.makeKernel('stampProbe', stampMod, 'probeTop', stampRes),
       stamp: this.makeKernel('stamp', stampMod, 'main', stampRes),
       reset: this.makeKernel('reset', mod('reset', resetSrc), 'main',
@@ -659,9 +682,8 @@ export class GpuMpm implements GpuMpmSim {
       pos4[4 * i + 3] = 0; // clear base: no pigment load (colour comes only from masterbatch)
     }
     q.writeBuffer(this.bufPos, 0, pos4);
-    q.writeBuffer(this.bufStreak, 0, new Float32Array(4 * this.capacity));
-    // "set all" inject uniform: white base
-    const inj = new Float32Array(16);
+    // "set all" inject uniform: white base (and, in the kernel, the lamina state of clear material)
+    const inj = new Float32Array(20);
     inj.set([0, 0, 0, 1e9], 0);
     inj.set(WHITE_LATENT.slice(0, 4), 4);
     inj.set([WHITE_LATENT[4], WHITE_LATENT[5], WHITE_LATENT[6], 1], 8);
@@ -780,6 +802,7 @@ export class GpuMpm implements GpuMpmSim {
     this.dispatchBox(pass, k.clearRaster, slot, BOX_ARG_FRAME);
     this.dispatchParticles(pass, k.raster, slot);
     if (disperse) {
+      this.dispatchParticles(pass, k.disperseMark, slot);
       this.dispatchParticles(pass, k.disperseGive, slot);
       this.dispatchParticles(pass, k.disperse, slot);
     }
@@ -868,6 +891,7 @@ export class GpuMpm implements GpuMpmSim {
       this.dispatchParticles(pass, k.p2g, s);
       this.dispatchBox(pass, k.grid, s, BOX_ARG_GRID);
       this.dispatchParticles(pass, k.g2p, s);
+      if (LAMINA_PER_SUBSTEP) this.dispatchParticles(pass, k.lamina, s);
       this.dispatchOne(pass, k.boxStep, s);
       if (this.foldActive) {
         this.foldTime += q.dt;
@@ -880,7 +904,7 @@ export class GpuMpm implements GpuMpmSim {
         }
       }
     }
-    this.dispatchParticles(pass, k.streak, frameSlot);
+    if (!LAMINA_PER_SUBSTEP) this.dispatchParticles(pass, k.laminaFrame, frameSlot);
     this.encodeFrameKernels(pass, frameSlot, true);
     pass.end();
 
@@ -934,9 +958,9 @@ export class GpuMpm implements GpuMpmSim {
     this.uploadInitialState();
   }
 
-  addPigment(center: readonly [number, number, number], radius: number, latent: Latent, strength = 1): void {
+  addPigment(center: readonly [number, number, number], radius: number, latent: Latent, strength = 1, striation = 0): void {
     if (this.destroyed) return;
-    this.device.queue.writeBuffer(this.bufInject, 0, this.injectData(center, radius, latent, strength, 0));
+    this.device.queue.writeBuffer(this.bufInject, 0, this.injectData(center, radius, latent, strength, 0, striation));
     this.runParticleKernel(this.kernels.inject);
   }
 
@@ -1003,7 +1027,14 @@ export class GpuMpm implements GpuMpmSim {
     const pos4 = new Float32Array(4 * m);
     const lat = new Float32Array(7 * m);
     const F = new Float32Array(9 * m);
+    // one blob: laminae as thick as the chunk is across, their normal along its radius, nothing thinned or blended
+    const lam = new Float32Array(4 * m);
+    const mix = new Float32Array(2 * m).fill(Math.log(2 * r));
     for (let i = 0; i < m; i++) {
+      const rx = pts[3 * i] - cx, ry = pts[3 * i + 1] - cy, rz = pts[3 * i + 2] - cz;
+      const rl = Math.hypot(rx, ry, rz);
+      if (rl > 1e-6) lam.set([rx / rl, ry / rl, rz / rl, 0], 4 * i);
+      else lam.set([0, 1, 0, 0], 4 * i);
       pos4[4 * i] = pts[3 * i]; pos4[4 * i + 1] = pts[3 * i + 1]; pos4[4 * i + 2] = pts[3 * i + 2];
       pos4[4 * i + 3] = PIGMENT_LOAD; // masterbatch: concentrated pigment
       for (let c = 0; c < 7; c++) lat[7 * i + c] = latent[c];
@@ -1031,7 +1062,8 @@ export class GpuMpm implements GpuMpmSim {
       this.chunksHeld = true;
     }
     q.writeBuffer(this.bufFold, 16 * base, new Float32Array(4 * m));
-    q.writeBuffer(this.bufStreak, 16 * base, new Float32Array(4 * m));
+    q.writeBuffer(this.bufLamina, 16 * base, lam);
+    q.writeBuffer(this.bufMix, 8 * base, mix);
     this.setCount(base + m);
     // refresh the uniform's particle count and the render volume right away
     this.writeParams(0, 0);
@@ -1059,8 +1091,9 @@ export class GpuMpm implements GpuMpmSim {
     this.device.queue.submit([enc.finish()]);
   }
 
-  private injectData(center: readonly [number, number, number], radius: number, latent: Latent, strength: number, mode: number): Float32Array {
-    const inj = new Float32Array(16);
+  private injectData(center: readonly [number, number, number], radius: number, latent: Latent, strength: number, mode: number, striation = 0): Float32Array {
+    const inj = new Float32Array(20);
+    inj[19] = Math.max(striation, 0);
     inj.set([center[0], center[1], center[2], Math.max(radius, 1e-6)], 0);
     inj.set(latent.slice(0, 4), 4);
     inj.set([latent[4], latent[5], latent[6], strength], 8);
@@ -1146,7 +1179,7 @@ export class GpuMpm implements GpuMpmSim {
   async readParticles(): Promise<ParticleSnapshot> {
     const n = this.count;
     // positions / velocities are vec4 on the GPU; the snapshot is xyz-interleaved
-    const sizes = [4 * n, 4 * n, 7 * n, 9 * n, n, 4 * n].map((f) => f * 4);
+    const sizes = [4 * n, 4 * n, 7 * n, 9 * n, n, 4 * n, 2 * n].map((f) => f * 4);
     const total = sizes.reduce((a, b) => a + b, 0);
     if (!this.readbackStaging || this.readbackStaging.size < total) {
       this.readbackStaging?.destroy();
@@ -1155,7 +1188,7 @@ export class GpuMpm implements GpuMpmSim {
     const staging = this.readbackStaging;
     const enc = this.device.createCommandEncoder();
     let off = 0;
-    for (const [buf, size] of [[this.bufPos, sizes[0]], [this.bufVel, sizes[1]], [this.bufLat, sizes[2]], [this.bufF, sizes[3]], [this.bufFlags, sizes[4]], [this.bufStreak, sizes[5]]] as [GPUBuffer, number][]) {
+    for (const [buf, size] of [[this.bufPos, sizes[0]], [this.bufVel, sizes[1]], [this.bufLat, sizes[2]], [this.bufF, sizes[3]], [this.bufFlags, sizes[4]], [this.bufLamina, sizes[5]], [this.bufMix, sizes[6]]] as [GPUBuffer, number][]) {
       if (size > 0) enc.copyBufferToBuffer(buf, 0, staging, off, size);
       off += size;
     }
@@ -1181,7 +1214,8 @@ export class GpuMpm implements GpuMpmSim {
       latents: new Float32Array(take(sizes[2])),
       deformation: new Float32Array(take(sizes[3])),
       flags: new Uint32Array(take(sizes[4])),
-      streaks: new Float32Array(take(sizes[5]))
+      laminae: new Float32Array(take(sizes[5])),
+      mixState: new Float32Array(take(sizes[6]))
     };
     staging.unmap();
     return snap;
@@ -1238,7 +1272,7 @@ export class GpuMpm implements GpuMpmSim {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufStreak, this.bufFold, this.bufFoldInfo, this.bufFoldTables,
+    for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufLamina, this.bufMix, this.bufFold, this.bufFoldInfo, this.bufFoldTables,
       this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll, this.bufProbe, this.bufPLoad,
       this.bufStamp, this.bufStampTop, this.bufStampInfo, this.bufBox, this.bufBoxArgs, this.bufBoxLast, this.bufFineBox, this.bufChunks]) {
       b.destroy();
@@ -1251,6 +1285,6 @@ export class GpuMpm implements GpuMpmSim {
     this.finA.destroy();
     this.finB.destroy();
     this.finC.destroy();
-    for (const b of [this.bufFMass, this.bufFLat, this.bufFLoad, this.bufFCov, this.bufPCov, this.bufXCap]) b.destroy();
+    for (const b of [this.bufFMass, this.bufFLat, this.bufFLoad, this.bufFCov, this.bufPCov, this.bufXCap, this.bufXQ, this.bufXBeta]) b.destroy();
   }
 }

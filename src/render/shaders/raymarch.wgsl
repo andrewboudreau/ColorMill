@@ -96,14 +96,14 @@ const COV_DITHER: f32 = 0.08;
 const CLEAR_BODY: vec3f = vec3f(0.60, 0.65, 0.67);
 // the clear base turns hazy over this many solver cells of thickness (1/e of the light passes)
 const CLEAR_HAZE_CELLS: f32 = 3.2;
-// roughness of the putty's skin (glossy, not a mirror) and of the rolls around their circumference
-const PUTTY_ROUGH: f32 = 0.11;
+// roughness of the putty's skin (a satin sheen: at 0.11 it read as wet and too shiny) and of the rolls around their circumference
+const PUTTY_ROUGH: f32 = 0.30;
 // density gradient at the surface, per cell (rest density = 1): below WEAK the normal is noise and the
 // skin is drawn rough, above FIRM it is a face and gets the full gloss
 const NORMAL_WIDE: f32 = 3.0;   // weight of the wide field's gradient against the surface density's
 const NORMAL_WEAK: f32 = 0.03;
 const NORMAL_FIRM: f32 = 0.10;
-const ROLL_ROUGH: f32 = 0.13;
+const ROLL_ROUGH: f32 = 0.32;
 
 // pixel being shaded, for screen-space dithers
 var<private> gPix: vec2f;

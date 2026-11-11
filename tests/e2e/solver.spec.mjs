@@ -167,7 +167,7 @@ export default async function run() {
 
     const snap1 = await page.evaluate(async () => {
       const s = await window.__solver.snapshot();
-      return { count: s.count, positions: Array.from(s.positions), velocities: Array.from(s.velocities), latents: Array.from(s.latents), deformation: Array.from(s.deformation), flags: Array.from(s.flags), streaks: Array.from(s.streaks) };
+      return { count: s.count, positions: Array.from(s.positions), velocities: Array.from(s.velocities), latents: Array.from(s.latents), deformation: Array.from(s.deformation), flags: Array.from(s.flags), laminae: Array.from(s.laminae) };
     });
     const a1 = analyse(snap1, dims);
     console.log(`  after run: ${JSON.stringify({ ...a1, minDf: +a1.minDf.toFixed(4), minDb: +a1.minDb.toFixed(4) })}`);
@@ -249,36 +249,36 @@ export default async function run() {
     console.log(`  green particles: ${greenAll} (in the front sheet: ${greenSheet}); blue-ish ${blueish}, yellow-ish ${yellowish}`);
     assert(greenSheet > 0, `some particles in the sheet decode to green (${greenSheet})`);
 
-    // --- colour streaks: in the sheet on the front roller the streak vectors are long and run around the roll ---
+    // --- laminae: in the sheet on the front roller they are thinned, and lie in the sheet (their normal through it) ---
     {
-      const lens = [];
+      const thin = [];
       let sumAxial = 0, sumRadial = 0;
       for (let p = 0; p < snap1.count; p++) {
         const y = snap1.positions[3 * p + 1], zz = snap1.positions[3 * p + 2];
         const dy = y - front.axisY, dz = zz - front.axisZ;
         const df = Math.hypot(dy, dz);
         if (!(y < GEOMETRY.axisY && df < GEOMETRY.radius + 4 * dims.h)) continue;
-        const sx = snap1.streaks[4 * p], sy = snap1.streaks[4 * p + 1], sz = snap1.streaks[4 * p + 2];
-        const dn = Math.hypot(sx, sy, sz);
-        const len = snap1.streaks[4 * p + 3];
-        if (!(len > 0) || !(dn > 0)) continue;
-        lens.push(len);
-        sumAxial += Math.abs(sx) / dn;
-        sumRadial += df > 1e-9 ? Math.abs((sy * dy + sz * dz) / df) / dn : 0;
+        const nx = snap1.laminae[4 * p], ny = snap1.laminae[4 * p + 1], nz = snap1.laminae[4 * p + 2];
+        const dn = Math.hypot(nx, ny, nz);
+        const q = snap1.laminae[4 * p + 3];
+        assert(Number.isFinite(q) && Math.abs(dn - 1) < 1e-3, `lamina state of particle ${p} is a unit normal and a finite q (${dn}, ${q})`);
+        thin.push(Math.exp(-q));
+        sumAxial += Math.abs(nx);
+        sumRadial += df > 1e-9 ? Math.abs((ny * dy + nz * dz) / df) : 0;
       }
-      lens.sort((u, v) => u - v);
-      const allLens = [];
-      for (let p = 0; p < snap1.count; p++) allLens.push(snap1.streaks[4 * p + 3]);
-      allLens.sort((u, v) => u - v);
-      const pct = (q) => allLens[Math.min(allLens.length - 1, Math.floor(q * allLens.length))].toFixed(2);
-      console.log(`  streak length over all particles: p10 ${pct(0.1)}, p50 ${pct(0.5)}, p90 ${pct(0.9)} spacings`);
-      const medianLen = lens.length ? lens[lens.length >> 1] : 0;
-      const meanAxial = lens.length ? sumAxial / lens.length : 1;
-      const meanRadial = lens.length ? sumRadial / lens.length : 1;
-      console.log(`  streaks in the front sheet (${lens.length} particles): median length ${medianLen.toFixed(2)} spacings, mean |axial| ${meanAxial.toFixed(3)}, mean |radial| ${meanRadial.toFixed(3)}`);
-      assert(medianLen > 4, `streaks in the front sheet are long (median ${medianLen.toFixed(2)} spacings)`);
-      assert(meanAxial < 0.5, `streaks do not run along the roll axis (mean |x| fraction ${meanAxial.toFixed(3)})`);
-      assert(meanRadial < 0.5, `streaks run around the roll, not through the sheet (mean |radial| fraction ${meanRadial.toFixed(3)})`);
+      thin.sort((u, v) => u - v);
+      const all = [];
+      for (let p = 0; p < snap1.count; p++) all.push(Math.exp(-snap1.laminae[4 * p + 3]));
+      all.sort((u, v) => u - v);
+      const pct = (q) => all[Math.min(all.length - 1, Math.floor(q * all.length))].toFixed(2);
+      console.log(`  lamina thinning s0 / s over all particles: p10 ${pct(0.1)}, p50 ${pct(0.5)}, p90 ${pct(0.9)}`);
+      const medianThin = thin.length ? thin[thin.length >> 1] : 0;
+      const meanAxial = thin.length ? sumAxial / thin.length : 1;
+      const meanRadial = thin.length ? sumRadial / thin.length : 0;
+      console.log(`  laminae in the front sheet (${thin.length} particles): median s0 / s ${medianThin.toFixed(2)}, mean |n axial| ${meanAxial.toFixed(3)}, mean |n radial| ${meanRadial.toFixed(3)}`);
+      assert(medianThin > 2, `laminae in the front sheet are thinned (median s0 / s ${medianThin.toFixed(2)})`);
+      assert(meanAxial < 0.5, `laminae in the sheet are not stacked along the roll axis (mean |n x| ${meanAxial.toFixed(3)})`);
+      assert(meanRadial > 0.5, `laminae lie in the sheet, their normal through it (mean |n radial| ${meanRadial.toFixed(3)})`);
     }
 
     // --- packed render volume: density integrates to the particle mass -----

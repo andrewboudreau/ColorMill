@@ -47,7 +47,7 @@ fn stepLamina(p : u32, dt : f32) {
   lam[p] = vec4<f32>(n, q);
 }
 
-/// Once a substep, after G2P (P.hdt.z is the substep).
+/// Once a substep, after G2P (P.hdt.z is the substep). Not dispatched unless mpm.ts LAMINA_PER_SUBSTEP is set.
 @compute @workgroup_size(128)
 fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
   let p = particleIndex(gid, nwg);
@@ -55,8 +55,8 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   stepLamina(p, P.hdt.z);
 }
 
-/// Once a frame, with the sim time the frame advanced and the last substep's C (kept for comparison:
-/// mpm.ts LAMINA_PER_SUBSTEP).
+/// Once a frame, with the sim time the frame advanced and the last substep's C: what runs (measured the
+/// same as once a substep, mpm.ts LAMINA_PER_SUBSTEP).
 @compute @workgroup_size(128)
 fn frame_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
   let p = particleIndex(gid, nwg);

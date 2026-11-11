@@ -43,10 +43,11 @@ export const WHITE_LATENT: Latent = [0, 0, 0, 1, 0.00481862, 0.00021851, 0.00295
 
 /**
  * Lamina kinematics (lamina.wgsl) once a substep, from that substep's C, or once a frame from the
- * last substep's C over the whole frame. Per substep is the integral the model means; per frame is
- * cheaper and was measured against it (docs/design-v2.md §5).
+ * last substep's C over the whole frame. Per substep is the integral the model means; per frame costs
+ * one dispatch instead of 8 to 16 and measured the same (mean ln(s0 / s) of the pigment after 20 s of
+ * milling: 1.88 against 1.88 at low, 3.22 against 3.25 at high; a bank at rest does not thin either way).
  */
-export const LAMINA_PER_SUBSTEP = true;
+export const LAMINA_PER_SUBSTEP = false;
 
 /** Workgroup sizes shared with the shaders (particleIndex() assumes 128). */
 export const PARTICLE_WG = 128;

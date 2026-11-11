@@ -426,7 +426,7 @@ the default E = 22. Keep the constants of §4 the same across presets; only
 
 ---
 
-## 5. Pigment: Mixbox latents and shear-driven dispersion
+## 5. Pigment: Mixbox latents and lamellar mixing
 
 Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
 2021). Mixing pigments is a mass-weighted average in latent space, and
@@ -536,49 +536,49 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   on a canvas, converts the pixels with mixbox.js once per distinct colour
   (text in a palette pigment uses its latent directly), and stamps them; the
   stamped text goes into the start link.
-- **Colour streaks** (`streak.wgsl`, the line raster in `raster.wgsl`): colour
-  lives on particles, so it can neither smear thinner nor longer than the
-  particles reach, and a real chunk, which becomes laminae many times its
-  area, would turn to speckle. Every particle carries a unit direction `d`
-  and a length `L` in particle spacings (one `vec4`). The direction is a
-  material line element turned by the velocity gradient, `ds/dt = C s`,
-  integrated once a frame to second order and renormalised, so on the sheet
-  it lies along the roll's circumference. The length is not the line
-  element's: `L += STREAK_GAIN · max(γ − STREAK_RATE_MIN, 0) · dt` with
-  `γ = ‖(C + Cᵀ)/2‖_F`, capped at 16, never shrinking, because a smear in
-  shear lengthens in proportion to the strain. Two things rule the line
-  element's own length out. A real sheet folds like a jelly roll and keeps
-  its laminae, while the under-resolved flow here un-stretches material when
-  the sheet re-enters the bank (measured: a median of 1.3 spacings on the
-  sheet, and falling). And there is little stretch along the line to begin
-  with: material beside a roll enters the nip already at the roll's speed,
-  so the nip is shear, not extension, and it is several times wider for its
-  rolls than a real one. `STREAK_GAIN` = 6 spacings per unit of strain
-  brings a particle to full length in one pass of the nip;
-  `STREAK_RATE_MIN` = 2 /s leaves the bank at rest and the solver's elastic
-  chatter out (the nip runs at 10 to 25 /s), so a chunk sitting on the bank
-  keeps its seed length of 0.5. The colour raster (fine lattice only) draws
-  each pigment-carrying particle (load above 0.05) as a line: `K` taps along
-  `d`, two fine cells apart (a tap's trilinear footprint is two cells wide,
-  so the line stays continuous), up to 6, each of weight `1/K`, the
-  length capped by the `streak` parameter (0 = points, the old picture
-  exactly). **Unequal ink**: a smeared chunk is laminae of unequal
-  thickness, not an even film, so one particle in four draws its pigment
-  3.4 times over and the other three 0.2 times (a mean of one; by a hash of
-  the particle's index, coming in as its length passes 0.5 to 3.5). Lines
-  lying side by side then differ, and where the colour is thin the smear
-  reads as threads with clear gaps instead of an even wash (lines alone
-  only softened the speckle; a dense band is opaque either way). The colour
-  box (`box.wgsl`) is widened by half the longest line so no tap lands on
-  its empty edge texels. Inject and stamp scale a particle's length by
-  `1 - a`, so a fresh dollop or picture is neither pre-smeared nor uneven
-  (a zero length is reseeded). The `streak` mill parameter (drawer slider
-  "Colour streaks", link key `streak`, default 12 spacings) is a picture
-  setting: the physics and the solver-grid density volume are unchanged.
-  Its cost is the extra taps, so it grows with the share of the batch that
-  carries pigment: nothing measurable with a chunk or two, and on the
-  software GPU at low roughly 10 to 15% of a frame with 85% of the particles
-  pigmented (28% with taps one cell apart, which is why they are two). The slow feeding of a real mill, where a chunk sits in the bank for many
+- **Laminae** (`lamina.wgsl`, `lamina_common.wgsl`, the thread raster in
+  `raster.wgsl`; `src/sim/lamina.ts` is the CPU mirror, with the tests):
+  colour lives on particles, but a real chunk becomes laminae far thinner
+  than a particle. Every particle carries the unit normal `n` of its
+  pigment's laminae and `q = ln(s/s0)`, the log of their thickness over the
+  thickness they arrived with (one `vec4`), plus `ln s0` and the exchange's
+  reference `mixed` (one `vec2`). Both follow the flow exactly: a material
+  surface element's direction is `m = F⁻ᵀ n0`, `dm/dt = −Lᵀ m`, so
+  `dn/dt = −(I − n nᵀ) Lᵀ n` and `d(ln s)/dt = nᵀ L n`, with `L` the velocity
+  gradient (the APIC `C`) less its trace (volume change is not mixing). The
+  kernel integrates `m = (I − dt L'ᵀ + dt²/2 L'ᵀL'ᵀ) n`, `q −= ln|m|`,
+  `n = m/|m|`: exact for simple shear (`s ∝ 1/√(1+γ²)`), exponential in
+  extension, and a rigid rotation by `θ` a step costs `θ⁴/8` in `q`. The
+  solver's `F` cannot stand in: after the plastic return it holds only the
+  elastic part and the operator's moves reset it. Integrated once a frame
+  from the last substep's `C` over the frame's time: once a substep gave the
+  same thinning (mean `ln(s0/s)` of the pigment after 20 s of milling 1.88
+  against 1.88 at low, 3.22 against 3.25 at high) for 8 to 16 times the
+  dispatches, and a bank at rest does not thin at all either way
+  (`LAMINA_PER_SUBSTEP` in `mpm.ts` switches). Kinematic particles keep
+  their state. **Where a blob is made**: a chunk and an inject are one blob,
+  `s0` = its diameter and `n` along its radius (the way the load falls
+  off; `addPigment` takes an optional thickness); a stamp is a print layer,
+  `s0` = its depth and `n` up; fresh pigment blended into a particle that
+  already has some is blended by load in the log. Clear material carries an
+  `n` and a `q` that mean nothing until it takes pigment. **The operator's
+  moves**: the hand of cut & fold only translates its band, so the normals
+  are as they were; the roll-up turns each normal with the script's own map
+  when it lets go (sheet frame at the particle's place on the roll to the
+  coil's frame, the half turn of the doubling, the lift), which is
+  orthogonal, so `q` is untouched. **The picture**: the colour raster (fine
+  lattice only) draws each pigment-carrying particle (load above 0.05) as a
+  thread lying in its laminae, along `x̂ × n` (the mill's flow is across the
+  axis), `s0/s − 1` particle spacings long up to the `streak` parameter
+  (0 = points): `K` taps two fine cells apart, up to 6, each of weight
+  `1/K`. **Unequal ink** as before (one particle in four draws its pigment
+  3.4 times over, the rest 0.2 times, coming in as the thread lengthens),
+  now fading with `s/Δ` once the laminae are thinner than the particle
+  spacing: above the resolvable scale the smear reads as threads, below it
+  the colour is the blend the exchange has made. The colour box
+  (`box.wgsl`) is widened by half the longest line so no tap lands on its
+  empty edge texels. The `streak` mill parameter (link key `streak`,
+  default 12 spacings) is a picture setting. The slow feeding of a real mill, where a chunk sits in the bank for many
   revolutions and paints a stripe on every pass, is the chunk feed above
   (a bigger batch does not give it: it buries the pigment inside a thick
   sheet).
@@ -599,36 +599,58 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   away before they are drawn, and the renderer integrates colour through
   the sheet's thickness.
 - **Disperse** kernels (`disperse.wgsl`, once per frame): a conservative
-  exchange of pigment between neighbouring particles in two passes through
-  the solver grid's nodes. Each particle has a rate
-  `α = clamp(k · γ · frameDt, 0, 1)` from its own shear,
-  `γ = ‖(C + Cᵀ)/2‖_F`, with `k = config.dispersion` (default 0.02, UI 0–0.5;
-  nearly off: colour mills as streaks that thin with folding). What moves is
-  the conserved pair, the load `w` and the load-weighted latent `w·z`.
-  `give_` scatters `N·α·w` and `N·α·w·z` into the pools of the 8 nodes round
-  the particle (trilinear `N`) and `N·α·m` into a per-node capacity; `take_`
-  removes what the particle gave and takes from each node's pool the share
-  its capacity term is of the node's. The shares of a pool sum to 1, so the
-  batch's total load and each load-weighted latent channel change only by
-  round-off (measured on the GPU over 600 frames of milling, a fold and a
-  roll: about 5e-9 of the total, 1e-6 in the worst colour channel, at any
-  `k`). The latent follows as `z = (w·z)/w`, so a clear particle takes the
-  colour of the pigment it receives outright. To keep the balance exact the
-  two passes compute the same fixed-point terms from the same inputs (2^21;
-  a particle's share is its integer capacity term over the node's integer
+  exchange of pigment between neighbouring particles through the solver
+  grid's nodes, which happens only where the flow has thinned the pigment's
+  laminae below what a particle can carry. A particle is a parcel one
+  particle spacing `Δ = h/2` across. While its laminae are thicker than
+  that, advection carries them and nothing is exchanged. Below it the parcel
+  is striped, and a box `Δ` wide that samples stripes `s` thick differs
+  from the local mean in proportion to `s/Δ`. So with `mixed` the log
+  thickness already accounted for and `ref = min(mixed, ln Δ)`, a particle
+  whose laminae reach a new minimum trades
+  `β = 1 − (s / exp(ref))^k` of its pigment, and `mixed ← min(mixed, ln s)`.
+  The product of `(1 − β)` over the frames is `(s_min/Δ)^k` whatever the
+  frame length, the grid or the strain rate, so there is no rate constant to
+  tune to the nip; elastic chatter in `s` trades nothing (only a new minimum
+  does), and thickening undoes nothing. `k = config.dispersion` (default 1,
+  the geometric value; UI 0–2; 0 = off) is the model's one number. This is a
+  closure, not a derivation: the kinematics of `s` are exact, the step from
+  "striped below the parcel size" to "this share is exchanged" is the
+  argument above. (A per-frame `β = 1 − s_new/s_prev` gives the same product
+  for a monotone `s` but counts every wobble of `s` as mixing.)
+  Three passes. `mark_`: each particle with `β > 0` raises the 8 nodes round
+  it to its `β` (an atomic max). `give_`: each particle's rate `α` is its
+  own `β`, or, if it has room for pigment, the marked `β` round it
+  (trilinear) times that room `1 − w/PIGMENT_LOAD`, so clear material beside
+  thinning laminae takes part and neat masterbatch with thick laminae does
+  not; it scatters `N·α·w` and `N·α·w·z` into the pools of the 8 nodes round
+  it (trilinear `N`) and `N·α·m` into a per-node capacity. `take_` removes
+  what the particle gave and takes from each node's pool the share its
+  capacity term is of the node's. One rate for giving and taking, so an even
+  field stays even; the shares of a pool sum to 1, so the batch's total load
+  and each load-weighted latent channel change only by round-off (about 1e-8
+  of the total over 60 s of milling with the operator's moves, any preset).
+  The latent follows as `z = (w·z)/w`, so a clear particle takes the colour
+  of the pigment it receives outright. The lamina state travels with the
+  pigment: two more pools carry `w·q` and `w·ln(s/Δ)`, and a particle's new
+  `q`, `ln s` and `mixed` are the load-weighted blend of what it kept and
+  what it took (what came in is accounted for down to its giver's
+  thickness); it keeps its own normal. To keep the balance exact the passes
+  compute the same fixed-point terms from the same inputs (2^21; a
+  particle's share is its integer capacity term over the node's integer
   sum), and a particle that does not exchange does neither half: kinematic
   particles (a held chunk, material in the operator's hand) are skipped.
-  The kernel this replaced gathered a neighbourhood mean with 27 quadratic
-  weights from a raster scattered with 8 trilinear ones and relaxed each
-  particle toward it at its own rate; nothing balanced one particle's gain
-  against another's loss (the total drifted +4% at low and −6% at high over
-  the same run, +37% at `k` = 0.2), a held chunk was read but never debited,
-  and a load floor in the raster handed every clear particle a trace of
-  load at rest. The pools are the solver-grid raster's load and latent
-  accumulators, which that raster no longer fills (it scatters mass only),
-  plus one capacity accumulator.
-  Mixing therefore happens where the material is sheared — at the nip — and
-  not in the resting bank.
+  The pools are the solver-grid raster's load and latent accumulators, which
+  that raster does not fill (it scatters mass only), plus the capacity, the
+  two lamina pools and the mark. Ten storage bindings, the software
+  adapter's limit.
+  Before this the rate was `α = k·γ·frameDt` from the particle's own shear
+  rate: mixing wherever there was shear, at a rate that depended on the
+  nip's strain rates and on `k`, whatever the laminae were doing.
+  `tools/perf/mixcurve.mjs` prints the mixing-against-time table (intensity
+  of segregation at boxes of 1/32, 1/16 and 1/8 of a sim unit, axial
+  segregation, striation thickness) for a fixed recipe with or without the
+  operator's moves.
 
 **Reference check.** Footage of a real two-roll mill (silicone, three bands
 of about equal width across the front roll: red, yellow, teal) milled to a
@@ -1013,7 +1035,7 @@ src/gpu/device.ts               WebGPU init + capability report + fallback messa
 src/config/mill.ts              MillConfig, presets, geometry helpers (pure, tested)
 src/sim/types.ts                shared interfaces (GpuMpmSim API, snapshots, stats)
 src/sim/mpm.ts                  GpuMpmSim implementation
-src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, box, chunk, raster, disperse, streak, pack, inject, stamp, fold
+src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, box, chunk, raster, disperse, lamina, lamina_common, pack, inject, stamp, fold
 src/stamp.ts                    stamping a picture on the bank: raster size, footprint, pixels to latents (pure, tested)
 src/render/renderer.ts          Renderer (ray-march), src/render/camera.ts
 src/render/shaders/raymarch.wgsl, mixbox.wgsl

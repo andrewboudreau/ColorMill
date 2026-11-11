@@ -15,7 +15,33 @@ export interface DiagSnapshot {
   readonly positions: Float32Array;
   readonly velocities: Float32Array;
   readonly deformation: Float32Array;
+  /** 9 floats per particle, row-major C (optional: without it the nip's shear rate reads NaN) */
+  readonly velocityGradient?: Float32Array;
   readonly flags: Uint32Array;
+}
+
+/** The velocity profile across the gap, for the particles inside the nip (NIP_HALF_HEIGHT of the roll axes' height,
+ *  between the roll surfaces, in the middle of the roll's length). */
+export interface NipShear {
+  /** particles measured */
+  readonly n: number;
+  /** their mean speed down through the nip, over the mean of the two rolls' surface speeds */
+  readonly meanSpeed: number;
+  /** the difference in downward speed across the gap (back side less front side: the slope of a least-squares
+   *  line through speed against position across the local gap, times the whole gap), over the front roll's surface
+   *  speed. Rolls that the material sticks to give frictionRatio - 1; a plug carried round with the front roll
+   *  gives gap / R (the far side of a rigid rotation is that much faster, with no shear in it). */
+  readonly speedDifference: number;
+  /** the same over U_back - U_front (NaN at ratio 1) */
+  readonly speedDifferenceOverNominal: number;
+  /** mean shear strain rate across the gap the particles carry in C (C_yz + C_zy, so a rigid rotation reads 0),
+   *  in units of U_front / gap: nominal is again frictionRatio - 1 */
+  readonly shearRate: number;
+  /** the same over (U_back - U_front) / gap (NaN at ratio 1) */
+  readonly shearRateOverNominal: number;
+  /** mean magnitude of the deviatoric strain rate sqrt(2 D':D') from C, in units of U_front / gap: what the
+   *  lamina model and the flow law see, whatever its direction */
+  readonly strainRate: number;
 }
 
 export interface Spread { readonly mean: number; readonly p5: number; readonly p95: number }
@@ -50,6 +76,8 @@ export interface NipDiagnostics {
   readonly sheetCount: number;
   /** net particles through the nip plane per second over U_front · gap · rho0 · L */
   readonly flux: number;
+  /** the velocity profile across the gap inside the nip */
+  readonly nip: NipShear;
   /** 90th percentile of the sheet particles' depth off the front roll, in gaps */
   readonly thicknessGaps: number;
   /** fastest free particle, and that over 2 omega R, twice the front roll's surface speed (a stable run stays under 1) */
@@ -109,6 +137,10 @@ export interface DiagOptions {
 export const DIAG_X_BAND: readonly [number, number] = [0.3, 1.2];
 /** The arc of sheet measured, radians round the front axis from the nip in the direction of rotation. */
 export const DIAG_ARC: readonly [number, number] = [0.35, Math.PI];
+
+/** Half height of the slice of the nip the shear measures take, about the roll axes' height. The gap between the
+ *  rolls is y^2 / R wider at height y off the axes: 1.25e-3 here, against gaps of 0.02 to 0.04. */
+export const NIP_HALF_HEIGHT = 0.02;
 
 /**
  * Measure the nip between two snapshots of the same particles (`a` earlier; state statistics are
@@ -197,6 +229,42 @@ export function nipDiagnostics(a: DiagSnapshot, b: DiagSnapshot, o: DiagOptions)
     else { bJ.push(J); bRho.push(rho / 8); bGhost.push(rhoG / 8); }
   }
 
+  // the nip: velocity against position across the local gap (0 on the front roll, 1 on the back roll)
+  const C = b.velocityGradient;
+  const Ub = Math.abs(back.omegaX) * R, UfNip = Math.abs(front.omegaX) * R;
+  let nn = 0, sS = 0, sU = 0, sSS = 0, sSU = 0, sShear = 0, sRate = 0;
+  for (let p = 0; p < n; p++) {
+    const x = pos[3 * p], y = pos[3 * p + 1], z = pos[3 * p + 2];
+    if (!free(p) || !(x > DIAG_X_BAND[0] && x < DIAG_X_BAND[1]) || Math.abs(y - ay) > NIP_HALF_HEIGHT) continue;
+    const eF = Math.hypot(y - ay, z - azF) - R, eB = Math.hypot(y - ay, z - azB) - R;
+    if (!(z > azB && z < azF) || eF + eB <= 0) continue;
+    const s = eF / (eF + eB);
+    const u = -b.velocities[3 * p + 1];
+    nn++; sS += s; sU += u; sSS += s * s; sSU += s * u;
+    if (C) {
+      const c = 9 * p;
+      sShear += C[c + 5] + C[c + 7];
+      const tr = (C[c] + C[c + 4] + C[c + 8]) / 3;
+      const dxx = C[c] - tr, dyy = C[c + 4] - tr, dzz = C[c + 8] - tr;
+      const dxy = 0.5 * (C[c + 1] + C[c + 3]), dxz = 0.5 * (C[c + 2] + C[c + 6]), dyz = 0.5 * (C[c + 5] + C[c + 7]);
+      sRate += Math.sqrt(2 * (dxx * dxx + dyy * dyy + dzz * dzz + 2 * (dxy * dxy + dxz * dxz + dyz * dyz)));
+    }
+  }
+  const varS = sSS - (sS * sS) / Math.max(nn, 1);
+  const slope = nn > 2 && varS > 1e-9 ? (sSU - (sS * sU) / nn) / varS : NaN;
+  const dU = Ub - UfNip;
+  const nominal = Math.abs(dU) > 1e-6 * UfNip;
+  const shear = C && nn > 0 ? sShear / nn / (UfNip / gap) : NaN;
+  const nip: NipShear = {
+    n: nn,
+    meanSpeed: nn > 0 ? sU / nn / (0.5 * (Ub + UfNip)) : NaN,
+    speedDifference: slope / UfNip,
+    speedDifferenceOverNominal: nominal ? slope / dU : NaN,
+    shearRate: shear,
+    shearRateOverNominal: nominal ? shear / (dU / UfNip) : NaN,
+    strainRate: C && nn > 0 ? sRate / nn / (UfNip / gap) : NaN
+  };
+
   // flux: net particles through the nip plane (y = axisY between the roll axes) between the snapshots
   let crossed = 0;
   const m = Math.min(a.count, b.count);
@@ -226,6 +294,7 @@ export function nipDiagnostics(a: DiagSnapshot, b: DiagSnapshot, o: DiagOptions)
     bankFrontSpeed: frontSpeed / Math.max(frontN, 1) / Uf,
     sheetCount: sJ.length / restSheet,
     flux,
+    nip,
     thicknessGaps: depth.length ? depth[Math.floor(0.9 * (depth.length - 1))] / gap : NaN,
     maxSpeed: vmax,
     maxSpeedOverLimit: vmax / limit,

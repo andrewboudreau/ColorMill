@@ -45,6 +45,10 @@ fn rollGhost(x : vec3<f32>) -> f32 {
   return (1.0 - smoothstep(-GHOST_REACH, GHOST_REACH, sF)) + (1.0 - smoothstep(-GHOST_REACH, GHOST_REACH, sB));
 }
 
+// The density tie lowers ln J at most this fast (1/s): through the nip (0.03 s) it follows the packing,
+// but material the fed log of a cut & roll is laid into is loaded over tens of substeps, not in one.
+const TIE_RATE : f32 = 10.0;
+
 const FOLD_SETTLE : f32 = 0.5;   // s: material just let go of the log does not count as pile yet
 
 fn loadMatF(p : u32) -> mat3x3<f32> {
@@ -141,7 +145,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   // particles pack without F hearing of it; then the nip passes more than the gap holds.
   if (P.mat2.y > 0.0) {
     let rho = mass / (8.0 * P.part.y) + rollGhost(x);
-    ev = min(ev, log((1.0 + P.mat2.y) / max(rho, 1e-3)) / 3.0);
+    ev = max(min(ev, log((1.0 + P.mat2.y) / max(rho, 1e-3)) / 3.0), ev - TIE_RATE * dt / 3.0);
   }
   // The elastic volume saturates (design §4, Stability): a particle the hand, the fed log or the
   // rolls' push-out squeeze further than the putty can carry keeps its shape history and a bounded

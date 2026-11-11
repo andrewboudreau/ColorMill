@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_MATERIAL, QUALITY_PRESETS, bulkModulus, courantNumber, lameParameters, soundSpeed, type MaterialConstants } from '../src/config/mill';
-import { flowCurve, hbShear, plasticReturn, principalStress, shearStress, updatePutty, type Mat3, type Vec3 } from '../src/sim/constitutive';
+import { TIE_RATE, flowCurve, hbShear, plasticReturn, principalStress, shearStress, updatePutty, type Mat3, type Vec3 } from '../src/sim/constitutive';
 
 const m = DEFAULT_MATERIAL;
 const { mu } = lameParameters(m);
@@ -88,13 +88,20 @@ describe('plasticReturn', () => {
 
   it('the density tie lowers J to what the measured density allows and never raises it', () => {
     const tied = { ...m, densityTolerance: 0.1 };
-    const at = (lnJ: number, rho: number): number => { const r = plasticReturn([lnJ / 3, lnJ / 3, lnJ / 3], tied, dt, rho); return Math.exp(r[0] + r[1] + r[2]); };
-    expect(at(Math.log(0.95), 1.375)).toBeCloseTo(0.8, 12);      // packed to 1.375: J = 1.1 / 1.375
+    // held at one density for half a second: the tie closes at TIE_RATE, so it has arrived
+    const at = (lnJ: number, rho: number): number => {
+      let r: Vec3 = [lnJ / 3, lnJ / 3, lnJ / 3];
+      for (let i = 0; i < 0.5 / dt; i++) r = plasticReturn(r, tied, dt, rho);
+      return Math.exp(r[0] + r[1] + r[2]);
+    };
+    const one = plasticReturn([0, 0, 0], tied, dt, 3);
+    expect(one[0] + one[1] + one[2]).toBeCloseTo(-TIE_RATE * dt, 12);   // one step: rate-limited
+    expect(at(Math.log(0.95), 1.375)).toBeCloseTo(0.8, 9);      // packed to 1.375: J = 1.1 / 1.375
     expect(at(Math.log(0.95), 1.0)).toBeCloseTo(0.95, 12);       // within the tolerance: untouched
     expect(at(Math.log(0.75), 1.2)).toBeCloseTo(0.75, 12);       // already below: untouched
     expect(at(Math.log(1.2), 0.6)).toBeCloseTo(1.2, 12);         // a free surface under-reads: never raised
-    expect(at(Math.log(0.95), 3)).toBeCloseTo(tied.volumeMin, 12);
-    expect(plasticReturn([0, 0, 0], m, dt, 2)).toEqual([0, 0, 0]);   // tolerance 0: off
+    expect(at(Math.log(0.95), 3)).toBeCloseTo(tied.volumeMin, 9);
+    expect(plasticReturn([0, 0, 0], { ...m, densityTolerance: 0 }, dt, 2)).toEqual([0, 0, 0]);   // tolerance 0: off
   });
 
   it('is idempotent in the rate-independent limit: a returned state is on the yield surface and stays', () => {

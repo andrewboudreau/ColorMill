@@ -81,7 +81,9 @@ export const DEFAULT_MATERIAL: MaterialConstants = {
   /* consistency and index: design §4 has the measurements that chose them */
   consistency: 0.45,
   flowIndex: 0.35,
-  densityTolerance: 0,
+  /* the density tie (g2p.wgsl; design §4, Volume): 0.05 / 0.1 / 0.2 leave a sheet count of 1.06 / 1.08 / 1.11
+     at `low` and 1.35 / 1.34 / 1.43 at `high` (calendering theory: 1.2 to 1.4; 1.09 and 1.83 with it off) */
+  densityTolerance: 0.1,
   /* with J free the cut & fold blows up 10% past the preset's time step, with [0.5, 2] the fed log of a cut &
      roll does at `high`; [0.7, 1.4] is clean at 1.2x the step on every preset (design §4, Stability). Steady
      milling does not reach the bounds: the sheet's J is 0.76 to 1.06 (5th to 95th percentile, `high`). */

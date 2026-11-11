@@ -15,10 +15,6 @@
 // The peel zone of the front roll's tack band while the hand holds the cut edge (cut & fold): this
 // far back from the crown along the front face, in radians.
 const PEEL_ARC : f32 = 0.7;
-// How far above and below the nip line the nip's channel reaches, in gaps: the wedge (where the rolls are
-// no-slip walls and not a band) starts this far above the axes' height. The gap is about 1.3 cells on every
-// preset, so this is the same 1.9 cells on all of them (0.06 at `low`, where it was tuned).
-const NIP_REACH : f32 = 1.5;
 
 @compute @workgroup_size(4, 4, 4)
 fn main(@builtin(global_invocation_id) lid : vec3<u32>) {
@@ -73,11 +69,10 @@ fn main(@builtin(global_invocation_id) lid : vec3<u32>) {
   //    clamps every node the sheet sits on, so the hand could pull only through the outermost
   //    layer of nodes and the putty gave way there).
   let df = rollerDist(P.front.x, P.front.y, p);
-  let nipReach = NIP_REACH * P.fold2.z;
-  let inWedge = p.y > P.front.x + nipReach && p.z < P.front.y;
+  let inWedge = p.y > P.front.x + 0.06 && p.z < P.front.y;
   if (df < R + P.bands.x && !(inWedge && df > R)) {
     let vr = rollerVel(P.front.x, P.front.y, P.front.z, p);
-    let inChannel = abs(p.y - P.front.x) < nipReach && p.z < P.front.y && df > R;
+    let inChannel = abs(p.y - P.front.x) < 0.06 && p.z < P.front.y && df > R;
     let peel = P.fold.x > 1.5 && df > R && p.z >= P.front.y && p.y - P.front.x > df * cos(PEEL_ARC);
     if (peel) {
       let nrm = rollerNormal(P.front.x, P.front.y, p);
@@ -99,7 +94,7 @@ fn main(@builtin(global_invocation_id) lid : vec3<u32>) {
   //    separating contact with Coulomb friction, so the sheet peels off it cleanly
   //    below the nip and follows the (stickier) front roll.
   let db = rollerDist(P.back.x, P.back.y, p);
-  let inWedgeB = p.y > P.back.x + nipReach && p.z > P.back.y;
+  let inWedgeB = p.y > P.back.x + 0.06 && p.z > P.back.y;
   if (inWedgeB && db <= R) {
     v = rollerVel(P.back.x, P.back.y, P.back.z, p);
   } else if (db < R + P.bands.y) {

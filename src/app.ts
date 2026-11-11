@@ -17,15 +17,17 @@
 import './styles.css';
 import { BASE_LATENT, PIGMENTS, findPigment, loadMixbox, rgbToLatentAsync } from './color/pigments';
 import { parseDrops, type Drop } from './drops';
+import { nipDiagnostics } from './sim/diagnostics';
 import { clampParam, formatMillQuery, isDefaultParam, parseExperimental, parseInk, parseMillParams, parseRollStyle } from './config/link';
 import { fitStamp, parseStampText, rgbaToStamp, stampDims } from './stamp';
 import {
-  BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres,
+  BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres, soundSpeed,
   type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
 import type { CameraState, Renderer } from './render/types';
 import type { DebugApi, GpuMpmSim, Latent, ParticleSnapshot, SimStats, StampImage } from './sim/types';
+import { mixingMetrics, pigmentInventory, type MixingMetrics, type PigmentInventory } from './sim/metrics';
 import { Hud } from './ui/hud';
 import { installKeyboard } from './ui/keys';
 import { installOrbitControls, type OrbitControls } from './ui/orbit';
@@ -144,9 +146,12 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   let preset: QualityPreset = chosen.preset;
   // batch size multiplier (?batch=1.5); scales the seeded bank
   const batchQuery = parseFloat(query.get('batch') ?? '');
-  let batch = Number.isFinite(batchQuery) && batchQuery > 0
+  let batchPinned = Number.isFinite(batchQuery) && batchQuery > 0;
+  let batch = batchPinned
     ? Math.min(Math.max(batchQuery, BATCH_LIMITS.min), BATCH_LIMITS.max)
-    : 1;
+    : QUALITY_PRESETS[preset].batch;
+  /** the batch a preset is rebuilt with: the operator's own if they chose one, else the preset's */
+  const batchFor = (p: QualityPreset): number => batchPinned ? batch : QUALITY_PRESETS[p].batch;
   let autoOrbit = query.get('orbit') === '1';
   const startPaused = query.get('paused') === '1';
   // Unless the preset was pinned by the user or the URL, drop a level when the
@@ -222,13 +227,13 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       if (key === 'gap') gapPinned = true;
       if (sim) sim.params[key] = value;
     },
-    onQuality: (p) => { adaptive = false; presetPinned = true; void rebuildSim(p, batch); },
+    onQuality: (p) => { adaptive = false; presetPinned = true; void rebuildSim(p, batchFor(p)); },
     onRenderScale: (scale) => {
       adaptiveResolution = false;
       renderScale = scale;
       if (renderer) renderer.renderScale = scale;
     },
-    onBatch: (b) => { void rebuildSim(preset, b); },
+    onBatch: (b) => { batchPinned = true; void rebuildSim(preset, b); },
     onAutoOrbit: (on) => { autoOrbit = on; },
     onSurfaceColour: (on) => { if (renderer) renderer.mode = on ? 'surface' : 'depth'; },
     onExperimental: (on) => {
@@ -630,11 +635,11 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   document.addEventListener('visibilitychange', onVisibility);
 
   // --- build / rebuild --------------------------------------------------------------
-  // material constants can be overridden from the URL for experiments (?E=30&thetaS=0.02)
+  // material constants can be overridden from the URL for experiments (?E=30&flowIndex=0.4)
   const materialOverride: { -readonly [K in keyof MaterialConstants]: number } = { ...DEFAULT_MATERIAL };
-  for (const k of ['E', 'nu', 'thetaC', 'thetaS'] as const) {
+  for (const k of ['E', 'nu', 'yieldStress', 'consistency', 'flowIndex', 'densityTolerance', 'volumeMin', 'volumeMax'] as const) {
     const v = parseFloat(query.get(k) ?? '');
-    if (Number.isFinite(v) && v > 0) materialOverride[k] = v;
+    if (Number.isFinite(v) && v >= 0 && (v > 0 || k === 'densityTolerance')) materialOverride[k] = v;
   }
   const material: MaterialConstants = materialOverride;
   const tackQuery = parseFloat(query.get('tack') ?? '');
@@ -671,6 +676,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       }
       next.paused = old.paused;
       renderer.setVolumes(next.volumes);
+      renderer.reflections = p !== 'low';
       sim = next;
       preset = p;
       batch = b;
@@ -693,7 +699,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       paintStats(true);
     }
   }
-  const setQuality = (p: QualityPreset): Promise<void> => rebuildSim(p, batch);
+  const setQuality = (p: QualityPreset): Promise<void> => rebuildSim(p, batchFor(p));
 
   // --- construct sim + renderer -------------------------------------------------------
   overlay.setProgress(`Building the ${preset} simulation (${chosen.reason}, ~${estimateParticleCount(QUALITY_PRESETS[preset]).toLocaleString()} particles)…`);
@@ -714,9 +720,14 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   try {
     renderer = opts.makeRenderer(ctx, canvas);
     renderer.renderScale = renderScale;
+    renderer.reflections = preset !== 'low';   // the roll mirror's march is not worth its samples on the low preset's GPUs
     if (offscreen) renderer.setPresentation?.(false);
     const isoQuery = parseFloat(query.get('iso') ?? '');
     if (Number.isFinite(isoQuery) && isoQuery > 0.05 && isoQuery < 1) renderer.iso = isoQuery;   // debug: iso-surface threshold
+    const debugQuery = query.get('debug');   // debug: the putty's normal, or how firm it is, as a colour
+    if (debugQuery === 'normal' || debugQuery === 'firm') renderer.debugView = debugQuery === 'normal' ? 1 : 2;
+    const reachQuery = parseFloat(query.get('reach') ?? '');   // debug: reach of the normal's filter, texels
+    if (Number.isFinite(reachQuery) && reachQuery >= 0 && reachQuery <= 3) renderer.normalReachOverride = reachQuery;
     // colour mode (?render=depth|surface; the drawer's toggle changes it live)
     const renderQuery = query.get('render');
     if (renderQuery === 'depth' || renderQuery === 'surface') renderer.mode = renderQuery;
@@ -754,6 +765,24 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     },
     snapshot(): Promise<ParticleSnapshot> { return (sim as GpuMpmSim).readParticles(); },
     stats(): SimStats { return (sim as GpuMpmSim).stats; },
+    async inventory(): Promise<PigmentInventory> { return pigmentInventory(await (sim as GpuMpmSim).readParticles()); },
+    async mixing(): Promise<MixingMetrics> {
+      return mixingMetrics(await (sim as GpuMpmSim).readParticles());
+    },
+    async nipDiagnostics(frames: number) {
+      const s = sim as GpuMpmSim;
+      const a = await s.readParticles();
+      const ca = await s.readCounters();
+      const t0 = s.stats.simTime;
+      await api.stepFrames(frames);
+      const b = await s.readParticles();
+      const cb = await s.readCounters();
+      return nipDiagnostics(a, b, {
+        dims: s.stats.grid, params: s.params, dt: s.quality.dt, seconds: s.stats.simTime - t0,
+        soundSpeed: soundSpeed(s.config.material),
+        resets: (cb.resets - ca.resets) >>> 0, pushOuts: (cb.pushOuts - ca.pushOuts) >>> 0
+      });
+    },
     tapPigment,
     setDropSlot,
     get dropSlot(): number { return dropSlot; },

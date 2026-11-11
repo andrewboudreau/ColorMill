@@ -2,7 +2,7 @@
 // the nodes the material can touch instead of the whole domain.
 //
 // G2P reduces the particles' cell range every substep (atomic min / max into BOX_ACC, kinematic
-// particles included). `step_` (one invocation, after G2P) turns that into the solver's box for
+// particles included; only the particles on or beyond a face of the last bounds report, see step_). `step_` (one invocation, after G2P) turns that into the solver's box for
 // the next substep: the cells' 27-node stencils plus a cell of slack for what the operator's
 // script moves before the next P2G, as an origin and size the grid update offsets its nodes by
 // and the workgroup counts its indirect dispatch reads. The bounds are exact for the positions
@@ -24,7 +24,8 @@
 // from `fineOut`, a uniform to it.
 //
 // When particles are placed from the CPU (seeding, reset, a pigment chunk) the host writes the
-// whole grid into every box (mpm.ts resetBox): the full grid is always a valid box.
+// whole grid into every box (mpm.ts resetBox): the full grid is always a valid box. It writes
+// inverted bounds for G2P's test, so the next substep reduces over every particle.
 @group(0) @binding(1) var<storage, read_write> box : array<atomic<u32>>;
 // indirect dispatch arguments: [0..2] the solver's grid update, [4..6] the raster's clear and pack,
 // [8..10] the colour raster's clear and pack
@@ -81,17 +82,39 @@ fn storeBox(at : u32, arg : u32, lo : vec3<i32>, hi : vec3<i32>) {
   args[arg + 2u] = u32(groups.z);
 }
 
+// the bounds G2P tests its particles against (min cell xyz, max cell xyz): a plain copy, because
+// an atomicLoad of a word every particle shares is as contended as a write
+@group(0) @binding(4) var<storage, read_write> boxLast : array<u32>;
+
 @compute @workgroup_size(1)
 fn step_() {
   let top = vec3<i32>(P.grid.xyz) - vec3<i32>(1);
-  let mnU = vec3<u32>(atomicLoad(&box[BOX_ACC]), atomicLoad(&box[BOX_ACC + 1u]), atomicLoad(&box[BOX_ACC + 2u]));
-  let mxU = vec3<u32>(atomicLoad(&box[BOX_ACC + 3u]), atomicLoad(&box[BOX_ACC + 4u]), atomicLoad(&box[BOX_ACC + 5u]));
-  var mn = vec3<i32>(0);
-  var mx = top;
-  // nothing reduced (no particle ran G2P): keep the whole grid
-  if (all(mnU <= mxU)) {
-    mn = vec3<i32>(mnU);
-    mx = min(vec3<i32>(mxU), top);
+  let accMn = vec3<u32>(atomicLoad(&box[BOX_ACC]), atomicLoad(&box[BOX_ACC + 1u]), atomicLoad(&box[BOX_ACC + 2u]));
+  let accMx = vec3<u32>(atomicLoad(&box[BOX_ACC + 3u]), atomicLoad(&box[BOX_ACC + 4u]), atomicLoad(&box[BOX_ACC + 5u]));
+  let lastMn = vec3<u32>(boxLast[0], boxLast[1], boxLast[2]);
+  let lastMx = vec3<u32>(boxLast[3], boxLast[4], boxLast[5]);
+  // G2P reports only the particles on or beyond a face of the last bounds. Where one did, the
+  // reduction is the true bound (every other particle is inside it); where none did, no particle
+  // is on that face any more and the bound moves in by a cell, which still holds them all. So the
+  // box is exact while the material's bounds move a cell a substep or less, and catches up a cell
+  // a substep otherwise. The host asks for a full reduction by writing inverted bounds (resetBox):
+  // every particle then reports.
+  var mn = select(vec3<i32>(lastMn) + vec3<i32>(1), vec3<i32>(accMn), accMn <= lastMn);
+  var mx = select(vec3<i32>(lastMx) - vec3<i32>(1), vec3<i32>(accMx), accMx >= lastMx);
+  mx = min(mx, top);
+  if (any(mn > mx)) {
+    // nothing reduced (no particle ran G2P): keep the whole grid, and ask again
+    mn = vec3<i32>(0);
+    mx = top;
+    for (var c = 0u; c < 3u; c++) {
+      boxLast[c] = u32(top[c]);
+      boxLast[3u + c] = 0u;
+    }
+  } else {
+    for (var c = 0u; c < 3u; c++) {
+      boxLast[c] = u32(mn[c]);
+      boxLast[3u + c] = u32(mx[c]);
+    }
   }
   storeCells(BOX_LAST, mn);
   storeCells(BOX_LAST + 3u, mx);

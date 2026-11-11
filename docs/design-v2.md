@@ -193,15 +193,20 @@ Boundaries, applied in this order:
    surface layer is dragged in as far as the particles' stencils reach (about
    a cell), the bank presses material onto the roll and packs the layer the
    nip is about to take, and when the channel cannot pass what arrives the
-   material's own pressure (ν = 0.47) holds the rest back and the bank rolls
+   material's own pressure (§4) holds the rest back and the bank rolls
    instead of being force-fed.
    Measured (particles per 0.35 rad of sheet; 1650 at `low`, 5550 at `medium`
    is a gap-thick sheet at rest density): `low` 1.2 L 2000–2700 in every bin,
    `low` 2.4 L 2200–2900, `medium` 1.2 L 7700–8300, all steady from 1.3 s to
    3.9 s, nothing dropped, the sheet rendered without a hole. The channel
-   itself is still velocity-prescribed, so it packs the sheet to 1.3–1.5× rest
-   density (more with a heavier bank); that is the remaining dishonesty of the
-   nip and it is bounded.
+   itself is still velocity-prescribed, and next to the rolls the particles
+   pack without their `F` recording it (those counts are 1.2–1.75× a gap-thick
+   rest sheet, and at `high` it was 2.2×); the density tie of §4 is what
+   bounds that now (1.08 / 1.26 / 1.35 at `low` / `medium` / `high`).
+   The 0.06 is a length, not a number of gaps, on purpose: scaled to 1.5 gaps
+   on every preset the rolls' grip on the bank is shorter at `medium` and
+   `high` and a bank of the same proportions moves slower (back half 0.42 of
+   roll speed against 0.69 at `high`).
    Alternatives tried and rejected: Coulomb friction only (μ = 0.8) starves
    the nip once the bank is small, because the drag scales with the bank's
    weight (lacy, pulsing sheet); a hard tangential tack constraint through the
@@ -215,6 +220,80 @@ Boundaries, applied in this order:
    force-feeds and drops material off the underside; releasing the band's
    normal constraint where it is overpacked drops material off the underside
    too.
+   **Friction ratio.** With `v = vr` on every node of the band the material
+   crossed the nip as a plug at the front roll's speed, whatever the back roll
+   did: at ratio 1.25 the particles' shear strain rate there (`C_yz + C_zy`,
+   which reads 0 for the band's rigid rotation) was 0.15–0.23 of
+   `(U_back − U_front) / gap`, at 1.6 it was 0.05–0.08. So in the channel
+   (`|y − axisY| < 0.06`, between the two axes) the band's velocity is
+
+   ```
+   s  = (d_front − R) / (d_front + d_back − 2R)      0 on the front roll, 1 on the back roll
+   v  = vr · (1 + (ratio − 1) · s · fade · R / d_front)
+   ```
+
+   the front roll's rotation plus the back roll's extra surface speed in
+   proportion to the node's place across the local gap: a Couette profile.
+   `fade` is 1 down to 0.03 below the axes' height and falls to 0 at the
+   channel's lower end, so the sheet leaves at the front roll's speed. `s` is
+   not clamped at the roll surfaces but carried on into the rolls' nodes as
+   far as `NIP_PROFILE_REACH` = 0.6 gaps (ghost nodes), so that what a
+   particle in the gap gathers is the line itself and not one flattened at the
+   walls. At ratio 1 the term is zero and the field is bit for bit the plug.
+   **This is a model, not a resolved flow**: a gap of 1.3 cells has one layer
+   of nodes in it, the profile is prescribed on them and the momentum the
+   grid solved for is overwritten as everywhere else in the band (the back
+   roll's contact is unchanged and gives no reaction). Only the drag part of
+   the lubrication profile is there; the pressure-driven (Poiseuille) part,
+   which in a real nip adds shear at the walls on the way in and takes it
+   away on the way out, is not.
+   Measured (`tools/perf/nip.mjs`, `low` / `medium` / `high`, shear in units of
+   the nominal `(U_back − U_front) / gap`, flux over `U_front·gap·ρ0·L`):
+
+   | ratio | shear before | shear now | flux before | flux now | sheet count before | now |
+   | --- | --- | --- | --- | --- | --- | --- |
+   | 1.0 | – | – | 1.12 / 1.12 / 1.19 | the same | 1.05 / 1.01 / 1.09 | the same |
+   | 1.25 | 0.15 / 0.16 / 0.23 | 0.91 / 0.92 / 0.96 | 1.14 / 1.13 / 1.22 | 1.22 / 1.16 / 1.23 | 1.06 / 1.03 / 1.13 | 1.09 / 1.07 / 1.21 |
+   | 1.6 | 0.08 / 0.05 / 0.07 | 0.91 / 0.95 / ~0.95 | 1.14 / 1.10 / 1.23 | 1.27 / 1.15 / 1.13 | 1.07 / 1.01 / 1.13 | 1.20 / 1.16 / 1.30 |
+
+   No `F` resets, nothing in the tray, both operator moves clean on every
+   preset at 1.25 and 1.6 (fastest particle 0.83–1.02 of twice the roll
+   speed). The flux follows the mean of the two speeds at `low` and only
+   part of the way at `medium` and `high` at 1.6 (0.88 of `gap × mean speed`):
+   the channel's density release gives the rest back to the bank.
+   Alternatives measured at 1.25: the same line clamped at the surfaces
+   (no ghost nodes) 0.60–0.67 of the nominal shear; a step (front half of the
+   gap at the front roll's speed, back half at the back roll's) 0.68–0.90,
+   uneven between presets; a blend of the two rolls' rotations, which is not
+   the plug at ratio 1, starved the nip at `low` (flux 0.89, bank's back half
+   0.39 of roll speed); prescribing the nodes deep in the back roll too
+   over-conveyed (count 1.2–1.39, the nip emptying in pulses); a reach of 1.2
+   gaps measured the same shear and threw the fastest particle of a cut &
+   fold at `high` to 1.22.
+   **What it does to mixing, measured, is not what a mill does.** Steady
+   milling (no moves) for 60 s, I(1/32) at 20 / 40 / 60 s: ratio 1.0, `low`
+   0.155 / 0.088 / 0.068, `high` 0.227 / 0.192 / 0.176; ratio 1.6, `low`
+   0.243 / 0.151 / 0.120, `high` 0.431 / 0.370 / 0.344 (with the plug, 1.6
+   read 0.136 / 0.078 / 0.062 and 0.239 / 0.201 / 0.185: no different from
+   1.0). The higher ratio mixes *slower*. Split by region, the lamina
+   thinning `d ln s/dt = n·L'·n` is mostly the bank's (at ratio 1, 0.17 of
+   0.21 /s at `low`, 0.20 of 0.29 at `high`); a striation reaches the nip
+   lying along the sheet, where simple shear across the gap does not thin
+   it (the nip's own share goes up 0–25%, and what the entry gains the exit
+   gives back as the profile fades). Meanwhile the faster channel carries a
+   thicker sheet, the bank is left with less of the batch (0.41 → 0.24 of
+   the particles at `low`) and a small bank rides through as a lump rather
+   than rolling (bank's contribution at 1.25 `low`: 0.013 /s). With the batch
+   raised to give the bank its share back (1.12 at `low`, 0.56 at `high`)
+   `high` at 1.6 is level with ratio 1 (0.248 / 0.198 / 0.174) and `low` is
+   still behind (0.245 / 0.127 / 0.086). With the operator's moves the
+   difference at the default ratio is small (0.139 / 0.018 / 0.008 at `low`,
+   0.268 / 0.035 / 0.019 at `high`, against 0.115 / 0.013 / 0.007 and
+   0.245 / 0.033 / 0.022). What a real nip adds, dispersive mixing from the
+   shear stress, this model has no measure for. One more thing the ratio
+   brings out: the gap in the sheet left by the start-up (the nip slice
+   empty for a moment each revolution, there at ratio 1 until about 2 s)
+   lasts to 8–10 s at `high` at 1.6.
 2. **Back roller**. In the wedge above the nip (`y > axisY + 0.06`,
    `z > backAxisZ`) it is the same tacky no-slip wall as the front roll:
    nodes inside its surface (`d ≤ R`) take `v = vr`, so the bank is drawn in
@@ -238,10 +317,11 @@ For each non-kinematic particle:
 
 ```
 gather v_new = Σ wgt · vel[n]
+gather mass  = Σ wgt · m[n]                             (for the density tie, §4)
 gather C_new = (4/h²) · Σ wgt · outer(vel[n], dpos)     (MLS-MPM)
 v = v_new;  C = C_new
 F = (I + dt · C) · F
-F = plasticReturn(F)                            (§4)
+F = plasticReturn(F, mass, x)                   (§4)
 x += dt · v
 x = clamp(x, 1.5h, domain − 1.5h)
 x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.25h along n
@@ -254,8 +334,9 @@ x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.2
 - **Disperse** (shear-driven mixing, §5).
 - **Pack**: write the coarse density volume (§8): one `rgba16float` 3D texture
   of node dims, `volA = (density, 0, 0, 0)`, where `density = pmass / 8`
-  (so a fully packed cell ≈ 1). Coarse pigment accumulators remain inputs to
-  dispersion; only the fine raster's pigment is packed into render textures.
+  (so a fully packed cell ≈ 1). The solver-grid raster scatters mass only;
+  its load and latent accumulators are the dispersion exchange's pools (§5),
+  and only the fine raster's pigment is packed into render textures.
 - **Colour raster**: the same scatter and pack a second time onto a finer
   lattice, in a box laid over the material each frame (§3.6). Its finest
   cell is the particle spacing, `colourCellsPerUnit` = twice the solver's
@@ -265,8 +346,9 @@ x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.2
   memory the raster used when it covered the domain and under the default
   128 MiB storage-binding limit for the 7-channel accumulator). It has its
   own accumulators and three `rgba16float`
-  textures `finA = (load, lat0..2)`, `finB = (lat3..6)`, `finC = (mass,
-  coverage)`, load, mass and coverage normalised by `(h/hF)³/8` so a packed
+  textures `finA = (load, lat0..2)`, `finB = (lat3..6)` (the latent
+  premultiplied by the load, §5), `finC = (mass, coverage)`, load, latent,
+  mass and coverage normalised by `(h/hF)³/8` so a packed
   fine cell reads ≈ 1, `finA.x / finC.x` is the load per unit mass and
   `finC.y / finC.x` is the covered mass fraction (0..1). **Coverage** is an
   eighth accumulator `pcov` (i32, scale 2^20) that sums `wgt·pMass` only for
@@ -289,7 +371,7 @@ x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.2
   116 MB at low, 225 MB at medium, 300 MB at high and ultra); a
   device whose storage-binding limit cannot hold the 7-channel accumulator
   falls back to the solver grid with a console warning. The dispersion
-  kernel keeps reading the solver-grid raster.
+  exchange always runs on the solver grid.
 
 ### 3.6 The material's box
 
@@ -355,60 +437,145 @@ the nip and shrinks again as the nip eats it.
 
 ---
 
-## 4. Material model: elastoplastic putty (fixed corotated + yield clamp)
+## 4. Material model: elasto-viscoplastic putty (Hencky + Herschel–Bulkley)
 
 This is the model that makes it a mill and not a puddle: the bank holds its
 shape under gravity, yields and flows under the nip's shear, and does not
-spring back.
+spring back. `src/sim/constitutive.ts` is a CPU mirror of the update in f64
+(`tests/constitutive.test.ts`: the return is idempotent, never raises the
+stress, keeps the volume, and steady simple shear reproduces the flow curve).
 
-Constants (in `config.material`):
+Constants (in `config.material`; URL overrides of the same names):
 
 | name | default | meaning |
 | --- | --- | --- |
 | `E` | 22 | Young's modulus (unit density; at 15 a sheet pulled off the roll by its edge sagged as a film and pigment chunks smeared, at 22 it holds as a slab with the chunks still lumps and the bank still rolls; 60 makes a rigid slab that starves the nip) |
-| `nu` | 0.47 | Poisson ratio (nearly incompressible, bulk modulus ≈ 80: at 0.35 the nip packed the putty to 1.5× rest density and carried 50% more than the gap allows; at 0.45 it still packed the sheet to 1.5× once the viscoplastic drag pulled the bank in, and the wrap ran short; at 0.49 (bulk modulus ≈ 500, dt at ~0.85 of the elastic CFL limit) the sheet was continuous at ~1.0–1.3× rest but the fed pile of a cut & roll blew up, speeds of 10–25; 0.47 is stable through a cut & roll) |
-| `thetaC` | 0.025 | plastic compression threshold |
-| `thetaS` | 0.05 | plastic stretch threshold (tensile cohesion; 0.0075 gives a lacy sheet after operator moves, 0.03 a continuous one that tears where it sticks when pulled by its edge, 0.05 pulls and folds as putty) |
-| `mu`, `lambda` | derived | `mu = E/(2(1+nu))`, `lambda = E·nu/((1+nu)(1−2nu))` |
+| `nu` | 0.47 | Poisson ratio. Bulk modulus `K = E/(3(1−2ν))` = 122, `λ` = 117, `μ` = 7.5. 0.45 (K = 73) leaves more margin under a cut & fold (clean at 1.3× the time step) and packs the nip more; 0.49 (K = 367) is past the time step's limit |
+| `yieldStress` | 0.58 | `τ_y`, yield stress in shear (von Mises: `sqrt(2)·μ·|dev ε|`, the τ_xy of the equivalent simple shear). The old stretch clamp `[0.975, 1.05]` gave 0.3–0.6 depending on direction; 0.58 is its stretch side |
+| `consistency` | 0.45 | `k` of the overstress |
+| `flowIndex` | 0.35 | `n` of the overstress (below 1: shear-thinning) |
+| `densityTolerance` | 0.1 | density tie: `J ≤ (1 + this)/ρ`; 0 turns it off |
+| `volumeMin`, `volumeMax` | 0.7, 1.4 | where the elastic volume saturates |
 
-Fixed corotated (Stomakhin 2013) with the MLS-MPM stress form:
+**Elasticity** is Hencky (logarithmic strain), which makes the return below
+exact and the pressure stiffen in compression:
 
 ```
 [U, Σ, V] = svd(F)                     (3×3, robust; see note)
-Rot = U · Vᵀ
-J = det(F) = Σ0·Σ1·Σ2
-P = 2mu·(F − Rot) + lambda·(J − 1)·J·F⁻ᵀ
-σ = (1/J) · P · Fᵀ                     (Cauchy stress, used in §3.2)
+ε = log Σ                              (principal Hencky strains; Σ clamped to [0.05, 20])
+ln J = ε0 + ε1 + ε2,   e = ε − ln J / 3
+τ = U · diag(2μ·e + K·ln J) · Uᵀ       (Kirchhoff stress = J·σ; what §3.2 scatters)
 ```
 
-Plastic return (after the F update in G2P) is **deviatoric only**: split the
-stretches into the volumetric part `J^(1/3)` and unit-volume deviatoric
-stretches `Σi / J^(1/3)`, clamp only the deviatoric stretches to
-`[1 − thetaC, 1 + thetaS]`, renormalise their product to 1 and put the volume
-back, then rebuild `F = U·diag(Σ)·Vᵀ`. No hardening. Clamping the raw
-singular values (the snow model) lets the material lose volume plastically,
-so the nip packs it to several times rest density and swallows the bank
-(docs/millref-notes.md §5a); putty yields in shape, not in volume, and the
-pressure term must keep resisting compression.
+The fixed corotated law this replaces has the pressure `λ(J − 1)J`, whose
+stiffness `λ(2J − 1)` falls as the putty is compressed and is zero at J = 1/2:
+the more the nip packed it the less it resisted. `K ln J` has the constant
+stiffness K in ln J.
 
-The return is **viscoplastic** (Perzyna): the deviatoric stretch beyond the
-yield range is not discarded at once but relaxes toward it,
-`dev = devC + clamp(dev − devC, ±DEV_CAP) · exp(−dt / TAU_VP)` with
-`TAU_VP` = 0.06 s and `DEV_CAP` = 1.0 (`g2p.wgsl`). For a short while the
-putty carries shear like a viscous fluid (effective viscosity ≈ 2μ·TAU_VP),
-so the drag of the roll surfaces reaches into the bank instead of stopping
-in a thin slip layer at the roll: a perfectly plastic bank sat over the back
-roll as a rigid lump moving at a fifth of roll speed while the rolls slid
-under it (the dead pocket that footage of a real mill does not show); with
-the relaxation its back half is drawn down into the nip at about half roll
-speed and the mass shifts toward the front roll. Measured at `low`, 2.4 L,
-z bands from the back roll to the front axis: mean speed of the back half
-0.05–0.2 → 0.4–0.57, the lump over the back roll clearing within 4 s. The
-extra drag would pack the sheet at the nip (1.5–1.8× rest at ν = 0.45, and
-the wrap then ran short, leaving a bare stretch of roll circulating), which
-is why ν went up: with a stiffer bulk modulus the excess is pushed back up
-the wedge instead of compressed through the gap (0.47; 0.49 was better still
-for the sheet but unstable under a cut & roll).
+**Plastic return** (after the F update in G2P): putty yields in shape, not in
+volume. The volume `ln J` is left alone and the deviatoric strain is brought
+back radially toward the von Mises surface. The return is viscoplastic, with
+a Herschel–Bulkley overstress: with `τ_tr = sqrt(2)·μ·|e|` the shear stress of
+the trial state, solve
+
+```
+τ + μ·dt·((τ − τ_y)/k)^(1/n) = τ_tr        for τ in [τ_y, τ_tr]
+e ← e · τ/τ_tr,     F ← U · exp(e + ln J / 3) · Vᵀ
+```
+
+by four Newton steps from above (`hbShear` in `common.wgsl`; the left side is
+increasing and convex, so it cannot overshoot). In steady shear at rate γ̇ the
+stress is the flow curve `τ = τ_y + k·γ̇ⁿ`: 0.58 at rest, 1.03 at 1/s, 1.6 at
+10/s, 2.8 at 100/s. So the flowing putty carries shear
+like a shear-thinning fluid and the drag of the rolls reaches into the bank
+instead of stopping in a slip layer at the roll surface, while the elastic
+strain it carries stays `τ/2μ` (the relaxation this replaces, a fixed 0.06 s
+time on the stretch, let the stored strain grow with the rate to its cap).
+Sweeps of `k` from 0.45 to 2 and `n` from 0.35 to 1 did not move the nip's
+count or flux by more than a few percent; `k` = 4 breaks up at `high`. Clamping
+the raw singular values (the snow model) lets the material lose volume
+plastically, so the nip packs it to several times rest density and swallows
+the bank (docs/millref-notes.md §5a).
+
+**Volume: the density tie.** `det F` only integrates the velocity gradient a
+particle saw. Next to the rolls (the hard push-out, the band's prescribed
+velocities) particles pack without `F` recording it: with J ≈ 0.95 in the
+sheet the grid measured 1.26 and 1.47 times rest density at `medium` and
+`high`, the pressure never saw it, and the nip passed 1.5–2.2 gaps of rest
+material where calendering theory allows 1.2–1.4. So G2P gathers the node
+mass it already reads, adds the rest mass the rolls displace from the
+particle's kernel (nodes inside a roll hold no particles: a smoothstep of the
+signed distance to each roll over ±1.45 cells, within 0.04 of the node-level
+integral, `tests/diagnostics.test.ts`), and caps the volume:
+
+```
+ρ = mass/(8·pMass) + rollGhost(x)
+ln J ← max(min(ln J, ln((1 + densityTolerance)/ρ)), ln J − TIE_RATE·dt)
+ln J ← clamp(ln J, ln volumeMin, ln volumeMax)
+```
+
+The tie only ever lowers J (a free surface under-reads ρ), and by at most
+`TIE_RATE` = 10 /s: applied in one substep it once threw the fed log of a cut
+& roll at `high`. The second line replaces the old reset of `F` to `I`
+outside J ∈ [0.5, 2], which dropped a particle's whole pressure in one
+substep and its shape history with it; only an `F` that is not a number
+resets now. With no bound at all a prescribed motion (the hand, the fed log)
+can store any amount of energy and a cut & fold blew up 10% past the preset's
+time step.
+
+Measured with `tools/perf/nip.mjs` (6 s of the default batch, then 5 windows;
+`low` / `medium` / `high`; the count is the sheet's particles over those of a
+gap-thick sheet at rest density, the flux is over `U·gap·ρ0·L`):
+
+| | fixed corotated, clamp, reset | Hencky + HB | + volume bounds, tie |
+| --- | --- | --- | --- |
+| F resets /s | 27 / 483 / 7759 | 0 / 23 / 166 | 0 / 0 / 0 |
+| sheet count | 1.09 / 1.59 / 2.24 | 1.09 / 1.47 / 1.75 | 1.08 / 1.26 / 1.35 |
+| nip flux | 1.17 / 1.55 / 2.20 | 1.10 / 1.52 / 1.85 | 1.14 / 1.31 / 1.37 |
+| sheet density (grid) | 0.90 / 1.26 / 1.47 | 0.90 / 1.18 / 1.24 | 0.87 / 0.93 / 0.93 |
+| bank, back half / roll speed | 0.84 / 0.80 / 0.71 | 0.80 / 0.56 / 0.15 | 0.78 / 0.20 / 0.10 |
+| bank particles | 9157 / 31117 / 78920 | 8887 / 36899 / 129391 | 9179 / 50975 / 167943 |
+
+`low` (gap 1.28 cells, as at `high`) stays below the band at 1.08–1.14.
+
+The sheet's thickness reads 0.84–1.03 gaps (90th percentile of the particles'
+depth off the roll, which reads 0.9 for a lattice sheet one gap thick), so
+the sheet is about one gap thick at 1.2 times rest density and the flux above
+1 is in the density. (These columns were measured with the band a plug at the
+front roll's speed; the friction ratio then added almost nothing to the flux,
+1.14 against 1.12 at `low`. With the profile of §3.3 across the channel the
+default ratio 1.25 reads flux 1.22 / 1.16 / 1.23, count 1.09 / 1.07 / 1.21,
+sheet density 0.86 / 0.90 / 0.90, and `bank.mjs` at the default batches a
+bank share of 0.25 / 0.27 / 0.25, back half 0.81 / 0.75 / 0.76 of roll
+speed, half the chunks through in 3.8 / 3.3 / 3.2 s.) It does not swell after
+the nip as a calendered sheet does, because the tack band prescribes its
+normal velocity too (§3.3) and what leaves the nip stays as dense as it left.
+
+**The bank and the batch.** The last two rows are not a property of the
+model: a sheet that carries 1.3 gaps instead of 2.2 leaves the rest of the
+same batch in the bank, and how a bank moves follows the share of the batch
+it holds, in the old model as well. `tools/perf/bank.mjs` drops three chunks
+on the bank and follows their particles through the nip:
+
+| | bank's share of the batch | back half / roll speed | half the chunks through the nip |
+| --- | --- | --- | --- |
+| old model, default batch, `low` / `medium` / `high` | 0.30 / 0.26 / 0.26 | 0.69 / 0.74 / 0.73 | 3.2 / 3.5 / 3.6 s |
+| old model, batch ×2 at `low`, ×2 at `high` | 0.45 / 0.35 | 0.29 / 0.31 | 5.2 / 6.3 s |
+| this model, default batch | 0.31 / 0.46 / 0.59 | 0.59 / 0.13 / 0.10 | 3.9 s / not in 8 s / not in 8 s |
+| this model, batch ×1 / ×0.65 / ×0.5 | 0.31 / 0.28 / 0.26 | 0.59 / 0.63 / 0.61 | 3.9 / 3.5 / 3.5 s |
+
+Past a share of about a third the bank reaches over the back roll and its
+back half sits there while the roll slides under it; the chunks on top are
+not drawn in. Neither the yield stress (0.15 to 0.58), nor `k` and `n` (0.45
+to 2, 0.35 to 1) nor the tie move that: at the default batch every one of
+them leaves the back half at 0.09–0.20 of roll speed at `medium` and `high`.
+At a bank of the old proportions `n` = 1 is a little quicker (0.54–0.76, half
+the chunks through in 3.2 s) but starves `low` (count 0.95). So the default
+batch is too large for the gap of the finer presets: the gap halves from
+`low` to `high` and the batch does not. A batch of 0.65 at `medium` and 0.5
+at `high` (or the gap of `low`, 0.04, on every preset: 0.50 / 0.54, 3.9 /
+4.1 s, count 1.01 / 1.11) gives the old bank with the right flux; both moves
+are clean there too.
 
 SVD note: implement a 3×3 SVD as Jacobi eigen-decomposition of `FᵀF`
 (≤ 8 sweeps) to get `V` and `Σ²`, then `U = F·V·Σ⁻¹` with a guard for tiny
@@ -416,15 +583,23 @@ singular values, and fix the sign so `det(U)·det(V) > 0`. Alternatively use
 the polar decomposition for `Rot` and the eigendecomposition only for the
 clamp. Precision: f32 is fine.
 
-Stability: sound speed `c = sqrt((lambda + 2mu)/ρ)` with ρ = 1; the measured
-stable limit is `dt ≈ 0.8·h/sqrt(E)` (docs/millref-notes.md §2) and the
-presets use `0.4·h/sqrt(60)`, i.e. a safety factor of 2 at E = 60 and 4 at
-the default E = 22. Keep the constants of §4 the same across presets; only
-`dt` and `substepsPerFrame` change.
+Stability: the sound speed is `c = sqrt((λ + 2μ)/ρ)` = 11.5 with ρ = 1
+(`soundSpeed` in `mill.ts`), and with the Hencky law it does not change with
+J. All three presets run at `c·dt/h` = 0.59 (`courantNumber`; 0.65–0.67 with
+the material's own speed added). That is the margin, and it is not large: an
+earlier version of this paragraph claimed a safety factor of 4 from
+`0.8·h/sqrt(E)`, which leaves ν out; at ν = 0.47 `c` is 2.45·sqrt(E). Measured
+by scaling `dt` (`nip.mjs --dt-scale`): steady milling holds to about
+`c·dt/h` = 0.85; the operator moves are the tighter case, clean at 1.2× the
+preset's step on all three presets (a cut & fold then peaks at 1.2–1.5 of
+`2ωR`, at most one particle on the tray) and failing at 1.3× at `high`. Keep
+the constants of §4 the same across presets; only `dt` and
+`substepsPerFrame` change, and a stiffer `E` or `nu` needs `dt` scaled by
+`1/c`.
 
 ---
 
-## 5. Pigment: Mixbox latents and shear-driven dispersion
+## 5. Pigment: Mixbox latents and lamellar mixing
 
 Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
 2021). Mixing pigments is a mass-weighted average in latent space, and
@@ -509,9 +684,14 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   dictate the motion, so a softer inclusion deforms like its neighbours;
   and with one velocity field per cell there is no slip between a chunk and
   the base inside a cell for softness to exploit. The change was not kept.
-- **Inject** kernel: `addPigment(center, radius, latent, strength)` blends
-  particle latents inside the sphere: `z = mix(z, zPigment, strength·t)`,
-  `t = 1 − |d|/radius`.
+- **Inject** kernel: `addPigment(center, radius, latent, strength)` adds
+  pigment inside the sphere, blended by load: with `a = strength·t`,
+  `t = 1 − |d|/radius`, the particle keeps `(1 − a)·w` of its own pigment and
+  gains `a·PIGMENT_LOAD` of the ink's, `w' = (1 − a)·w + a·PIGMENT_LOAD` and
+  `z' = ((1 − a)·w·z + a·PIGMENT_LOAD·zPigment) / w'`. A clear particle
+  (`w = 0`) therefore takes the ink's colour outright at any `a`, only
+  thinner; `mix(z, zPigment, a)` blended in the clear base's unweighted
+  white latent and gave every soft edge a pastel rim.
 - **Stamp** kernel (`stamp.wgsl`): `stampImage(image, placement)` presses a
   picture onto the material seen from above. The image is a raster of up to
   256 px a side, 8 floats per pixel (a latent and an opacity), mapped onto a
@@ -521,8 +701,7 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   records per solver column (i, k) the highest particle under the footprint
   (float bits, `atomicMax`), then `main` gives every particle within
   `STAMP_DEPTH` = 0.06 (about 1 cm; at least 1.5 cells) of its column's top the pixel it lies
-  under, `z = mix(z, zPixel, α·strength)`, and the masterbatch load, as
-  inject does. The surface is found fresh each stamp, so a picture lands on
+  under, blended by load with `a = α·strength` exactly as inject does. The surface is found fresh each stamp, so a picture lands on
   the flat seeded bank (the use: a logo or a line of text laid on the putty
   before the mill pulls it in and streaks it) and on whatever the material
   has become. The app rasterises an image file (`Stamp picture`, or a file
@@ -530,72 +709,122 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   on a canvas, converts the pixels with mixbox.js once per distinct colour
   (text in a palette pigment uses its latent directly), and stamps them; the
   stamped text goes into the start link.
-- **Colour streaks** (`streak.wgsl`, the line raster in `raster.wgsl`): colour
-  lives on particles, so it can neither smear thinner nor longer than the
-  particles reach, and a real chunk, which becomes laminae many times its
-  area, would turn to speckle. Every particle carries a unit direction `d`
-  and a length `L` in particle spacings (one `vec4`). The direction is a
-  material line element turned by the velocity gradient, `ds/dt = C s`,
-  integrated once a frame to second order and renormalised, so on the sheet
-  it lies along the roll's circumference. The length is not the line
-  element's: `L += STREAK_GAIN · max(γ − STREAK_RATE_MIN, 0) · dt` with
-  `γ = ‖(C + Cᵀ)/2‖_F`, capped at 16, never shrinking, because a smear in
-  shear lengthens in proportion to the strain. Two things rule the line
-  element's own length out. A real sheet folds like a jelly roll and keeps
-  its laminae, while the under-resolved flow here un-stretches material when
-  the sheet re-enters the bank (measured: a median of 1.3 spacings on the
-  sheet, and falling). And there is little stretch along the line to begin
-  with: material beside a roll enters the nip already at the roll's speed,
-  so the nip is shear, not extension, and it is several times wider for its
-  rolls than a real one. `STREAK_GAIN` = 6 spacings per unit of strain
-  brings a particle to full length in one pass of the nip;
-  `STREAK_RATE_MIN` = 2 /s leaves the bank at rest and the solver's elastic
-  chatter out (the nip runs at 10 to 25 /s), so a chunk sitting on the bank
-  keeps its seed length of 0.5. The colour raster (fine lattice only) draws
-  each pigment-carrying particle (load above 0.05) as a line: `K` taps along
-  `d`, two fine cells apart (a tap's trilinear footprint is two cells wide,
-  so the line stays continuous), up to 6, each of weight `1/K`, the
-  length capped by the `streak` parameter (0 = points, the old picture
-  exactly). **Unequal ink**: a smeared chunk is laminae of unequal
-  thickness, not an even film, so one particle in four draws its pigment
-  3.4 times over and the other three 0.2 times (a mean of one; by a hash of
-  the particle's index, coming in as its length passes 0.5 to 3.5). Lines
-  lying side by side then differ, and where the colour is thin the smear
-  reads as threads with clear gaps instead of an even wash (lines alone
-  only softened the speckle; a dense band is opaque either way). The colour
-  box (`box.wgsl`) is widened by half the longest line so no tap lands on
-  its empty edge texels. Inject and stamp scale a particle's length by
-  `1 - a`, so a fresh dollop or picture is neither pre-smeared nor uneven
-  (a zero length is reseeded). The `streak` mill parameter (drawer slider
-  "Colour streaks", link key `streak`, default 12 spacings) is a picture
-  setting: the physics and the solver-grid density volume are unchanged.
-  Its cost is the extra taps, so it grows with the share of the batch that
-  carries pigment: nothing measurable with a chunk or two, and on the
-  software GPU at low roughly 10 to 15% of a frame with 85% of the particles
-  pigmented (28% with taps one cell apart, which is why they are two). The slow feeding of a real mill, where a chunk sits in the bank for many
+- **Laminae** (`lamina.wgsl`, `lamina_common.wgsl`, the thread raster in
+  `raster.wgsl`; `src/sim/lamina.ts` is the CPU mirror, with the tests):
+  colour lives on particles, but a real chunk becomes laminae far thinner
+  than a particle. Every particle carries the unit normal `n` of its
+  pigment's laminae and `q = ln(s/s0)`, the log of their thickness over the
+  thickness they arrived with (one `vec4`), plus `ln s0` and the exchange's
+  reference `mixed` (one `vec2`). Both follow the flow exactly: a material
+  surface element's direction is `m = F⁻ᵀ n0`, `dm/dt = −Lᵀ m`, so
+  `dn/dt = −(I − n nᵀ) Lᵀ n` and `d(ln s)/dt = nᵀ L n`, with `L` the velocity
+  gradient (the APIC `C`) less its trace (volume change is not mixing). The
+  kernel integrates `m = (I − dt L'ᵀ + dt²/2 L'ᵀL'ᵀ) n`, `q −= ln|m|`,
+  `n = m/|m|`: exact for simple shear (`s ∝ 1/√(1+γ²)`), exponential in
+  extension, and a rigid rotation by `θ` a step costs `θ⁴/8` in `q`. The
+  solver's `F` cannot stand in: after the plastic return it holds only the
+  elastic part and the operator's moves reset it. Integrated once a frame
+  from the last substep's `C` over the frame's time: once a substep gave the
+  same thinning (mean `ln(s0/s)` of the pigment after 20 s of milling 1.88
+  against 1.88 at low, 3.22 against 3.25 at high) for 8 to 16 times the
+  dispatches, and a bank at rest does not thin at all either way
+  (`LAMINA_PER_SUBSTEP` in `mpm.ts` switches). Kinematic particles keep
+  their state. **Where a blob is made**: a chunk and an inject are one blob,
+  `s0` = its diameter and `n` along its radius (the way the load falls
+  off; `addPigment` takes an optional thickness); a stamp is a print layer,
+  `s0` = its depth and `n` up; fresh pigment blended into a particle that
+  already has some is blended by load in the log. Clear material carries an
+  `n` and a `q` that mean nothing until it takes pigment. **The operator's
+  moves**: the hand of cut & fold only translates its band, so the normals
+  are as they were; the roll-up turns each normal with the script's own map
+  when it lets go (sheet frame at the particle's place on the roll to the
+  coil's frame, the half turn of the doubling, the lift), which is
+  orthogonal, so `q` is untouched. **The picture**: the colour raster (fine
+  lattice only) draws each pigment-carrying particle (load above 0.05) as a
+  thread lying in its laminae, along `x̂ × n` (the mill's flow is across the
+  axis), `s0/s − 1` particle spacings long up to the `streak` parameter
+  (0 = points): `K` taps two fine cells apart, up to 6, each of weight
+  `1/K`. **Unequal ink** as before (one particle in four draws its pigment
+  3.4 times over, the rest 0.2 times, coming in as the thread lengthens),
+  now fading with `s/Δ` once the laminae are thinner than the particle
+  spacing: above the resolvable scale the smear reads as threads, below it
+  the colour is the blend the exchange has made. The colour box
+  (`box.wgsl`) is widened by half the longest line so no tap lands on its
+  empty edge texels. The `streak` mill parameter (link key `streak`,
+  default 12 spacings) is a picture setting. The slow feeding of a real mill, where a chunk sits in the bank for many
   revolutions and paints a stripe on every pass, is the chunk feed above
   (a bigger batch does not give it: it buries the pigment inside a thick
   sheet).
 - **Pigment load.** Each particle carries a pigment load in `pos.w` (clear
   base 0, a masterbatch chunk `PIGMENT_LOAD` = 12). The raster accumulates
-  per node the mass, the load and the load-weighted latent. The fine raster's
-  pack writes `finA/finB` = load and the latent normalised by the node's load
-  (the mix of the pigments only), and `finC` = mass and coverage. Thus
-  `finA.x / finC.x` is the load per unit mass. The raster uses
+  per node the mass, the load and the load-weighted latent; a particle with no
+  load adds to neither of the last two (there is no floor: a floor gave the
+  clear base's white latent a weight in every thin edge). The fine raster's
+  pack writes `finA/finB` = load and the latent **premultiplied by the load**
+  (same normalisation as the load), and `finC` = mass and coverage. Thus
+  `finA.x / finC.x` is the load per unit mass, and the renderer divides the
+  filtered latent by the sum of its four concentration channels (which sum
+  to 1 per pigment, so the sum is the filtered load) to get the mix of the
+  pigments only. Stored normalised instead, trilinear and mip filtering
+  averaged each texel's colour with equal weight whatever its load, and an
+  empty texel's zeros darkened and desaturated every edge. The raster uses
   the tight 8-node trilinear stencil so one-cell streaks are not averaged
   away before they are drawn, and the renderer integrates colour through
   the sheet's thickness.
-- **Disperse** kernel (once per frame): for each particle gather the
-  node-averaged latent `zg` (from the raster of §3.5) with the 27-node
-  stencil; compute the shear rate `γ = ‖(C + Cᵀ)/2‖_F` from the particle's
-  current `C`; then `z += clamp(k · γ · frameDt, 0, 1) · (zg − z)` with
-  `k = config.dispersion` (default 0.02, UI 0–0.5; nearly off: colour mills as streaks that thin with folding, and at 0.1 a black chunk was 77% grey after 3 s). The load relaxes toward the
-  neighbourhood's load per unit mass at the same rate; `zg` is the
-  load-weighted (pigments-only) neighbourhood latent, and a particle that
-  gains pigment blends `zg` in with the gained load, so a clear-base
-  particle picking up pigment takes the neighbourhood's colour outright.
-  Mixing therefore happens where the material is sheared — at the nip — and
-  not in the resting bank.
+- **Disperse** kernels (`disperse.wgsl`, once per frame): a conservative
+  exchange of pigment between neighbouring particles through the solver
+  grid's nodes, which happens only where the flow has thinned the pigment's
+  laminae below what a particle can carry. A particle is a parcel one
+  particle spacing `Δ = h/2` across. While its laminae are thicker than
+  that, advection carries them and nothing is exchanged. Below it the parcel
+  is striped, and a box `Δ` wide that samples stripes `s` thick differs
+  from the local mean in proportion to `s/Δ`. So with `mixed` the log
+  thickness already accounted for and `ref = min(mixed, ln Δ)`, a particle
+  whose laminae reach a new minimum trades
+  `β = 1 − (s / exp(ref))^k` of its pigment, and `mixed ← min(mixed, ln s)`.
+  The product of `(1 − β)` over the frames is `(s_min/Δ)^k` whatever the
+  frame length, the grid or the strain rate, so there is no rate constant to
+  tune to the nip; elastic chatter in `s` trades nothing (only a new minimum
+  does), and thickening undoes nothing. `k = config.dispersion` (default 1,
+  the geometric value; UI 0–2; 0 = off) is the model's one number. This is a
+  closure, not a derivation: the kinematics of `s` are exact, the step from
+  "striped below the parcel size" to "this share is exchanged" is the
+  argument above. (A per-frame `β = 1 − s_new/s_prev` gives the same product
+  for a monotone `s` but counts every wobble of `s` as mixing.)
+  Three passes. `mark_`: each particle with `β > 0` raises the 8 nodes round
+  it to its `β` (an atomic max). `give_`: each particle's rate `α` is its
+  own `β`, or, if it has room for pigment, the marked `β` round it
+  (trilinear) times that room `1 − w/PIGMENT_LOAD`, so clear material beside
+  thinning laminae takes part and neat masterbatch with thick laminae does
+  not; it scatters `N·α·w` and `N·α·w·z` into the pools of the 8 nodes round
+  it (trilinear `N`) and `N·α·m` into a per-node capacity. `take_` removes
+  what the particle gave and takes from each node's pool the share its
+  capacity term is of the node's. One rate for giving and taking, so an even
+  field stays even; the shares of a pool sum to 1, so the batch's total load
+  and each load-weighted latent channel change only by round-off (measured 1.2e-7 to 1.5e-7
+  of the total over 60 s of milling with the operator's moves, growing
+  steadily and always upward: a rounding bias, not yet tracked down).
+  The latent follows as `z = (w·z)/w`, so a clear particle takes the colour
+  of the pigment it receives outright. The lamina state travels with the
+  pigment: two more pools carry `w·q` and `w·ln(s/Δ)`, and a particle's new
+  `q`, `ln s` and `mixed` are the load-weighted blend of what it kept and
+  what it took (what came in is accounted for down to its giver's
+  thickness); it keeps its own normal. To keep the balance exact the passes
+  compute the same fixed-point terms from the same inputs (2^21; a
+  particle's share is its integer capacity term over the node's integer
+  sum), and a particle that does not exchange does neither half: kinematic
+  particles (a held chunk, material in the operator's hand) are skipped.
+  The pools are the solver-grid raster's load and latent accumulators, which
+  that raster does not fill (it scatters mass only), plus the capacity, the
+  two lamina pools and the mark. Ten storage bindings, the software
+  adapter's limit.
+  Before this the rate was `α = k·γ·frameDt` from the particle's own shear
+  rate: mixing wherever there was shear, at a rate that depended on the
+  nip's strain rates and on `k`, whatever the laminae were doing.
+  `tools/perf/mixcurve.mjs` prints the mixing-against-time table (intensity
+  of segregation at boxes of 1/32, 1/16 and 1/8 of a sim unit, axial
+  segregation, striation thickness) for a fixed recipe with or without the
+  operator's moves.
 
 **Reference check.** Footage of a real two-roll mill (silicone, three bands
 of about equal width across the front roll: red, yellow, teal) milled to a
@@ -893,18 +1122,40 @@ Single fullscreen ray-march pass (`src/render/shaders/raymarch.wgsl`):
    thin sheet, and the bank goes milky with thickness); pigment makes it
    opaque with the pigments' own colour, never a pastel of it.
 4. Shading: key light (warm, upper right front), fill (cool, left), rim from
-   behind; Blinn-Phong specular with a wide + narrow lobe (silicone putty is
-   glossy); ambient occlusion from density sampled along the normal plus an
-   analytic hemisphere occlusion by each roll (darkens the crease between
-   bank and rolls); a thin-sheet transmittance term (thickness from a short
-   march along −n, transmitted colour ≈ albedo²) so sheet edges glow.
-5. Rollers: analytic ray/cylinder intersection with end caps; brushed metal
-   shading with a rotating stripe pattern (angle = `rollerAngle`) so rotation
-   speed is visible. Depth-composite against the volume hit.
-6. Tray/floor plane with a soft contact shadow under the front roller;
-   translucent end-guide plates at x = 0 and x = L; background: dark
-   vertical gradient.
-7. Output sRGB. The canvas uses `navigator.gpu.getPreferredCanvasFormat()`.
+   behind, each a **soft box** in an analytic studio environment
+   (`envRadiance`: three rectangles along the rig's directions whose edges
+   blur with roughness, dark walls, ceiling and bench bounce; no texture).
+   Diffuse is wrapped Lambert from the three lights plus the studio's
+   ambient. The putty's gloss is a dielectric skin (F0 = 0.04, Schlick
+   Fresnel, roughness 0.11 widened where the normal is cell-scale noise)
+   mirroring that environment, the rolls and the bench (`reflectScene`,
+   analytic), with specular occlusion from the AO. Ambient occlusion from
+   density sampled along the normal plus an analytic hemisphere occlusion by
+   each roll; a shadow march toward the key (dithered start, skipped where
+   the key cannot reach); a thin-sheet transmittance term (thickness from a
+   short march along −n, transmitted colour ≈ albedo²) so sheet edges glow.
+   The clear base scatters a share `1 − exp(−thickness / 3.2 cells)` of the
+   light as a faint milk and passes the rest: the analytic scene behind the
+   hit along the **refracted** ray (n = 1.41), tinted by the path length.
+   The gloss sits on top at full strength whether the body is clear or not.
+5. Rollers: analytic ray/cylinder intersection with end caps; polished
+   steel (F0 ≈ 0.6) whose reflection is sharp around the roll and smeared
+   along the axis (five environment taps), with the rotating brush / wear /
+   spiral pattern (angle = `rollerAngle`) modulating its reflectance so
+   rotation speed is visible; the rolls mirror the bench, each other and,
+   with `Renderer.reflections` (default on, `?reflections=0` in the
+   harness), the putty next to them (8 density samples along the reflected
+   ray + 3 colour samples). The end faces are turned steel with the bow-tie
+   glint of circular tool marks. Depth-composite against the volume hit.
+6. A wooden bench top with a brushed steel plate under the mill (soft roll
+   shadows and contact darkening as before), a shop floor below it;
+   clear end-guide plates at x = 0 and x = L; background: dark studio walls
+   with a pool of light at the horizon.
+7. Display: exposure, a hue-preserving tone curve (a shoulder on the largest
+   channel, so pigment mid-tones keep their hue and saturation; overshoot
+   bleaches to white), sRGB encode, half an 8-bit step of interleaved
+   gradient noise against banding. The canvas uses
+   `navigator.gpu.getPreferredCanvasFormat()`.
 
 Render at `min(devicePixelRatio, 2) * renderScale`, with a separate 0.5–1
 resolution control that preserves the simulation. `Renderer.setVolumes(volumes)`
@@ -958,7 +1209,7 @@ src/gpu/device.ts               WebGPU init + capability report + fallback messa
 src/config/mill.ts              MillConfig, presets, geometry helpers (pure, tested)
 src/sim/types.ts                shared interfaces (GpuMpmSim API, snapshots, stats)
 src/sim/mpm.ts                  GpuMpmSim implementation
-src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, box, chunk, raster, disperse, streak, pack, inject, stamp, fold
+src/sim/shaders/*.wgsl          clear, p2g, grid, g2p, box, chunk, raster, disperse, lamina, lamina_common, pack, inject, stamp, fold
 src/stamp.ts                    stamping a picture on the bank: raster size, footprint, pixels to latents (pure, tested)
 src/render/renderer.ts          Renderer (ray-march), src/render/camera.ts
 src/render/shaders/raymarch.wgsl, mixbox.wgsl

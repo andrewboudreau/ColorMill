@@ -78,7 +78,7 @@ describe('mill geometry', () => {
   });
 
   it('derives Lame parameters', () => {
-    const { mu, lambda } = lameParameters({ E: 60, nu: 0.35, thetaC: 0, thetaS: 0 });
+    const { mu, lambda } = lameParameters({ E: 60, nu: 0.35 });
     expect(mu).toBeCloseTo(22.22, 1);
     expect(lambda).toBeCloseTo(51.85, 1);
   });

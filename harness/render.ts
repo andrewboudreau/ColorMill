@@ -65,6 +65,9 @@ function laminaeCover(x: number, h: number): number {
   const upTo = (t: number): number => Math.floor(t / (2 * W)) * W + Math.min(t - Math.floor(t / (2 * W)) * 2 * W, W);
   return (upTo(x + 0.5 * h) - upTo(x - 0.5 * h)) / h;
 }
+/** ?clear=sheet|all: the sheet (or the sheet and the bank) is clear base with no pigment, for looking
+ *  at the translucency of the unpigmented putty */
+const clearWhat = query.get('clear') ?? '';
 const renderMode = query.get('render') === 'surface' ? 'surface' : 'depth';   // depth is the app's default too
 
 function toHalf(f: number): number {
@@ -169,17 +172,20 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
           // coverage: the pigment-carrying share of the node's mass (masterbatch or clear base, nothing
           // between), 0 in the skin and, with laminae, the node cell's share of the pigment bands;
           // the load is that share at masterbatch strength, as the raster would sum it
-          const share = inSkin ? 0 : onSheet ? laminaeCover(x, h) : 1;
-          cc[idx] = toHalf(dens * share * PIGMENT_LOAD);
+          const isClear = clearWhat === 'all' || (clearWhat === 'sheet' && onSheet);
+          const share = inSkin || isClear ? 0 : onSheet ? laminaeCover(x, h) : 1;
+          const load = dens * share * PIGMENT_LOAD;
+          cc[idx] = toHalf(load);
           cov[idx / 4] = toHalf(dens * share);   // normalised like the mass
           a[idx] = toHalf(dens);
-          a[idx + 1] = toHalf(lat[0]);
-          a[idx + 2] = toHalf(lat[1]);
-          a[idx + 3] = toHalf(lat[2]);
-          bb[idx] = toHalf(lat[3]);
-          bb[idx + 1] = toHalf(lat[4]);
-          bb[idx + 2] = toHalf(lat[5]);
-          bb[idx + 3] = toHalf(lat[6]);
+          // the latent premultiplied by the load, as pack.wgsl stores it
+          a[idx + 1] = toHalf(load * lat[0]);
+          a[idx + 2] = toHalf(load * lat[1]);
+          a[idx + 3] = toHalf(load * lat[2]);
+          bb[idx] = toHalf(load * lat[3]);
+          bb[idx + 1] = toHalf(load * lat[4]);
+          bb[idx + 2] = toHalf(load * lat[5]);
+          bb[idx + 3] = toHalf(load * lat[6]);
         }
       }
     }
@@ -195,7 +201,7 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
     device.queue.writeTexture({ texture: tex }, data, { bytesPerRow: nx * 8, rowsPerImage: ny }, { width: nx, height: ny, depthOrArrayLayers: nz });
     return tex;
   };
-  // the colour raster at the same resolution: finA = (load, lat0..2) is volA with the load in x,
+  // the colour raster at the same resolution: finA = (load, load·lat0..2) is volA with the load in x,
   // finB = volB, finC = (mass, coverage) is volA's density in x and the coverage in y
   const fa = new Uint16Array(a);
   const fc = new Uint16Array(nx * ny * nz * 4);
@@ -263,6 +269,7 @@ async function main(): Promise<void> {
   device.pushErrorScope('validation');
   const renderer = new RayMarchRenderer(ctx, canvas);
   renderer.mode = renderMode;
+  if (query.get('reflections') === '0') renderer.reflections = false;   // rolls do not mirror the putty
   const dims = gridDims(preset);
   const t0 = performance.now();
   const volumes = buildVolumes(device, dims);

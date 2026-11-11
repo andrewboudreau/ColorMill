@@ -55,21 +55,21 @@
 //   finish: release whatever is still held.
 @group(0) @binding(1) var<storage, read_write> pos : array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read_write> vel : array<vec4<f32>>;
-@group(0) @binding(3) var<storage, read_write> cbuf : array<f32>;
-@group(0) @binding(4) var<storage, read_write> fbuf : array<f32>;
-@group(0) @binding(5) var<storage, read_write> abuf : array<f32>;
-@group(0) @binding(6) var<storage, read_write> flags : array<u32>;
-@group(0) @binding(7) var<storage, read_write> fold0 : array<vec4<f32>>;   // p0 xyz + arc s_rel per particle
+// P2G affine, F and C, MAT_STRIDE vec4 per particle (common.wgsl)
+@group(0) @binding(3) var<storage, read_write> mats : array<vec4<f32>>;
+@group(0) @binding(4) var<storage, read_write> flags : array<u32>;
+@group(0) @binding(5) var<storage, read_write> fold0 : array<vec4<f32>>;   // p0 xyz + arc s_rel per particle
 // [0] live pile top y bits (reduced by g2p while the move runs), [1] max x bits, [2] min x bits
 // (init +inf bits), [3] selected count, [8 + k*NB + b] particle count per (half k, bin b),
 // [8 + 2NB + (k*NB + b)*NS + j] particle count per (half, bin, depth slice j)
-@group(0) @binding(8) var<storage, read_write> info : array<atomic<u32>>;
-@group(0) @binding(9) var<storage, read> pmass : array<i32>;   // last raster (unused here, kept for the bind group)
+@group(0) @binding(6) var<storage, read_write> info : array<atomic<u32>>;
+// lamina state (lamina.wgsl): the normal xyz and q. The roll-up turns the normal with the material when it lets go.
+@group(0) @binding(7) var<storage, read_write> lam : array<vec4<f32>>;
 // per bin (TS floats): for each half k at 8k: rhoStart, phiStart, rhoEnd, rMax (the half's
 // spiral's outer radius once wound up to and including this bin); shared at 4: t0, t1, ell;
 // (cut & fold needs no tables; it only fills the count); header at NB*TS: rLog (the larger
 // half), baseY, Lhalf, count; then the depth CDF per (half, bin): NS + 1 cumulative fractions
-@group(0) @binding(10) var<storage, read_write> tables : array<f32>;
+@group(0) @binding(8) var<storage, read_write> tables : array<f32>;
 
 const NB : u32 = 128u;          // arc bins
 const NS : u32 = 32u;           // depth slices per bin, square-root spaced (fine near the roll, coarse deep in the bank)
@@ -292,11 +292,15 @@ fn windPos(p0 : vec3<f32>, sRel : f32, t : f32) -> vec3<f32> {
 }
 
 fn loadMatF(p : u32) -> mat3x3<f32> {
-  let b = p * 9u;
+  let b = p * MAT_STRIDE;
+  // F is floats 9 to 17 of the particle's 28: r0 = (a8, f0, f1, f2), r1 = (f3 .. f6), r2 = (f7, f8, c0, c1)
+  let r0 = mats[b + 2u];
+  let r1 = mats[b + 3u];
+  let r2 = mats[b + 4u];
   return mat3x3<f32>(
-    vec3<f32>(fbuf[b], fbuf[b + 3u], fbuf[b + 6u]),
-    vec3<f32>(fbuf[b + 1u], fbuf[b + 4u], fbuf[b + 7u]),
-    vec3<f32>(fbuf[b + 2u], fbuf[b + 5u], fbuf[b + 8u]));
+    vec3<f32>(r0.y, r1.x, r1.w),
+    vec3<f32>(r0.z, r1.y, r2.x),
+    vec3<f32>(r0.w, r1.z, r2.y));
 }
 
 @compute @workgroup_size(128)
@@ -451,7 +455,31 @@ fn tables_(@builtin(local_invocation_id) lid : vec3<u32>) {
   }
 }
 
+/** The lamina normal of a particle the roll-up lets go, turned as the script turned the material round it:
+    from the sheet on the roll at p0 (across the sheet, along its arc, along the axis) to the same three
+    directions in the wound coil, then with its half if the roll was doubled, then with the lift to the
+    standing log. The script's map is orthogonal, so the thickness q is left alone. (The wind lays the
+    arc on the coil the other way round from the roll: a reflection, which is what the material did.) */
+fn rollNormal(n : vec3<f32>, p0 : vec3<f32>, sRel : f32) -> vec3<f32> {
+  let k = halfOf(p0);
+  let r0 = rollerNormal(P.front.x, P.front.y, p0);     // across the sheet, outward
+  let t0 = vec3<f32>(0.0, -r0.z, r0.y);                // along the arc, the way sRel grows
+  let psi = PI + windPhi(arcTotal(), k) - windPhi(sRel, k);
+  let e = vec3<f32>(0.0, cos(psi), sin(psi));          // outward on the coil
+  let tc = vec3<f32>(0.0, sin(psi), -cos(psi));        // along the wound arc
+  var m = vec3<f32>(n.x, 0.0, 0.0) + dot(n, r0) * e + dot(n, t0) * tc;
+  if (P.fold4.z > 0.0 && k == 1u) { m = vec3<f32>(-m.x, -m.y, m.z); }   // the half turn of the doubling
+  m = liftFrame(0.5 * PI) * m;
+  if (isBad3(m) || dot(m, m) < 0.25) { return n; }
+  return normalize(m);
+}
+
 fn release(p : u32, v : vec3<f32>) {
+  if (!isFlop()) {
+    // (the hand of cut & fold only carries its band: a translation, the normals are as they were)
+    let l = lam[p];
+    lam[p] = vec4<f32>(rollNormal(l.xyz, fold0[p].xyz, fold0[p].w), l.w);
+  }
   vel[p] = vec4<f32>(v, 0.0);
   fold0[p].w = P.fold.y;   // release time: g2p leaves it out of the pile-top estimate while it settles
   // the log was placed kinematically, so the particle's old F says nothing about
@@ -461,12 +489,14 @@ fn release(p : u32, v : vec3<f32>) {
   let zero = mat3x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
   let ar = matRows(p2gAffine(kirchhoffStressOf(F), zero));
   let fr = matRows(F);
-  let b = 9u * p;
-  for (var c = 0u; c < 9u; c++) {
-    cbuf[b + c] = 0.0;
-    fbuf[b + c] = fr[c];
-    abuf[b + c] = ar[c];
-  }
+  let b = MAT_STRIDE * p;
+  mats[b] = vec4<f32>(ar[0], ar[1], ar[2], ar[3]);
+  mats[b + 1u] = vec4<f32>(ar[4], ar[5], ar[6], ar[7]);
+  mats[b + 2u] = vec4<f32>(ar[8], fr[0], fr[1], fr[2]);
+  mats[b + 3u] = vec4<f32>(fr[3], fr[4], fr[5], fr[6]);
+  mats[b + 4u] = vec4<f32>(fr[7], fr[8], 0.0, 0.0);
+  mats[b + 5u] = vec4<f32>(0.0);
+  mats[b + 6u] = vec4<f32>(0.0);
   flags[p] = flags[p] & ~3u;
 }
 

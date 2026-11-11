@@ -5,8 +5,10 @@
 //   * grid node (i,j,k) has index n = (k*NY + j)*NX + i, position (i,j,k)*h
 //   * particle positions / velocities and the grid velocity are vec4 (xyz + pad)
 //     so a load is one 16-byte transaction instead of three scalar loads.
-//   * particle matrices (C, F, P2G affine) are stored row-major in flat f32 arrays:
-//     buf[p*9 + r*3 + c] = M[r][c] (math notation, row r / column c).
+//   * particle matrices (P2G affine, F, C) share one buffer, MAT_STRIDE vec4 per particle: seen as
+//     floats, the affine matrix is at 28p, F at 28p + 9 and C at 28p + 18, each row-major
+//     (float 3r + c = M[r][c], math notation, row r / column c), and float 27 is spare. A vec4
+//     store is one transaction where nine scalar stores were nine, which was most of G2P's stores.
 //     WGSL mat3x3 is column-major: m[c][r] is row r of column c.
 //   * fixed-point grid accumulators: mass 2^20, momentum 2^16, latent 2^18.
 
@@ -21,9 +23,9 @@ struct Params {
   back : vec4<f32>,
   // front roller: axisY, axisZ, omegaX, radius
   front : vec4<f32>,
-  // material: mu, lambda, thetaC, thetaS
+  // material (design §4): shear modulus mu, bulk modulus K, yield stress tau_y, Herschel-Bulkley consistency k
   mat : vec4<f32>,
-  // pVol, pMass, stressScale, dispersion k
+  // pVol, pMass, stressScale, the exchange closure's exponent k (disperse.wgsl)
   part : vec4<f32>,
   // fold script: active (0/1), s, ds/dt, lift height
   fold : vec4<f32>,
@@ -34,17 +36,22 @@ struct Params {
   // fold slab: bank half depth (z window for the live bank-top estimate), slab clearance above the bank,
   // arc -> z scale (0.6), max y any folded particle may reach (domain.y - 3h)
   fold3 : vec4<f32>,
-  // colour raster (design §3.5): the node counts of its box nxF, nyF, nzF, 0
+  // colour raster (design §3.5): the node counts of its box nxF, nyF, nzF; then 1 on the substeps whose G2P
+  // stores C (the frame's last, g2p.wgsl), else 0
   fine : vec4<u32>,
   // colour raster at its finest cell: hF, 1/hF, normalisation (h/hF)^3 / 8 so a packed fine cell reads ~1,
-  // the longest colour streak line in particle spacings (0 = points)
+  // the longest colour thread in particle spacings (0 = points)
   // (the cell in use is FINE_K / 8 of this, box.wgsl)
   fineH : vec4<f32>,
   // cut & roll, peel and wind (fold.wgsl): wind speed along the arc, T_wind, T_double, T_lift
   fold4 : vec4<f32>,
   // held pigment chunks (chunk.wgsl): feed speed (how fast a chunk sinks through its level), the node mass that
-  // counts as material under it, 0, 0
+  // counts as material under it; then the nip's shear (grid.wgsl): the back roll's surface speed over the front
+  // roll's less one, and how far past the roll surfaces the profile across the gap is carried on, in gaps
   chunk : vec4<f32>,
+  // material, continued: 1 / n (n the Herschel-Bulkley index), the density tie's tolerance (0 = off),
+  // the bounds of ln J / 3
+  mat2 : vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> P : Params;
@@ -53,9 +60,9 @@ const MASS_SCALE : f32 = 1048576.0;   // 2^20
 const MOM_SCALE  : f32 = 65536.0;     // 2^16
 const LAT_SCALE  : f32 = 262144.0;    // 2^18
 const PI : f32 = 3.14159265358979;
-// Pigment load of a masterbatch chunk relative to the base putty (pos.w per
-// particle; base = 1). Latents are averaged weighted by load, so a chunk tints
-// several times its own mass of base to a mid-tone instead of fading out.
+// Pigment load of a masterbatch chunk (pos.w per particle; the clear base
+// carries 0). Latents are averaged weighted by load, so the base has no say in
+// a mix's colour and only the load per unit mass thins it.
 const PIGMENT_LOAD : f32 = 12.0;
 
 // The material's box buffer (box.wgsl, design §3.6), u32 words. Cells and nodes share indices
@@ -70,6 +77,8 @@ const BOX_SLACK : i32 = 1;    // extra cells around every box
 const BOX_FINE : u32 = 32u;        // lattice index xyz of its texel 0, FINE_K
 const BOX_FINE_RANGE : u32 = 36u;  // texels xyz its clear and pack cover (this frame's range and the last one's)
 const BOX_FINE_PREV : u32 = 40u;   // texels xyz of the previous frame's own range
+// diagnostics (physics review 4.5): G2P counts its F resets and its roller push-outs here; nothing in the solver reads them
+const BOX_DIAG : u32 = 44u;
 const FINE_K_MIN : i32 = 8;
 const FINE_K_MAX : i32 = 64;
 
@@ -238,13 +247,44 @@ fn svd3(F : mat3x3<f32>) -> Svd3 {
   return out;
 }
 
-/// Fixed corotated Kirchhoff stress tau = P F^T (design §4 with the MLS-MPM
-/// volume: the P2G force term is V0 * P * F^T, not V0 * sigma):
-/// P = 2mu (F - R) + lambda (J - 1) J F^-T, so tau = 2mu (F - R) F^T + lambda (J - 1) J I.
-fn kirchhoffStress(F : mat3x3<f32>, R : mat3x3<f32>, J : f32, mu : f32, lambda : f32) -> mat3x3<f32> {
-  let a = (2.0 * mu) * ((F - R) * transpose(F));
-  let b = lambda * (J - 1.0) * J;
-  return a + mat3x3<f32>(vec3<f32>(b, 0.0, 0.0), vec3<f32>(0.0, b, 0.0), vec3<f32>(0.0, 0.0, b));
+// ---------------------------------------------------------------------------
+// The putty (design §4; src/sim/constitutive.ts is the CPU mirror, unit tested): Hencky elasticity,
+// a von Mises radial return with a Herschel-Bulkley overstress, and a pressure K ln J.
+// ---------------------------------------------------------------------------
+const HB_NEWTON : i32 = 4;
+
+/// The shear stress after one backward-Euler step of the Herschel-Bulkley overstress from a trial
+/// shear stress: the root of  tau + mu dt ((tau - tau_y) / k)^(1/n) = trial  in [tau_y, trial]. The
+/// left side is increasing and convex (n <= 1), so Newton from above cannot overshoot; it starts from
+/// the smaller of the trial value and the root of the power term alone, within a factor of two of
+/// the root.
+fn hbShear(trial : f32) -> f32 {
+  let ty = P.mat.z;
+  if (!(trial > ty)) { return trial; }
+  let xt = trial - ty;
+  let k = max(P.mat.w, 1e-6);
+  let p = P.mat2.x;
+  let a = P.mat.x * P.hdt.z;
+  var x = min(xt, k * pow(xt / a, 1.0 / p));
+  for (var i = 0; i < HB_NEWTON; i++) {
+    let w = a * pow(x / k, p);
+    x = max(x - (x - xt + w) / (1.0 + p * w / max(x, 1e-20)), 0.0);
+  }
+  return ty + min(x, xt);
+}
+
+/// Principal Hencky strains of the singular values (floored: a log needs a positive stretch).
+fn henckyStrain(S : vec3<f32>) -> vec3<f32> {
+  return log(clamp(S, vec3<f32>(0.05), vec3<f32>(20.0)));
+}
+
+/// Kirchhoff stress of principal Hencky strains eps in the frame U: U diag(2 mu dev eps + K ln J) U^T.
+/// (The P2G force term is V0 * tau, design §3.2.) Linear in the strain: the Cauchy pressure
+/// -K ln J / J has no ceiling in compression, and the stiffness per unit mass does not change with J.
+fn henckyStress(U : mat3x3<f32>, eps : vec3<f32>) -> mat3x3<f32> {
+  let lnJ = eps.x + eps.y + eps.z;
+  let t = (2.0 * P.mat.x) * (eps - vec3<f32>(lnJ / 3.0)) + vec3<f32>(P.mat.y * lnJ);
+  return mat3x3<f32>(U[0] * t.x, U[1] * t.y, U[2] * t.z) * transpose(U);
 }
 
 /// The matrix P2G multiplies dpos by (design §3.2), premultiplied once in G2P:
@@ -255,16 +295,17 @@ fn p2gAffine(tau : mat3x3<f32>, C : mat3x3<f32>) -> mat3x3<f32> {
   return (-dt * P.part.x * 4.0 * invh * invh * P.part.z) * tau + P.part.y * C;
 }
 
-/// Kirchhoff stress of an already plastically-clamped F (SVD inside; used by the
-/// fold release, where G2P has not run for the particle in a while).
+/// Kirchhoff stress of an already returned F (SVD inside; used by the fold release, where G2P
+/// has not run for the particle in a while).
 fn kirchhoffStressOf(F : mat3x3<f32>) -> mat3x3<f32> {
   let d = svd3(F);
-  let Rot = d.U * transpose(d.V);
-  let J = d.S.x * d.S.y * d.S.z;
-  return kirchhoffStress(F, Rot, J, P.mat.x, P.mat.y);
+  return henckyStress(d.U, henckyStrain(d.S));
 }
 
 /// Store a mat3x3 row-major into a flat f32 array slot (9 floats per particle).
+/// vec4 per particle in the matrix buffer (affine, F, C; see the conventions at the top).
+const MAT_STRIDE : u32 = 7u;
+
 fn matRows(m : mat3x3<f32>) -> array<f32, 9> {
   return array<f32, 9>(m[0][0], m[1][0], m[2][0], m[0][1], m[1][1], m[2][1], m[0][2], m[1][2], m[2][2]);
 }

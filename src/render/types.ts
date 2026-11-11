@@ -36,6 +36,12 @@ export interface Renderer {
   iso?: number;
   /** colour mode (see RenderMode) */
   mode?: RenderMode;
+  /** The rolls mirror the putty next to them (a short density march per roll pixel); default on. */
+  reflections?: boolean;
+  /** debug: 0 = the picture, 1 = the putty's surface normal as a colour, 2 = how firm that normal is */
+  debugView?: number;
+  /** debug: reach of the normal's filter in texels (default: by the grid's cell) */
+  normalReachOverride?: number;
   /** Backing-store resolution multiplier, 0.5 to 1; independent of simulation quality. */
   renderScale?: number;
   /** Swap the volumes the ray-marcher samples (called when the sim is rebuilt). */

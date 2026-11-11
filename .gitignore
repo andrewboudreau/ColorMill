@@ -11,3 +11,4 @@ emsdk-cache/
 
 # agent worktrees (Claude Code)
 .claude/worktrees/
+tools/perf/out/

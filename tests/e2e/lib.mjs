@@ -27,7 +27,12 @@ export function chromiumExecutable() {
 }
 
 /** Chromium flags that expose WebGPU headlessly (SwiftShader fallback). */
-export const WEBGPU_ARGS = [
+export const WEBGPU_ARGS = process.env.E2E_GPU ? [
+  // E2E_GPU=1: the machine's own adapter instead of SwiftShader (whose limits can be lower than the app needs)
+  '--headless=new',
+  '--enable-unsafe-webgpu',
+  '--ignore-gpu-blocklist'
+] : [
   '--headless=new',
   '--enable-unsafe-webgpu',
   // On Windows, initialize SwiftShader Vulkan for WebGPU without forcing

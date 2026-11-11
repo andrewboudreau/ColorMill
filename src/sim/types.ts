@@ -4,6 +4,8 @@
  */
 import type { GridDims, MillConfig, MillParams, QualitySettings, RollStyle } from '../config/mill';
 import type { Drop } from '../drops';
+import type { MixingMetrics, PigmentInventory } from './metrics';
+import type { NipDiagnostics } from './diagnostics';
 
 /** A 7-float Mixbox latent. */
 export type Latent = readonly [number, number, number, number, number, number, number];
@@ -37,10 +39,15 @@ export interface ParticleSnapshot {
   readonly latents: Float32Array;
   /** 9 floats per particle, row-major F */
   readonly deformation: Float32Array;
+  /** 9 floats per particle, row-major C: the velocity gradient G2P gathered on the frame's last substep */
+  readonly velocityGradient: Float32Array;
   /** 1 uint per particle */
   readonly flags: Uint32Array;
-  /** 4 floats per particle: colour streak, xyz unit direction then w length in particle spacings */
-  readonly streaks: Float32Array;
+  /** 4 floats per particle: the pigment laminae's unit normal xyz, then q = ln(s / s0), the log of their thickness
+   *  over the thickness they arrived with (src/sim/lamina.ts) */
+  readonly laminae: Float32Array;
+  /** 2 floats per particle: ln s0 (world units), then ln of the thickness the pigment is already blended down to */
+  readonly mixState: Float32Array;
   /** 1 float per particle: pigment load (0 = clear base, PIGMENT_LOAD = pure masterbatch) */
   readonly loads: Float32Array;
 }
@@ -54,9 +61,10 @@ export interface RenderVolumes {
   /** Incremented when density changes. Omit to rebuild the density mip on every draw. */
   readonly densityVersion?: number;
   readonly dims: GridDims;
-  /** colour raster (design §3.5), in a box of fineDims nodes laid over the material: rgba16float (pigment load, lat0, lat1, lat2) */
+  /** colour raster (design §3.5), in a box of fineDims nodes laid over the material: rgba16float (pigment load, then the latent premultiplied by it: load·lat0, load·lat1, load·lat2) */
   readonly finA: GPUTexture;
-  /** rgba16float (lat3, lat4, lat5, lat6) on fineDims */
+  /** rgba16float (load·lat3, load·lat4, load·lat5, load·lat6) on fineDims; the reader divides by the sum of the four
+   *  concentration channels (load·lat0..3) after filtering */
   readonly finB: GPUTexture;
   /** rgba16float (mass, coverage, 0, 0) on fineDims, same normalisation as finA.x, so finA.x / finC.x is the load per unit mass
    *  and finC.y / finC.x the share of the mass that carries pigment (0..1) */
@@ -117,8 +125,9 @@ export interface GpuMpmSim {
   step(encoder: GPUCommandEncoder, frameDtSeconds: number): void;
   /** Re-seed the bank as fresh white silicone. */
   reset(): void;
-  /** Blend a pigment into particles inside a sphere (design §5). */
-  addPigment(center: readonly [number, number, number], radius: number, latent: Latent, strength?: number): void;
+  /** Blend a pigment into particles inside a sphere (design §5). `striation` is the thickness its laminae are
+   *  laid down with (world units); 0 or omitted = one blob, the sphere's diameter. */
+  addPigment(center: readonly [number, number, number], radius: number, latent: Latent, strength?: number, striation?: number): void;
   /**
    * Blend a pigment into a sphere sitting just under the material surface at
    * (x, z): the GPU probes the highest particle in the column, so the dollop
@@ -168,6 +177,8 @@ export interface GpuMpmSim {
   /** Read where the colour raster's box is (design §3.6; tests and diagnostics): the world position of its
    *  texel 0, its cell size, and that cell in eighths of the finest one (8 = particle resolution). */
   readColourBox(): Promise<{ origin: [number, number, number]; cell: number; eighths: number }>;
+  /** Diagnostic event counters since the simulator was built (wrapping u32): G2P's F resets and roller push-outs. */
+  readCounters(): Promise<{ resets: number; pushOuts: number }>;
   destroy(): void;
 }
 
@@ -185,6 +196,13 @@ export interface DebugApi {
   snapshot(): Promise<ParticleSnapshot>;
   /** Last frame's stats */
   stats(): SimStats;
+  /** Total pigment and its colour over the particles (sum of load x mass, and of load x mass x latent per channel):
+   *  conserved by milling, dispersion and the operator's moves; only a drop, an inject, a stamp or a reset changes it. */
+  inventory(): Promise<PigmentInventory>;
+  /** Mixing measures of the pigment load: Danckwerts' intensity of segregation at boxes of 1/32, 1/16 and 1/8 of a sim unit (the same at every preset), and the axial segregation. */
+  mixing(): Promise<MixingMetrics>;
+  /** Step `frames` frames and measure the nip over them (src/sim/diagnostics.ts; tools/perf/nip.mjs prints the table). */
+  nipDiagnostics(frames: number): Promise<NipDiagnostics>;
   /** Inject a named pigment (key of PIGMENTS) at a random bank spot, as a UI tap would. */
   tapPigment(name: string, slot?: number, size?: number): void;
   /** Choose the drop slot (0-based, left to right) that taps land on. */

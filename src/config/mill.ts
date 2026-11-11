@@ -33,13 +33,17 @@ export interface QualitySettings {
    *  a finer grid can afford to be nearer to it, and the narrower the nip, the thinner the sheet and the wider
    *  a chunk's pigment is spread (design §7). */
   readonly gap: number;
+  /** the batch this preset starts with. The nip passes a sheet about 1.3 gaps thick at rest density, so a narrower
+   *  gap carries less of the batch round the roll and leaves more in the bank; past roughly 0.45 of the batch the
+   *  bank's back half stalls and chunks are no longer drawn in (tools/perf/bank.mjs). These keep the bank near 0.3. */
+  readonly batch: number;
 }
 
 export const QUALITY_PRESETS: Readonly<Record<QualityPreset, QualitySettings>> = {
-  low: { preset: 'low', cellsPerUnit: 32, dt: 1.6e-3, substepsPerFrame: 8, colourCellsPerUnit: 64, colourNodes: 1.82e6, gap: 0.04 },
-  medium: { preset: 'medium', cellsPerUnit: 48, dt: 1.1e-3, substepsPerFrame: 12, colourCellsPerUnit: 96, colourNodes: 3.53e6, gap: 0.028 },
-  high: { preset: 'high', cellsPerUnit: 64, dt: 8e-4, substepsPerFrame: 16, colourCellsPerUnit: 128, colourNodes: 4.69e6, gap: 0.02 },
-  ultra: { preset: 'ultra', cellsPerUnit: 72, dt: 7.1e-4, substepsPerFrame: 18, colourCellsPerUnit: 144, colourNodes: 4.69e6, gap: 0.02 }
+  low: { preset: 'low', cellsPerUnit: 32, dt: 1.6e-3, substepsPerFrame: 8, colourCellsPerUnit: 64, colourNodes: 1.82e6, gap: 0.04, batch: 1 },
+  medium: { preset: 'medium', cellsPerUnit: 48, dt: 1.1e-3, substepsPerFrame: 12, colourCellsPerUnit: 96, colourNodes: 3.53e6, gap: 0.028, batch: 0.65 },
+  high: { preset: 'high', cellsPerUnit: 64, dt: 8e-4, substepsPerFrame: 16, colourCellsPerUnit: 128, colourNodes: 4.69e6, gap: 0.02, batch: 0.5 },
+  ultra: { preset: 'ultra', cellsPerUnit: 72, dt: 7.1e-4, substepsPerFrame: 18, colourCellsPerUnit: 144, colourNodes: 4.69e6, gap: 0.02, batch: 0.5 }
 };
 
 export interface MaterialConstants {
@@ -47,10 +51,17 @@ export interface MaterialConstants {
   readonly E: number;
   /** Poisson ratio */
   readonly nu: number;
-  /** plastic compression threshold (singular values clamped to >= 1 - thetaC) */
-  readonly thetaC: number;
-  /** plastic stretch threshold (singular values clamped to <= 1 + thetaS) */
-  readonly thetaS: number;
+  /** yield stress in shear, tau_y: below it the putty is an elastic solid (the bank holds its shape) */
+  readonly yieldStress: number;
+  /** Herschel-Bulkley consistency k: flowing at shear rate g the shear stress is tau_y + k g^n */
+  readonly consistency: number;
+  /** Herschel-Bulkley index n (0 < n <= 1; below 1 the putty shear-thins) */
+  readonly flowIndex: number;
+  /** density tie: det F may not exceed (1 + this) / (density gathered from the grid, rest = 1); 0 turns it off */
+  readonly densityTolerance: number;
+  /** the elastic volume ratio J = det F saturates at these bounds (the pressure K ln J with it) */
+  readonly volumeMin: number;
+  readonly volumeMax: number;
 }
 
 /*
@@ -64,27 +75,51 @@ export interface MaterialConstants {
  */
 export const DEFAULT_MATERIAL: MaterialConstants = {
   E: 22,
-  /* nearly incompressible: at 0.35 the nip packed the putty to 1.5x rest density
-     and carried 50% more through than the gap allows; at 0.45 it still packed
-     the sheet to 1.5x once the viscoplastic drag pulled the bank in (and the
-     wrap ran short); at 0.49 (bulk modulus ~500) the sheet came out at
-     ~1.0-1.3x rest but the fed pile of a cut & roll blew up (speeds of 10-25,
-     dt at ~0.85 of the elastic CFL limit); 0.47 (bulk modulus ~80) is stable
-     through a cut & roll. */
+  /* nearly incompressible. With E = 22, nu 0.35 / 0.45 / 0.47 / 0.49 is a bulk modulus K = E / 3(1 - 2 nu) of
+     24 / 73 / 122 / 367 and a sound speed sqrt(K + 4 mu / 3) of 5.9 / 9.1 / 11.5 / 19.4, which is a Courant
+     number c dt / h of 0.30 / 0.47 / 0.59 / 0.99 on every preset (soundSpeed and courantNumber below; the
+     measured limit is in design §4, Stability). */
   nu: 0.47,
-  thetaC: 0.025,
-  /* tensile cohesion: at 0.0075 the sheet re-forming after an operator move
-     comes out lacy; 0.03 keeps it continuous but a sheet pulled off the roll by
-     its edge thins to a film and tears where it sticks; 0.05 pulls and folds as
-     putty, a thick slab (validated headlessly, cut & fold frames) */
-  thetaS: 0.05
+  /* the bank holds its shape under gravity 2 and a sheet pulled by its edge folds as a slab */
+  yieldStress: 0.58,
+  /* consistency and index: design §4 has the measurements that chose them */
+  consistency: 0.45,
+  flowIndex: 0.35,
+  /* the density tie (g2p.wgsl; design §4, Volume): 0.05 / 0.1 / 0.2 leave a sheet count of 1.06 / 1.08 / 1.11
+     at `low` and 1.35 / 1.34 / 1.43 at `high` (calendering theory: 1.2 to 1.4; 1.09 and 1.83 with it off) */
+  densityTolerance: 0.1,
+  /* with J free the cut & fold blows up 10% past the preset's time step, with [0.5, 2] the fed log of a cut &
+     roll does at `high`; [0.7, 1.4] is clean at 1.2x the step on every preset (design §4, Stability). Steady
+     milling does not reach the bounds: the sheet's J is 0.76 to 1.06 (5th to 95th percentile, `high`). */
+  volumeMin: 0.7,
+  volumeMax: 1.4
 };
 
-/** Lamé parameters derived from E and nu. */
-export function lameParameters(m: MaterialConstants): { mu: number; lambda: number } {
+/** Lame parameters derived from E and nu. */
+export function lameParameters(m: Pick<MaterialConstants, 'E' | 'nu'>): { mu: number; lambda: number } {
   const mu = m.E / (2 * (1 + m.nu));
   const lambda = (m.E * m.nu) / ((1 + m.nu) * (1 - 2 * m.nu));
   return { mu, lambda };
+}
+
+/** Bulk modulus K = E / 3(1 - 2 nu) = lambda + 2 mu / 3: the Kirchhoff pressure is K ln J (design §4). */
+export function bulkModulus(m: Pick<MaterialConstants, 'E' | 'nu'>): number {
+  return m.E / (3 * (1 - 2 * m.nu));
+}
+
+/**
+ * Elastic (P-wave) speed at unit density, sqrt(K + 4 mu / 3) = sqrt(lambda + 2 mu). The Kirchhoff stress
+ * is linear in Hencky strain, so the stiffness the grid sees per unit of particle mass, and with it this
+ * speed, does not change with compression (design §4, Stability).
+ */
+export function soundSpeed(m: Pick<MaterialConstants, 'E' | 'nu'>): number {
+  const { mu, lambda } = lameParameters(m);
+  return Math.sqrt(lambda + 2 * mu);
+}
+
+/** (c + |v|) dt / h for a preset: the Courant number of the explicit step. */
+export function courantNumber(q: { readonly dt: number; readonly cellsPerUnit: number }, m: Pick<MaterialConstants, 'E' | 'nu'>, speed = 0): number {
+  return (soundSpeed(m) + speed) * q.dt * q.cellsPerUnit;
 }
 
 /** Live, user-adjustable mill parameters (all in sim units). */
@@ -97,7 +132,9 @@ export interface MillParams {
   gap: number;
   /** gravity, sim units / s^2 */
   gravity: number;
-  /** shear-driven dispersion rate k (see design §5) */
+  /** lamellar mixing: the exponent k of the exchange closure (design §5, src/sim/lamina.ts exchangeFraction). A
+   *  particle whose pigment laminae are thinned to s below the particle spacing keeps (s / spacing)^k of its
+   *  difference from its neighbours. 1 is the geometric value; 0 switches the exchange off. */
   dispersion: number;
   /** back-roller Coulomb friction coefficient */
   backFriction: number;
@@ -110,7 +147,7 @@ export interface MillParams {
   /** cut & fold: how many passes one press makes (each a cut at the crown, the edge lifted, pulled back over
    *  the mill and dropped), 1 to 3 */
   foldPasses: number;
-  /** colour streaks: the longest line a pigment particle is drawn as, in particle spacings; 0 draws particles as points */
+  /** colour threads: the longest line a pigment particle's laminae are drawn as, in particle spacings; 0 draws particles as points */
   streak: number;
   /** pigment chunks: how long a medium chunk takes to feed into the bank, in seconds (it is held and sinks in,
    *  let go where it touches material; bigger chunks take longer in proportion); 0 lets a chunk go whole */
@@ -122,10 +159,10 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
   frictionRatio: 1.25,
   gap: 0.04,
   gravity: 2.0,
-  /* nearly off: colour should mill as distinct streaks that thin with folding,
-     not fade to a tint (measured: at 0.1 a black chunk is 77% grey after 3 s of
-     milling; at 0 it stays black and streaks around the roll) */
-  dispersion: 0.02,
+  /* not tuned: 1 is what the geometry gives (a parcel one spacing wide that samples stripes s thick differs
+     from the local mean in proportion to s / spacing). It is not a rate, so it does not depend on the nip's
+     strain rates or on the preset */
+  dispersion: 1,
   backFriction: 0.4,
   tackCells: 0,
   /* drop: lowering the log in released it a thin slice at a time, and the nip spread and
@@ -143,7 +180,7 @@ export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max:
   frictionRatio: { min: 1, max: 1.6, step: 0.01 },
   gap: { min: 0.02, max: 0.1, step: 0.002 },
   gravity: { min: 0, max: 6, step: 0.1 },
-  dispersion: { min: 0, max: 0.5, step: 0.005 },
+  dispersion: { min: 0, max: 2, step: 0.05 },
   backFriction: { min: 0, max: 1, step: 0.02 },
   tackCells: { min: 0, max: 6, step: 0.1 },
   logFeed: { min: 0, max: 0.6, step: 0.05 },
@@ -421,7 +458,7 @@ export function dropSlotX(slot: number, slots = DROP_SLOTS): number {
 }
 
 /** Estimated particle count for a preset (batch volume / (h^3/8)), for UI/preset selection. */
-export function estimateParticleCount(q: QualitySettings, batch = 1): number {
+export function estimateParticleCount(q: QualitySettings, batch = q.batch): number {
   const { h } = gridDims(q);
   return Math.round((GEOMETRY.bankVolume * batch) / (h * h * h / 8));
 }
@@ -439,7 +476,7 @@ export interface MillConfig {
   readonly batch?: number;
 }
 
-export const BATCH_CHOICES: readonly number[] = [0.5, 0.75, 1, 1.5, 2, 3];
+export const BATCH_CHOICES: readonly number[] = [0.5, 0.65, 0.75, 1, 1.5, 2, 3];
 /** Range accepted from `?batch=` (the panel offers BATCH_CHOICES). */
 export const BATCH_LIMITS = { min: 0.25, max: 4 } as const;
 
@@ -458,6 +495,7 @@ export function defaultConfig(preset: QualityPreset = 'high'): MillConfig {
   return {
     quality: QUALITY_PRESETS[preset],
     material: DEFAULT_MATERIAL,
-    params: { ...DEFAULT_PARAMS, gap: QUALITY_PRESETS[preset].gap }
+    params: { ...DEFAULT_PARAMS, gap: QUALITY_PRESETS[preset].gap },
+    batch: QUALITY_PRESETS[preset].batch
   };
 }

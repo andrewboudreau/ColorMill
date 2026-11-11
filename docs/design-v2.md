@@ -181,14 +181,12 @@ Boundaries, applied in this order:
    the surface velocity. If `d < R + tackBand` (tackBand = gap + h, i.e. the
    thickness of the sheet the nip produces plus one cell of stencil slack):
    `v = vr` (full no-slip incl. normal — the sheet is carried around; in the
-   channel itself, `|y − axisY| < nipReach` with `nipReach = 1.5·gap`
-   (`NIP_REACH`; 0.06 at `low`, where it was tuned, and the same number of
-   gaps at the finer presets instead of 2 and 3), a node whose render-raster density
+   channel itself, `|y − axisY| < 0.06`, a node whose render-raster density
    (last frame's `pmass / 8`; a gap-wide channel at rest rasters to ~0.65 at
    `low`) is past 0.8 is let go of in proportion,
    `v = mix(vr, v_free, (density − 0.8)/0.4)`, so the material's pressure can
    push excess back up rather than the band conveying it through) **except
-   in the wedge above the nip** (`y > axisY + nipReach`, `z < frontAxisZ`, the
+   in the wedge above the nip** (`y > axisY + 0.06`, `z < frontAxisZ`, the
    region where the bank rests on the roll). There the roll is simply a
    no-slip wall: only the nodes inside its surface (`d ≤ R`) take `v = vr`,
    nothing else is prescribed, and g2p pushes particles out of the roll. The
@@ -204,7 +202,11 @@ Boundaries, applied in this order:
    itself is still velocity-prescribed, and next to the rolls the particles
    pack without their `F` recording it (those counts are 1.2–1.75× a gap-thick
    rest sheet, and at `high` it was 2.2×); the density tie of §4 is what
-   bounds that now (1.08 / 1.20 / 1.25 at `low` / `medium` / `high`).
+   bounds that now (1.08 / 1.26 / 1.35 at `low` / `medium` / `high`).
+   The 0.06 is a length, not a number of gaps, on purpose: scaled to 1.5 gaps
+   on every preset the rolls' grip on the bank is shorter at `medium` and
+   `high` and a bank of the same proportions moves slower (back half 0.42 of
+   roll speed against 0.69 at `high`).
    Alternatives tried and rejected: Coulomb friction only (μ = 0.8) starves
    the nip once the bank is small, because the drag scales with the bank's
    weight (lacy, pulsing sheet); a hard tangential tack constraint through the
@@ -218,7 +220,7 @@ Boundaries, applied in this order:
    force-feeds and drops material off the underside; releasing the band's
    normal constraint where it is overpacked drops material off the underside
    too.
-2. **Back roller**. In the wedge above the nip (`y > axisY + nipReach`,
+2. **Back roller**. In the wedge above the nip (`y > axisY + 0.06`,
    `z > backAxisZ`) it is the same tacky no-slip wall as the front roll:
    nodes inside its surface (`d ≤ R`) take `v = vr`, so the bank is drawn in
    from both sides. Everywhere else it is a separating contact with Coulomb
@@ -451,21 +453,50 @@ Measured with `tools/perf/nip.mjs` (6 s of the default batch, then 5 windows;
 `low` / `medium` / `high`; the count is the sheet's particles over those of a
 gap-thick sheet at rest density, the flux is over `U·gap·ρ0·L`):
 
-| | fixed corotated, clamp, reset | Hencky + HB | + volume bounds, tie, `nipReach` |
+| | fixed corotated, clamp, reset | Hencky + HB | + volume bounds, tie |
 | --- | --- | --- | --- |
 | F resets /s | 27 / 483 / 7759 | 0 / 23 / 166 | 0 / 0 / 0 |
-| sheet count | 1.09 / 1.59 / 2.24 | 1.09 / 1.47 / 1.75 | 1.08 / 1.20 / 1.25 |
-| nip flux | 1.17 / 1.55 / 2.20 | 1.10 / 1.52 / 1.85 | 1.14 / 1.26 / 1.29 |
+| sheet count | 1.09 / 1.59 / 2.24 | 1.09 / 1.47 / 1.75 | 1.08 / 1.26 / 1.35 |
+| nip flux | 1.17 / 1.55 / 2.20 | 1.10 / 1.52 / 1.85 | 1.14 / 1.31 / 1.37 |
 | sheet density (grid) | 0.90 / 1.26 / 1.47 | 0.90 / 1.18 / 1.24 | 0.87 / 0.93 / 0.93 |
-| bank, back half / roll speed | 0.84 / 0.80 / 0.71 | 0.80 / 0.56 / 0.15 | 0.78 / 0.16 / 0.08 |
-| bank particles | 9157 / 31117 / 78920 | 8887 / 36899 / 129391 | 9179 / 53996 / 177765 |
+| bank, back half / roll speed | 0.84 / 0.80 / 0.71 | 0.80 / 0.56 / 0.15 | 0.78 / 0.20 / 0.10 |
+| bank particles | 9157 / 31117 / 78920 | 8887 / 36899 / 129391 | 9179 / 50975 / 167943 |
 
-The last two rows are the price: a sheet that no longer hoards material
-leaves a bank several times larger at `medium` and `high`, and the back half
-of a large bank over the back roll is nearly static (the speed follows the
-bank's size, not `k` or `n`: at `low` with twice the batch both models give
-about 0.2). Pigment dropped on that bank takes longer to be drawn in. `low`
-(gap 1.28 cells, as at `high`) stays below the band at 1.08–1.14.
+`low` (gap 1.28 cells, as at `high`) stays below the band at 1.08–1.14.
+
+The sheet's thickness reads 0.84–1.03 gaps (90th percentile of the particles'
+depth off the roll, which reads 0.9 for a lattice sheet one gap thick), so
+the sheet is about one gap thick at 1.2 times rest density and the flux above
+1 is in the density: 1.125 of it is the mean of the two roll speeds over the
+front roll's (friction ratio 1.25), the rest packing. It does not swell after
+the nip as a calendered sheet does, because the tack band prescribes its
+normal velocity too (§3.3) and what leaves the nip stays as dense as it left.
+
+**The bank and the batch.** The last two rows are not a property of the
+model: a sheet that carries 1.3 gaps instead of 2.2 leaves the rest of the
+same batch in the bank, and how a bank moves follows the share of the batch
+it holds, in the old model as well. `tools/perf/bank.mjs` drops three chunks
+on the bank and follows their particles through the nip:
+
+| | bank's share of the batch | back half / roll speed | half the chunks through the nip |
+| --- | --- | --- | --- |
+| old model, default batch, `low` / `medium` / `high` | 0.30 / 0.26 / 0.26 | 0.69 / 0.74 / 0.73 | 3.2 / 3.5 / 3.6 s |
+| old model, batch ×2 at `low`, ×2 at `high` | 0.45 / 0.35 | 0.29 / 0.31 | 5.2 / 6.3 s |
+| this model, default batch | 0.31 / 0.46 / 0.59 | 0.59 / 0.13 / 0.10 | 3.9 s / not in 8 s / not in 8 s |
+| this model, batch ×1 / ×0.65 / ×0.5 | 0.31 / 0.28 / 0.26 | 0.59 / 0.63 / 0.61 | 3.9 / 3.5 / 3.5 s |
+
+Past a share of about a third the bank reaches over the back roll and its
+back half sits there while the roll slides under it; the chunks on top are
+not drawn in. Neither the yield stress (0.15 to 0.58), nor `k` and `n` (0.45
+to 2, 0.35 to 1) nor the tie move that: at the default batch every one of
+them leaves the back half at 0.09–0.20 of roll speed at `medium` and `high`.
+At a bank of the old proportions `n` = 1 is a little quicker (0.54–0.76, half
+the chunks through in 3.2 s) but starves `low` (count 0.95). So the default
+batch is too large for the gap of the finer presets: the gap halves from
+`low` to `high` and the batch does not. A batch of 0.65 at `medium` and 0.5
+at `high` (or the gap of `low`, 0.04, on every preset: 0.50 / 0.54, 3.9 /
+4.1 s, count 1.01 / 1.11) gives the old bank with the right flux; both moves
+are clean there too.
 
 SVD note: implement a 3×3 SVD as Jacobi eigen-decomposition of `FᵀF`
 (≤ 8 sweeps) to get `V` and `Σ²`, then `U = F·V·Σ⁻¹` with a guard for tiny

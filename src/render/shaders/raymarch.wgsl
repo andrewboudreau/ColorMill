@@ -63,7 +63,7 @@ struct FineBox {
 @group(0) @binding(7) var finA: texture_3d<f32>;   // (load, load·lat0, load·lat1, load·lat2), normalised like finC's mass
 @group(0) @binding(8) var finB: texture_3d<f32>;   // (load·lat3, load·lat4, load·lat5, load·lat6)
 @group(0) @binding(10) var<uniform> FB: FineBox;
-@group(0) @binding(9) var finC: texture_3d<f32>;   // (mass, coverage, undispersed load); finA.x / finC.x = load per unit mass,
+@group(0) @binding(9) var finC: texture_3d<f32>;   // (mass, coverage, undispersed load, speck code); finA.x / finC.x = load per unit mass,
                                                    // finC.y / finC.x = share of the mass carrying pigment,
                                                    // finC.z / finA.x = share of the pigment still in agglomerates
 
@@ -74,12 +74,11 @@ const PIGMENT_OPACITY: f32 = 6.0;
 // Dispersive mixing (design §5, Agglomerates): pigment still in agglomerates tints at this share of its
 // strength (the colour develops as the nip breaks them down; mirrors AGGLOMERATE_TINT in agglomerate.ts) ...
 const AGGLO_WEAK: f32 = 0.12;
-// ... and shows as specks instead: cells of AGGLO_SPECK_CELL colour-raster cells drawn as solid masstone,
-// with a chance of AGGLO_SPECK_CHANCE times the undispersed share of the pigment (less where there is
-// only a trace of it: AGGLO_SPECK_LOAD is the undispersed load per unit mass the chance reaches 63% of that at)
-const AGGLO_SPECK_CELL: f32 = 0.5;
-const AGGLO_SPECK_CHANCE: f32 = 0.3;
-const AGGLO_SPECK_LOAD: f32 = 0.25;
+// ... and shows as specks instead: one particle in 48 is drawn as a speck (raster.wgsl scatterSpeck;
+// finC.w is the cell's speck: size level 1..3 in bits 9..10, place in the cell in eighths below), a sphere of
+// solid masstone of up to this radius in colour cells. A speck is its particle's, so it rides the
+// material and shrinks as the agglomerates erode.
+const AGGLO_SPECK_RADIUS: f32 = 0.40;
 // a speck's colour is the pigment's masstone: darker and more saturated than its tint (albedo ^ this)
 const AGGLO_SPECK_TONE: f32 = 1.5;
 // Least premultiplied latent sum (the filtered load of a colour texel) that is decoded: below it the
@@ -1149,14 +1148,23 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
       pigment = smoothstep(COV_LO, COV_HI, covD) * (1.0 - exp(-PIGMENT_OPACITY * loadCovered));
     }
     if (csum > 1e-5 && und > 1e-4) {
-      // an agglomerate at the surface: a speck the size of a fraction of a colour cell, opaque, in the
-      // pigment's masstone. Hash of the world cell, like the coverage dither above.
-      let sc = floor((p - n * (SURFACE_DEPTH * hF)) / (AGGLO_SPECK_CELL * hF));
-      let chance = AGGLO_SPECK_CHANCE * raw * (1.0 - exp(-und / AGGLO_SPECK_LOAD));
-      if (hash31(sc + vec3f(17.0, 59.0, 83.0)) < chance) {
-        albedo = pow(albedo, vec3f(AGGLO_SPECK_TONE));
-        pigment = max(pigment, 0.97);
+      // an agglomerate at the surface: opaque, in the pigment's masstone
+      let g = (p - n * (SURFACE_DEPTH * hF) - FB.origin.xyz) / FB.origin.w;   // in colour cells; texel i is centred on i
+      let gb = vec3i(floor(g));
+      let gmax = vec3i(U.fine.xyz) - vec3i(1);
+      var speck = 0.0;
+      for (var k = 0; k < 8; k++) {
+        let c = gb + vec3i(k & 1, (k >> 1) & 1, k >> 2);
+        if (any(c < vec3i(0)) || any(c > gmax)) { continue; }
+        let code = i32(textureLoad(finC, c, 0).w + 0.5);
+        if (code < 512) { continue; }
+        let e = vec3f(vec3i((code >> 6) & 7, (code >> 3) & 7, code & 7));
+        let centre = vec3f(c) - vec3f(0.5) + (e + vec3f(0.5)) / 8.0;
+        let rad = AGGLO_SPECK_RADIUS * f32(code >> 9) / 3.0;
+        speck = max(speck, 1.0 - smoothstep(0.7 * rad, rad, length(g - centre)));
       }
+      albedo = mix(albedo, pow(albedo, vec3f(AGGLO_SPECK_TONE)), speck);
+      pigment = max(pigment, 0.97 * speck);
     }
 
     // ---- from here on the albedo, the pigment opacity and the surface are inputs ----

@@ -38,7 +38,8 @@ fn clearFine(@builtin(global_invocation_id) gid : vec3<u32>) {
   let n = (gid.z * P.fine.y + gid.y) * P.fine.x + gid.x;
   pmass[n] = 0;
   pload[n] = 0;
-  pcov[2u * n] = 0;
-  pcov[2u * n + 1u] = 0;
+  pcov[3u * n] = 0;
+  pcov[3u * n + 1u] = 0;
+  pcov[3u * n + 2u] = 0;
   for (var c = 0u; c < 7u; c++) { plat[7u * n + c] = 0; }
 }

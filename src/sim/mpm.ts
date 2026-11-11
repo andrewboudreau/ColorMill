@@ -440,7 +440,7 @@ export class GpuMpm implements GpuMpmSim {
     this.bufFMass = mk(fd.nodeCount);
     this.bufFLat = mk(7 * fd.nodeCount);
     this.bufFLoad = mk(fd.nodeCount);
-    this.bufFCov = mk(2 * fd.nodeCount);
+    this.bufFCov = mk(3 * fd.nodeCount);
     this.bufPCov = mk(4);
     this.bufXCap = mk(d.nodeCount);
     this.bufXQ = mk(3 * d.nodeCount);

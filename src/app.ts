@@ -146,9 +146,12 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   let preset: QualityPreset = chosen.preset;
   // batch size multiplier (?batch=1.5); scales the seeded bank
   const batchQuery = parseFloat(query.get('batch') ?? '');
-  let batch = Number.isFinite(batchQuery) && batchQuery > 0
+  let batchPinned = Number.isFinite(batchQuery) && batchQuery > 0;
+  let batch = batchPinned
     ? Math.min(Math.max(batchQuery, BATCH_LIMITS.min), BATCH_LIMITS.max)
-    : 1;
+    : QUALITY_PRESETS[preset].batch;
+  /** the batch a preset is rebuilt with: the operator's own if they chose one, else the preset's */
+  const batchFor = (p: QualityPreset): number => batchPinned ? batch : QUALITY_PRESETS[p].batch;
   let autoOrbit = query.get('orbit') === '1';
   const startPaused = query.get('paused') === '1';
   // Unless the preset was pinned by the user or the URL, drop a level when the
@@ -224,13 +227,13 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       if (key === 'gap') gapPinned = true;
       if (sim) sim.params[key] = value;
     },
-    onQuality: (p) => { adaptive = false; presetPinned = true; void rebuildSim(p, batch); },
+    onQuality: (p) => { adaptive = false; presetPinned = true; void rebuildSim(p, batchFor(p)); },
     onRenderScale: (scale) => {
       adaptiveResolution = false;
       renderScale = scale;
       if (renderer) renderer.renderScale = scale;
     },
-    onBatch: (b) => { void rebuildSim(preset, b); },
+    onBatch: (b) => { batchPinned = true; void rebuildSim(preset, b); },
     onAutoOrbit: (on) => { autoOrbit = on; },
     onSurfaceColour: (on) => { if (renderer) renderer.mode = on ? 'surface' : 'depth'; },
     onExperimental: (on) => {
@@ -696,7 +699,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       paintStats(true);
     }
   }
-  const setQuality = (p: QualityPreset): Promise<void> => rebuildSim(p, batch);
+  const setQuality = (p: QualityPreset): Promise<void> => rebuildSim(p, batchFor(p));
 
   // --- construct sim + renderer -------------------------------------------------------
   overlay.setProgress(`Building the ${preset} simulation (${chosen.reason}, ~${estimateParticleCount(QUALITY_PRESETS[preset]).toLocaleString()} particles)…`);

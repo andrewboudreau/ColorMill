@@ -33,13 +33,17 @@ export interface QualitySettings {
    *  a finer grid can afford to be nearer to it, and the narrower the nip, the thinner the sheet and the wider
    *  a chunk's pigment is spread (design §7). */
   readonly gap: number;
+  /** the batch this preset starts with. The nip passes a sheet about 1.3 gaps thick at rest density, so a narrower
+   *  gap carries less of the batch round the roll and leaves more in the bank; past roughly 0.45 of the batch the
+   *  bank's back half stalls and chunks are no longer drawn in (tools/perf/bank.mjs). These keep the bank near 0.3. */
+  readonly batch: number;
 }
 
 export const QUALITY_PRESETS: Readonly<Record<QualityPreset, QualitySettings>> = {
-  low: { preset: 'low', cellsPerUnit: 32, dt: 1.6e-3, substepsPerFrame: 8, colourCellsPerUnit: 64, colourNodes: 1.82e6, gap: 0.04 },
-  medium: { preset: 'medium', cellsPerUnit: 48, dt: 1.1e-3, substepsPerFrame: 12, colourCellsPerUnit: 96, colourNodes: 3.53e6, gap: 0.028 },
-  high: { preset: 'high', cellsPerUnit: 64, dt: 8e-4, substepsPerFrame: 16, colourCellsPerUnit: 128, colourNodes: 4.69e6, gap: 0.02 },
-  ultra: { preset: 'ultra', cellsPerUnit: 72, dt: 7.1e-4, substepsPerFrame: 18, colourCellsPerUnit: 144, colourNodes: 4.69e6, gap: 0.02 }
+  low: { preset: 'low', cellsPerUnit: 32, dt: 1.6e-3, substepsPerFrame: 8, colourCellsPerUnit: 64, colourNodes: 1.82e6, gap: 0.04, batch: 1 },
+  medium: { preset: 'medium', cellsPerUnit: 48, dt: 1.1e-3, substepsPerFrame: 12, colourCellsPerUnit: 96, colourNodes: 3.53e6, gap: 0.028, batch: 0.65 },
+  high: { preset: 'high', cellsPerUnit: 64, dt: 8e-4, substepsPerFrame: 16, colourCellsPerUnit: 128, colourNodes: 4.69e6, gap: 0.02, batch: 0.5 },
+  ultra: { preset: 'ultra', cellsPerUnit: 72, dt: 7.1e-4, substepsPerFrame: 18, colourCellsPerUnit: 144, colourNodes: 4.69e6, gap: 0.02, batch: 0.5 }
 };
 
 export interface MaterialConstants {
@@ -452,7 +456,7 @@ export function dropSlotX(slot: number, slots = DROP_SLOTS): number {
 }
 
 /** Estimated particle count for a preset (batch volume / (h^3/8)), for UI/preset selection. */
-export function estimateParticleCount(q: QualitySettings, batch = 1): number {
+export function estimateParticleCount(q: QualitySettings, batch = q.batch): number {
   const { h } = gridDims(q);
   return Math.round((GEOMETRY.bankVolume * batch) / (h * h * h / 8));
 }
@@ -470,7 +474,7 @@ export interface MillConfig {
   readonly batch?: number;
 }
 
-export const BATCH_CHOICES: readonly number[] = [0.5, 0.75, 1, 1.5, 2, 3];
+export const BATCH_CHOICES: readonly number[] = [0.5, 0.65, 0.75, 1, 1.5, 2, 3];
 /** Range accepted from `?batch=` (the panel offers BATCH_CHOICES). */
 export const BATCH_LIMITS = { min: 0.25, max: 4 } as const;
 
@@ -489,6 +493,7 @@ export function defaultConfig(preset: QualityPreset = 'high'): MillConfig {
   return {
     quality: QUALITY_PRESETS[preset],
     material: DEFAULT_MATERIAL,
-    params: { ...DEFAULT_PARAMS, gap: QUALITY_PRESETS[preset].gap }
+    params: { ...DEFAULT_PARAMS, gap: QUALITY_PRESETS[preset].gap },
+    batch: QUALITY_PRESETS[preset].batch
   };
 }

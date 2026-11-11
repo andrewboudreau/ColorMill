@@ -63,13 +63,25 @@ struct FineBox {
 @group(0) @binding(7) var finA: texture_3d<f32>;   // (load, load·lat0, load·lat1, load·lat2), normalised like finC's mass
 @group(0) @binding(8) var finB: texture_3d<f32>;   // (load·lat3, load·lat4, load·lat5, load·lat6)
 @group(0) @binding(10) var<uniform> FB: FineBox;
-@group(0) @binding(9) var finC: texture_3d<f32>;   // (mass, coverage); finA.x / finC.x = load per unit mass,
-                                                   // finC.y / finC.x = share of the mass carrying pigment
+@group(0) @binding(9) var finC: texture_3d<f32>;   // (mass, coverage, undispersed load); finA.x / finC.x = load per unit mass,
+                                                   // finC.y / finC.x = share of the mass carrying pigment,
+                                                   // finC.z / finA.x = share of the pigment still in agglomerates
 
 // Pigment is an opaque colourant in a clear medium: the share of light a sample captures
 // rises with its pigment load per unit mass (0 = clear base, PIGMENT_LOAD = pure masterbatch);
 // a few percent of masterbatch already colours the sheet solidly, as it does on a real mill.
 const PIGMENT_OPACITY: f32 = 6.0;
+// Dispersive mixing (design §5, Agglomerates): pigment still in agglomerates tints at this share of its
+// strength (the colour develops as the nip breaks them down; mirrors AGGLOMERATE_TINT in agglomerate.ts) ...
+const AGGLO_WEAK: f32 = 0.12;
+// ... and shows as specks instead: cells of AGGLO_SPECK_CELL colour-raster cells drawn as solid masstone,
+// with a chance of AGGLO_SPECK_CHANCE times the undispersed share of the pigment (less where there is
+// only a trace of it: AGGLO_SPECK_LOAD is the undispersed load per unit mass the chance reaches 63% of that at)
+const AGGLO_SPECK_CELL: f32 = 0.5;
+const AGGLO_SPECK_CHANCE: f32 = 0.3;
+const AGGLO_SPECK_LOAD: f32 = 0.25;
+// a speck's colour is the pigment's masstone: darker and more saturated than its tint (albedo ^ this)
+const AGGLO_SPECK_TONE: f32 = 1.5;
 // Least premultiplied latent sum (the filtered load of a colour texel) that is decoded: below it the
 // half-float channels are a few subnormal steps and the ratio is noise.
 const LATENT_MIN: f32 = 1e-5;
@@ -698,7 +710,8 @@ fn puttyTint(q: vec3f) -> vec3f {
   let fa = textureSampleLevel(finA, volSampler, fq, 0.0);
   let fb = textureSampleLevel(finB, volSampler, fq, 0.0);
   let fc = textureSampleLevel(finC, volSampler, fq, 0.0);
-  let pl = fa.x / max(fc.x, 1e-4);
+  // the load that tints: pigment still in agglomerates counts for little (AGGLO_WEAK)
+  let pl = (fa.x - (1.0 - AGGLO_WEAK) * clamp(fc.z, 0.0, fa.x)) / max(fc.x, 1e-4);
   let s = fa.y + fa.z + fa.w + fb.x;   // the filtered load: un-premultiplies the latent
   var albedo = vec3f(1.0);
   if (s > LATENT_MIN && pl > 1e-4) { albedo = srgbToLinear(latentToRgb(vec4f(fa.yzw, fb.x) / s, fb.yzw / s)); }
@@ -1073,6 +1086,7 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     var dsum = 0.0;
     var load = 0.0;
     var cov = 0.0;
+    var und = 0.0;   // the part of the load still in agglomerates
     // surface mode: five samples just inside the hit, one at the hit and a cross of four half a
     // cell away along the surface, no depth; depth mode: five samples down the normal with a
     // depth decay
@@ -1103,6 +1117,7 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
       let pl = fa.x / max(fm, 1e-4);   // load per unit mass
       dsum += w;
       load += w * pl;
+      und += w * clamp(fc.z, 0.0, fa.x) / max(fm, 1e-4);
       cov += w * clamp(fc.y / max(fm, 1e-4), 0.0, 1.0);   // covered share of the mass
       let fb = textureSampleLevel(finB, volSampler, fq, 0.0);
       let s = fa.y + fa.z + fa.w + fb.x;
@@ -1112,7 +1127,12 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
       resid += wp * fb.yzw / s;
       csum += wp;
     }
-    if (dsum > 1e-5) { load = load / dsum; cov = cov / dsum; }
+    if (dsum > 1e-5) { load = load / dsum; cov = cov / dsum; und = und / dsum; }
+    // dispersive mixing: only dispersed pigment develops its colour; what is still in agglomerates tints
+    // weakly and shows as specks of masstone (below)
+    und = min(und, load);
+    let raw = und / max(load, 1e-5);   // undispersed share of the pigment here
+    load = load - (1.0 - AGGLO_WEAK) * und;
     var albedo = vec3f(1.0);
     if (csum > 1e-5) { c = c / csum; resid = resid / csum; albedo = srgbToLinear(latentToRgb(c, resid)); }
     let ao = volumeAo(p, n);
@@ -1127,6 +1147,16 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
       let covD = cov + COV_DITHER * (2.0 * hash31(cell) - 1.0);
       let loadCovered = load / max(cov, 0.05);
       pigment = smoothstep(COV_LO, COV_HI, covD) * (1.0 - exp(-PIGMENT_OPACITY * loadCovered));
+    }
+    if (csum > 1e-5 && und > 1e-4) {
+      // an agglomerate at the surface: a speck the size of a fraction of a colour cell, opaque, in the
+      // pigment's masstone. Hash of the world cell, like the coverage dither above.
+      let sc = floor((p - n * (SURFACE_DEPTH * hF)) / (AGGLO_SPECK_CELL * hF));
+      let chance = AGGLO_SPECK_CHANCE * raw * (1.0 - exp(-und / AGGLO_SPECK_LOAD));
+      if (hash31(sc + vec3f(17.0, 59.0, 83.0)) < chance) {
+        albedo = pow(albedo, vec3f(AGGLO_SPECK_TONE));
+        pigment = max(pigment, 0.97);
+      }
     }
 
     // ---- from here on the albedo, the pigment opacity and the surface are inputs ----

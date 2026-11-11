@@ -258,8 +258,9 @@ x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.2
 - **Disperse** (shear-driven mixing, §5).
 - **Pack**: write the coarse density volume (§8): one `rgba16float` 3D texture
   of node dims, `volA = (density, 0, 0, 0)`, where `density = pmass / 8`
-  (so a fully packed cell ≈ 1). Coarse pigment accumulators remain inputs to
-  dispersion; only the fine raster's pigment is packed into render textures.
+  (so a fully packed cell ≈ 1). The solver-grid raster scatters mass only;
+  its load and latent accumulators are the dispersion exchange's pools (§5),
+  and only the fine raster's pigment is packed into render textures.
 - **Colour raster**: the same scatter and pack a second time onto a finer
   lattice, in a box laid over the material each frame (§3.6). Its finest
   cell is the particle spacing, `colourCellsPerUnit` = twice the solver's
@@ -269,8 +270,9 @@ x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.2
   memory the raster used when it covered the domain and under the default
   128 MiB storage-binding limit for the 7-channel accumulator). It has its
   own accumulators and three `rgba16float`
-  textures `finA = (load, lat0..2)`, `finB = (lat3..6)`, `finC = (mass,
-  coverage)`, load, mass and coverage normalised by `(h/hF)³/8` so a packed
+  textures `finA = (load, lat0..2)`, `finB = (lat3..6)` (the latent
+  premultiplied by the load, §5), `finC = (mass, coverage)`, load, latent,
+  mass and coverage normalised by `(h/hF)³/8` so a packed
   fine cell reads ≈ 1, `finA.x / finC.x` is the load per unit mass and
   `finC.y / finC.x` is the covered mass fraction (0..1). **Coverage** is an
   eighth accumulator `pcov` (i32, scale 2^20) that sums `wgt·pMass` only for
@@ -293,7 +295,7 @@ x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.2
   116 MB at low, 225 MB at medium, 300 MB at high and ultra); a
   device whose storage-binding limit cannot hold the 7-channel accumulator
   falls back to the solver grid with a console warning. The dispersion
-  kernel keeps reading the solver-grid raster.
+  exchange always runs on the solver grid.
 
 ### 3.6 The material's box
 
@@ -572,9 +574,14 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   dictate the motion, so a softer inclusion deforms like its neighbours;
   and with one velocity field per cell there is no slip between a chunk and
   the base inside a cell for softness to exploit. The change was not kept.
-- **Inject** kernel: `addPigment(center, radius, latent, strength)` blends
-  particle latents inside the sphere: `z = mix(z, zPigment, strength·t)`,
-  `t = 1 − |d|/radius`.
+- **Inject** kernel: `addPigment(center, radius, latent, strength)` adds
+  pigment inside the sphere, blended by load: with `a = strength·t`,
+  `t = 1 − |d|/radius`, the particle keeps `(1 − a)·w` of its own pigment and
+  gains `a·PIGMENT_LOAD` of the ink's, `w' = (1 − a)·w + a·PIGMENT_LOAD` and
+  `z' = ((1 − a)·w·z + a·PIGMENT_LOAD·zPigment) / w'`. A clear particle
+  (`w = 0`) therefore takes the ink's colour outright at any `a`, only
+  thinner; `mix(z, zPigment, a)` blended in the clear base's unweighted
+  white latent and gave every soft edge a pastel rim.
 - **Stamp** kernel (`stamp.wgsl`): `stampImage(image, placement)` presses a
   picture onto the material seen from above. The image is a raster of up to
   256 px a side, 8 floats per pixel (a latent and an opacity), mapped onto a
@@ -584,8 +591,7 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   records per solver column (i, k) the highest particle under the footprint
   (float bits, `atomicMax`), then `main` gives every particle within
   `STAMP_DEPTH` = 0.06 (about 1 cm; at least 1.5 cells) of its column's top the pixel it lies
-  under, `z = mix(z, zPixel, α·strength)`, and the masterbatch load, as
-  inject does. The surface is found fresh each stamp, so a picture lands on
+  under, blended by load with `a = α·strength` exactly as inject does. The surface is found fresh each stamp, so a picture lands on
   the flat seeded bank (the use: a logo or a line of text laid on the putty
   before the mill pulls it in and streaks it) and on whatever the material
   has become. The app rasterises an image file (`Stamp picture`, or a file
@@ -641,22 +647,49 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   sheet).
 - **Pigment load.** Each particle carries a pigment load in `pos.w` (clear
   base 0, a masterbatch chunk `PIGMENT_LOAD` = 12). The raster accumulates
-  per node the mass, the load and the load-weighted latent. The fine raster's
-  pack writes `finA/finB` = load and the latent normalised by the node's load
-  (the mix of the pigments only), and `finC` = mass and coverage. Thus
-  `finA.x / finC.x` is the load per unit mass. The raster uses
+  per node the mass, the load and the load-weighted latent; a particle with no
+  load adds to neither of the last two (there is no floor: a floor gave the
+  clear base's white latent a weight in every thin edge). The fine raster's
+  pack writes `finA/finB` = load and the latent **premultiplied by the load**
+  (same normalisation as the load), and `finC` = mass and coverage. Thus
+  `finA.x / finC.x` is the load per unit mass, and the renderer divides the
+  filtered latent by the sum of its four concentration channels (which sum
+  to 1 per pigment, so the sum is the filtered load) to get the mix of the
+  pigments only. Stored normalised instead, trilinear and mip filtering
+  averaged each texel's colour with equal weight whatever its load, and an
+  empty texel's zeros darkened and desaturated every edge. The raster uses
   the tight 8-node trilinear stencil so one-cell streaks are not averaged
   away before they are drawn, and the renderer integrates colour through
   the sheet's thickness.
-- **Disperse** kernel (once per frame): for each particle gather the
-  node-averaged latent `zg` (from the raster of §3.5) with the 27-node
-  stencil; compute the shear rate `γ = ‖(C + Cᵀ)/2‖_F` from the particle's
-  current `C`; then `z += clamp(k · γ · frameDt, 0, 1) · (zg − z)` with
-  `k = config.dispersion` (default 0.02, UI 0–0.5; nearly off: colour mills as streaks that thin with folding, and at 0.1 a black chunk was 77% grey after 3 s). The load relaxes toward the
-  neighbourhood's load per unit mass at the same rate; `zg` is the
-  load-weighted (pigments-only) neighbourhood latent, and a particle that
-  gains pigment blends `zg` in with the gained load, so a clear-base
-  particle picking up pigment takes the neighbourhood's colour outright.
+- **Disperse** kernels (`disperse.wgsl`, once per frame): a conservative
+  exchange of pigment between neighbouring particles in two passes through
+  the solver grid's nodes. Each particle has a rate
+  `α = clamp(k · γ · frameDt, 0, 1)` from its own shear,
+  `γ = ‖(C + Cᵀ)/2‖_F`, with `k = config.dispersion` (default 0.02, UI 0–0.5;
+  nearly off: colour mills as streaks that thin with folding). What moves is
+  the conserved pair, the load `w` and the load-weighted latent `w·z`.
+  `give_` scatters `N·α·w` and `N·α·w·z` into the pools of the 8 nodes round
+  the particle (trilinear `N`) and `N·α·m` into a per-node capacity; `take_`
+  removes what the particle gave and takes from each node's pool the share
+  its capacity term is of the node's. The shares of a pool sum to 1, so the
+  batch's total load and each load-weighted latent channel change only by
+  round-off (measured on the GPU over 600 frames of milling, a fold and a
+  roll: about 5e-9 of the total, 1e-6 in the worst colour channel, at any
+  `k`). The latent follows as `z = (w·z)/w`, so a clear particle takes the
+  colour of the pigment it receives outright. To keep the balance exact the
+  two passes compute the same fixed-point terms from the same inputs (2^21;
+  a particle's share is its integer capacity term over the node's integer
+  sum), and a particle that does not exchange does neither half: kinematic
+  particles (a held chunk, material in the operator's hand) are skipped.
+  The kernel this replaced gathered a neighbourhood mean with 27 quadratic
+  weights from a raster scattered with 8 trilinear ones and relaxed each
+  particle toward it at its own rate; nothing balanced one particle's gain
+  against another's loss (the total drifted +4% at low and −6% at high over
+  the same run, +37% at `k` = 0.2), a held chunk was read but never debited,
+  and a load floor in the raster handed every clear particle a trace of
+  load at rest. The pools are the solver-grid raster's load and latent
+  accumulators, which that raster no longer fills (it scatters mass only),
+  plus one capacity accumulator.
   Mixing therefore happens where the material is sheared — at the nip — and
   not in the resting bank.
 

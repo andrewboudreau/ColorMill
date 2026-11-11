@@ -50,8 +50,10 @@ struct FineBox {
 // the colour raster (design §3.5), on its own finer grid: pigment load, latent and mass, so a
 // streak thinner than a solver cell still reaches the picture; the surface itself is still
 // found on volA's density
-@group(0) @binding(7) var finA: texture_3d<f32>;   // (load, lat0, lat1, lat2), load normalised like finC's mass
-@group(0) @binding(8) var finB: texture_3d<f32>;   // (lat3, lat4, lat5, lat6)
+// The latent is stored premultiplied by the load (pack.wgsl), so the sampler's trilinear filter mixes
+// pigment amounts; divide by the sum of the four concentration channels after sampling.
+@group(0) @binding(7) var finA: texture_3d<f32>;   // (load, load·lat0, load·lat1, load·lat2), normalised like finC's mass
+@group(0) @binding(8) var finB: texture_3d<f32>;   // (load·lat3, load·lat4, load·lat5, load·lat6)
 @group(0) @binding(10) var<uniform> FB: FineBox;
 @group(0) @binding(9) var finC: texture_3d<f32>;   // (mass, coverage); finA.x / finC.x = load per unit mass,
                                                    // finC.y / finC.x = share of the mass carrying pigment
@@ -60,6 +62,9 @@ struct FineBox {
 // rises with its pigment load per unit mass (0 = clear base, PIGMENT_LOAD = pure masterbatch);
 // a few percent of masterbatch already colours the sheet solidly, as it does on a real mill.
 const PIGMENT_OPACITY: f32 = 6.0;
+// Least premultiplied latent sum (the filtered load of a colour texel) that is decoded: below it the
+// half-float channels are a few subnormal steps and the ratio is noise.
+const LATENT_MIN: f32 = 1e-5;
 // Surface colour mode (design §8): the colour of the top-most material only, sampled this many
 // colour-raster cells inside the hit (just at the outermost particles), with four sideways
 // samples half a cell away in a cross so a single texel does not speckle.
@@ -627,9 +632,9 @@ fn puttyTint(q: vec3f) -> vec3f {
   let fb = textureSampleLevel(finB, volSampler, fq, 0.0);
   let fc = textureSampleLevel(finC, volSampler, fq, 0.0);
   let pl = fa.x / max(fc.x, 1e-4);
-  let s = fa.y + fa.z + fa.w + fb.x;
+  let s = fa.y + fa.z + fa.w + fb.x;   // the filtered load: un-premultiplies the latent
   var albedo = vec3f(1.0);
-  if (s > 1e-4 && pl > 1e-4) { albedo = srgbToLinear(latentToRgb(vec4f(fa.yzw, fb.x) / s, fb.yzw / s)); }
+  if (s > LATENT_MIN && pl > 1e-4) { albedo = srgbToLinear(latentToRgb(vec4f(fa.yzw, fb.x) / s, fb.yzw / s)); }
   return mix(CLEAR_BODY, albedo, 1.0 - exp(-PIGMENT_OPACITY * pl));
 }
 
@@ -992,8 +997,9 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     // latent is the pigment-weighted Mixbox mix of the PIGMENTS along the ray
     // (the clear base carries none, so it never whitens a streak); the pigment
     // load per unit mass along the ray sets how opaque the colour is.
-    // Latents are renormalised by their weight sum because trilinear blending
-    // with empty cells scales them toward zero.
+    // Latents are stored premultiplied by the load, so the trilinear sample is the
+    // pigment-amount mix of the texels round it; dividing by the sum of its four
+    // concentration channels (the filtered load) gives the latent back.
     var c = vec4f(0.0);
     var resid = vec3f(0.0);
     var csum = 0.0;
@@ -1033,7 +1039,7 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
       cov += w * clamp(fc.y / max(fm, 1e-4), 0.0, 1.0);   // covered share of the mass
       let fb = textureSampleLevel(finB, volSampler, fq, 0.0);
       let s = fa.y + fa.z + fa.w + fb.x;
-      if (s <= 1e-4 || pl <= 1e-4) { continue; }
+      if (s <= LATENT_MIN || pl <= 1e-4) { continue; }
       let wp = w * pl;
       c += wp * vec4f(fa.yzw, fb.x) / s;
       resid += wp * fb.yzw / s;

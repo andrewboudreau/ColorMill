@@ -216,8 +216,8 @@ t=0.5 → Mixbox `#30953d` (green), linear ≈ `#7f8743` (mud).
 
 ### Why latent space matters for the 3D solver
 
-Mixbox's **latent** representation is 7 coefficients (3 Kubelka–Munk pigment
-weights + 4 residual). For mixing many colors you **average in latent space**
+Mixbox's **latent** representation is 7 coefficients (4 pigment
+concentrations that sum to 1, + a 3-channel RGB residual). For mixing many colors you **average in latent space**
 and convert to RGB once — not pairwise `lerp`. That maps cleanly onto the
 grid/particle pipeline:
 
@@ -384,7 +384,7 @@ stick-slip friction so it is not a skating rink.
 ### Why Mixbox latents per particle
 
 Pigment mixing in RGB is wrong (blue + yellow → grey). Mixbox's 7-float
-latent (3 Kubelka–Munk pigment weights + 4 residual) is *linear* under
+latent (4 pigment concentrations + a 3-channel RGB residual) is *linear* under
 mass-weighted averaging, so a particle's latent can be transported, averaged
 into grid nodes, and blended with other particles' latents with plain
 arithmetic; the polynomial `latentToRgb` is evaluated once per pixel in the

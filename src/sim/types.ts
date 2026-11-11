@@ -4,6 +4,7 @@
  */
 import type { GridDims, MillConfig, MillParams, QualitySettings, RollStyle } from '../config/mill';
 import type { Drop } from '../drops';
+import type { MixingMetrics, PigmentInventory } from './metrics';
 import type { NipDiagnostics } from './diagnostics';
 
 /** A 7-float Mixbox latent. */
@@ -55,9 +56,10 @@ export interface RenderVolumes {
   /** Incremented when density changes. Omit to rebuild the density mip on every draw. */
   readonly densityVersion?: number;
   readonly dims: GridDims;
-  /** colour raster (design §3.5), in a box of fineDims nodes laid over the material: rgba16float (pigment load, lat0, lat1, lat2) */
+  /** colour raster (design §3.5), in a box of fineDims nodes laid over the material: rgba16float (pigment load, then the latent premultiplied by it: load·lat0, load·lat1, load·lat2) */
   readonly finA: GPUTexture;
-  /** rgba16float (lat3, lat4, lat5, lat6) on fineDims */
+  /** rgba16float (load·lat3, load·lat4, load·lat5, load·lat6) on fineDims; the reader divides by the sum of the four
+   *  concentration channels (load·lat0..3) after filtering */
   readonly finB: GPUTexture;
   /** rgba16float (mass, coverage, 0, 0) on fineDims, same normalisation as finA.x, so finA.x / finC.x is the load per unit mass
    *  and finC.y / finC.x the share of the mass that carries pigment (0..1) */
@@ -188,6 +190,11 @@ export interface DebugApi {
   snapshot(): Promise<ParticleSnapshot>;
   /** Last frame's stats */
   stats(): SimStats;
+  /** Total pigment and its colour over the particles (sum of load x mass, and of load x mass x latent per channel):
+   *  conserved by milling, dispersion and the operator's moves; only a drop, an inject, a stamp or a reset changes it. */
+  inventory(): Promise<PigmentInventory>;
+  /** Mixing measures of the pigment load: Danckwerts' intensity of segregation at boxes of h, 2h and 4h, and the axial segregation. */
+  mixing(): Promise<MixingMetrics>;
   /** Step `frames` frames and measure the nip over them (src/sim/diagnostics.ts; tools/perf/nip.mjs prints the table). */
   nipDiagnostics(frames: number): Promise<NipDiagnostics>;
   /** Inject a named pigment (key of PIGMENTS) at a random bank spot, as a UI tap would. */

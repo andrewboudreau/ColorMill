@@ -3,7 +3,7 @@
 // much of the material carries pigment, and the striation thickness. The preset-independence check of the
 // lamellar mixing model (design §5): the same table should come out at every preset.
 //
-// usage: node tools/perf/mixcurve.mjs [low medium high ...] [--seconds=60] [--every=5] [--moves=1] [--k=1] [--omega=3]
+// usage: node tools/perf/mixcurve.mjs [low medium high ...] [--seconds=60] [--every=5] [--moves=1] [--k=1] [--omega=3] [--query=&frictionRatio=1.6]
 //                                      [--shots=<dir>] [--shot-at=5,20,60] [--tag=new] [--json=<file>]
 //   --moves=1 (default): cut & fold from the left at 5 s, from the right at 12 s, cut & roll at 20 s, and again
 //             every 20 s. --moves=0: steady milling, nobody touches it.
@@ -87,7 +87,7 @@ const out = {};
 try {
   if (SHOTS) mkdirSync(SHOTS, { recursive: true });
   for (const preset of presets) {
-    const page = await openApp(ctx.browser, ctx.server.baseUrl, preset, { width: 1280, height: 800 });
+    const page = await openApp(ctx.browser, ctx.server.baseUrl, preset, { width: 1280, height: 800, query: opt('query', '') });
     const info = await page.evaluate(({ K, OMEGA }) => {
       const api = window.__colormill;
       if (Number.isFinite(OMEGA)) api.sim.params.omega = OMEGA;

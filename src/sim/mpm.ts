@@ -1217,9 +1217,12 @@ export class GpuMpm implements GpuMpmSim {
     // F out of the matrix buffer
     const mat = new Float32Array(take(sizes[3]));
     const deformation = new Float32Array(9 * n);
+    const velocityGradient = new Float32Array(9 * n);
     for (let i = 0; i < n; i++) {
       const f = MAT_FLOATS * i + MAT_F;
       for (let c = 0; c < 9; c++) deformation[9 * i + c] = mat[f + c];
+      const g = MAT_FLOATS * i + MAT_C;
+      for (let c = 0; c < 9; c++) velocityGradient[9 * i + c] = mat[g + c];
     }
     const snap: ParticleSnapshot = {
       count: n,
@@ -1228,6 +1231,7 @@ export class GpuMpm implements GpuMpmSim {
       loads,
       latents,
       deformation,
+      velocityGradient,
       flags: new Uint32Array(take(sizes[4])),
       laminae: new Float32Array(take(sizes[5])),
       mixState: new Float32Array(take(sizes[6]))

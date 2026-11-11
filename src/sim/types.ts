@@ -39,6 +39,8 @@ export interface ParticleSnapshot {
   readonly latents: Float32Array;
   /** 9 floats per particle, row-major F */
   readonly deformation: Float32Array;
+  /** 9 floats per particle, row-major C: the velocity gradient G2P gathered on the frame's last substep */
+  readonly velocityGradient: Float32Array;
   /** 1 uint per particle */
   readonly flags: Uint32Array;
   /** 4 floats per particle: the pigment laminae's unit normal xyz, then q = ln(s / s0), the log of their thickness

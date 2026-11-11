@@ -39,6 +39,8 @@ try {
     const row = {
       preset, ...info, resets: mean((w) => w.resetsPerSecond), pushOuts: mean((w) => w.pushOutsPerSecond),
       sheet: reg('sheet'), bank: reg('bank'), sheetCount: mean((w) => w.sheetCount), bankBack: mean((w) => w.bankBackSpeed), bankFront: mean((w) => w.bankFrontSpeed), flux: mean((w) => w.flux),
+      ratio: await page.evaluate(() => window.__colormill.sim.params.frictionRatio),
+      nip: Object.fromEntries(['n', 'meanSpeed', 'speedDifference', 'speedDifferenceOverNominal', 'shearRate', 'shearRateOverNominal', 'strainRate'].map((k) => [k, mean((w) => w.nip[k])])),
       thickness: mean((w) => w.thicknessGaps), vmax: max((w) => w.maxSpeed), vOverLimit: max((w) => w.maxSpeedOverLimit),
       courant: max((w) => w.courant), tray: max((w) => w.tray), Jmin: Math.min(...win.map((w) => w.Jmin)), Jmax: max((w) => w.Jmax)
     };
@@ -84,6 +86,13 @@ const lines = [
   ['bank speed back / front half (/ U)', ...rows.map((r) => `${f(r.bankBack)} / ${f(r.bankFront)}`)],
   ['sheet count / gap-thick rest sheet', ...rows.map((r) => f(r.sheetCount))],
   ['nip flux / (U gap rho0 L)', ...rows.map((r) => f(r.flux))],
+  ['flux / (mean U gap rho0 L)', ...rows.map((r) => f(r.flux * 2 / (1 + r.ratio)))],
+  ['nip particles; speed / mean U', ...rows.map((r) => `${f(r.nip.n, 0)}; ${f(r.nip.meanSpeed)}`)],
+  ['nip dv across gap / U_f (nominal; rigid)', ...rows.map((r) => `${f(r.nip.speedDifference, 3)} (${f(r.ratio - 1, 2)}; ${f(r.gap / 0.32, 3)})`)],
+  ['nip dv / (U_b - U_f)', ...rows.map((r) => f(r.nip.speedDifferenceOverNominal))],
+  ['nip shear 2 D_yz gap / U_f (nominal)', ...rows.map((r) => `${f(r.nip.shearRate, 3)} (${f(r.ratio - 1, 2)})`)],
+  ['nip shear / ((U_b - U_f) / gap)', ...rows.map((r) => f(r.nip.shearRateOverNominal))],
+  ['nip |strain rate| gap / U_f', ...rows.map((r) => f(r.nip.strainRate, 3))],
   ['sheet thickness p90 / gap', ...rows.map((r) => f(r.thickness))],
   ['max |v| (/ 2 omega R)', ...rows.map((r) => `${f(r.vmax)} (${f(r.vOverLimit)})`)],
   ['Courant (c + max|v|) dt / h', ...rows.map((r) => f(r.courant))],

@@ -3,19 +3,18 @@
 // clamps, hard roller push-out.
 @group(0) @binding(1) var<storage, read_write> pos : array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read_write> vel : array<vec4<f32>>;
-@group(0) @binding(3) var<storage, read_write> cbuf : array<f32>;
-@group(0) @binding(4) var<storage, read_write> fbuf : array<f32>;
-@group(0) @binding(5) var<storage, read_write> abuf : array<f32>;   // P2G affine (read by p2g)
-@group(0) @binding(6) var<storage, read> flags : array<u32>;
-@group(0) @binding(7) var<storage, read> gvel : array<vec4<f32>>;   // xyz velocity, w the node's mass (grid.wgsl)
+// P2G affine (read by p2g), F and C, MAT_STRIDE vec4 per particle (common.wgsl)
+@group(0) @binding(3) var<storage, read_write> mats : array<vec4<f32>>;
+@group(0) @binding(4) var<storage, read> flags : array<u32>;
+@group(0) @binding(5) var<storage, read> gvel : array<vec4<f32>>;   // xyz velocity, w the node's mass (grid.wgsl)
 // cut & fold reductions: [0] = live pile top under the standing log (atomicMax on float bits)
-@group(0) @binding(8) var<storage, read_write> foldInfo : array<atomic<u32>>;
-@group(0) @binding(9) var<storage, read> fold0 : array<vec4<f32>>;   // .w = release time of a fed particle
+@group(0) @binding(6) var<storage, read_write> foldInfo : array<atomic<u32>>;
+@group(0) @binding(7) var<storage, read> fold0 : array<vec4<f32>>;   // .w = release time of a fed particle
 // the material's box (box.wgsl): BOX_ACC is the min / max cell over every particle this substep
-@group(0) @binding(10) var<storage, read_write> box : array<atomic<u32>>;
+@group(0) @binding(8) var<storage, read_write> box : array<atomic<u32>>;
 
 // the bounds step_ settled on last substep, in a plain buffer of its own (min cell xyz, max cell xyz)
-@group(0) @binding(11) var<storage, read> boxLast : array<u32>;
+@group(0) @binding(9) var<storage, read> boxLast : array<u32>;
 
 /// Report a particle at x to the box's reduction. Only a particle on or beyond a face of the last
 /// substep's bounds touches the shared atomics; step_ takes a face nothing reported on as having
@@ -52,11 +51,15 @@ const TIE_RATE : f32 = 10.0;
 const FOLD_SETTLE : f32 = 0.5;   // s: material just let go of the log does not count as pile yet
 
 fn loadMatF(p : u32) -> mat3x3<f32> {
-  let b = p * 9u;
+  let b = p * MAT_STRIDE;
+  // F is floats 9 to 17 of the particle's 28: r0 = (a8, f0, f1, f2), r1 = (f3 .. f6), r2 = (f7, f8, c0, c1)
+  let r0 = mats[b + 2u];
+  let r1 = mats[b + 3u];
+  let r2 = mats[b + 4u];
   return mat3x3<f32>(
-    vec3<f32>(fbuf[b], fbuf[b + 3u], fbuf[b + 6u]),
-    vec3<f32>(fbuf[b + 1u], fbuf[b + 4u], fbuf[b + 7u]),
-    vec3<f32>(fbuf[b + 2u], fbuf[b + 5u], fbuf[b + 8u]));
+    vec3<f32>(r0.y, r1.x, r1.w),
+    vec3<f32>(r0.z, r1.y, r2.x),
+    vec3<f32>(r0.w, r1.z, r2.y));
 }
 
 fn pushOut(axisY : f32, axisZ : f32, R : f32, x : vec3<f32>, h : f32) -> vec3<f32> {
@@ -178,10 +181,12 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   let cr = matRows(C);
   let fr = matRows(F);
   let ar = matRows(affine);
-  let b = 9u * p;
-  for (var c = 0u; c < 9u; c++) {
-    cbuf[b + c] = cr[c];
-    fbuf[b + c] = fr[c];
-    abuf[b + c] = ar[c];
-  }
+  let b = MAT_STRIDE * p;
+  mats[b] = vec4<f32>(ar[0], ar[1], ar[2], ar[3]);
+  mats[b + 1u] = vec4<f32>(ar[4], ar[5], ar[6], ar[7]);
+  mats[b + 2u] = vec4<f32>(ar[8], fr[0], fr[1], fr[2]);
+  mats[b + 3u] = vec4<f32>(fr[3], fr[4], fr[5], fr[6]);
+  mats[b + 4u] = vec4<f32>(fr[7], fr[8], cr[0], cr[1]);
+  mats[b + 5u] = vec4<f32>(cr[2], cr[3], cr[4], cr[5]);
+  mats[b + 6u] = vec4<f32>(cr[6], cr[7], cr[8], 0.0);
 }

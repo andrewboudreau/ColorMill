@@ -1,10 +1,11 @@
 // P2G (design §3.2): scatter mass and momentum (APIC + stress) to the grid.
 // The affine matrix (-dt pVol 4/h^2 stressScale tau + pMass C) is premultiplied
-// by G2P, so this kernel reads one 9-float matrix per particle instead of C and
+// by G2P, so this kernel reads one matrix per particle (three vec4 loads) instead of C and
 // the stress separately.
 @group(0) @binding(1) var<storage, read> pos : array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read> vel : array<vec4<f32>>;
-@group(0) @binding(3) var<storage, read> abuf : array<f32>;   // P2G affine matrix, row-major (written by g2p)
+// MAT_STRIDE vec4 per particle (common.wgsl); the P2G affine matrix (written by g2p) is the first 9 floats, row-major
+@group(0) @binding(3) var<storage, read> mats : array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read> flags : array<u32>;
 @group(0) @binding(5) var<storage, read_write> gmass : array<atomic<i32>>;
 @group(0) @binding(6) var<storage, read_write> gmom : array<atomic<i32>>;
@@ -15,11 +16,14 @@
 const HAND_MASS : f32 = 4.0;
 
 fn loadAffine(p : u32) -> mat3x3<f32> {
-  let b = p * 9u;
+  let b = p * MAT_STRIDE;
+  let r0 = mats[b];        // a0 .. a3
+  let r1 = mats[b + 1u];   // a4 .. a7
+  let a8 = mats[b + 2u].x;
   return mat3x3<f32>(
-    vec3<f32>(abuf[b], abuf[b + 3u], abuf[b + 6u]),
-    vec3<f32>(abuf[b + 1u], abuf[b + 4u], abuf[b + 7u]),
-    vec3<f32>(abuf[b + 2u], abuf[b + 5u], abuf[b + 8u]));
+    vec3<f32>(r0.x, r0.w, r1.z),
+    vec3<f32>(r0.y, r1.x, r1.w),
+    vec3<f32>(r0.z, r1.y, a8));
 }
 
 @compute @workgroup_size(128)

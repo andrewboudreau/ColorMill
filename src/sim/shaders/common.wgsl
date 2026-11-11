@@ -5,8 +5,10 @@
 //   * grid node (i,j,k) has index n = (k*NY + j)*NX + i, position (i,j,k)*h
 //   * particle positions / velocities and the grid velocity are vec4 (xyz + pad)
 //     so a load is one 16-byte transaction instead of three scalar loads.
-//   * particle matrices (C, F, P2G affine) are stored row-major in flat f32 arrays:
-//     buf[p*9 + r*3 + c] = M[r][c] (math notation, row r / column c).
+//   * particle matrices (P2G affine, F, C) share one buffer, MAT_STRIDE vec4 per particle: seen as
+//     floats, the affine matrix is at 28p, F at 28p + 9 and C at 28p + 18, each row-major
+//     (float 3r + c = M[r][c], math notation, row r / column c), and float 27 is spare. A vec4
+//     store is one transaction where nine scalar stores were nine, which was most of G2P's stores.
 //     WGSL mat3x3 is column-major: m[c][r] is row r of column c.
 //   * fixed-point grid accumulators: mass 2^20, momentum 2^16, latent 2^18.
 
@@ -299,6 +301,9 @@ fn kirchhoffStressOf(F : mat3x3<f32>) -> mat3x3<f32> {
 }
 
 /// Store a mat3x3 row-major into a flat f32 array slot (9 floats per particle).
+/// vec4 per particle in the matrix buffer (affine, F, C; see the conventions at the top).
+const MAT_STRIDE : u32 = 7u;
+
 fn matRows(m : mat3x3<f32>) -> array<f32, 9> {
   return array<f32, 9>(m[0][0], m[1][0], m[2][0], m[0][1], m[1][1], m[2][1], m[0][2], m[1][2], m[2][2]);
 }

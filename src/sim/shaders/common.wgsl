@@ -53,9 +53,9 @@ const MASS_SCALE : f32 = 1048576.0;   // 2^20
 const MOM_SCALE  : f32 = 65536.0;     // 2^16
 const LAT_SCALE  : f32 = 262144.0;    // 2^18
 const PI : f32 = 3.14159265358979;
-// Pigment load of a masterbatch chunk relative to the base putty (pos.w per
-// particle; base = 1). Latents are averaged weighted by load, so a chunk tints
-// several times its own mass of base to a mid-tone instead of fading out.
+// Pigment load of a masterbatch chunk (pos.w per particle; the clear base
+// carries 0). Latents are averaged weighted by load, so the base has no say in
+// a mix's colour and only the load per unit mass thins it.
 const PIGMENT_LOAD : f32 = 12.0;
 
 // The material's box buffer (box.wgsl, design §3.6), u32 words. Cells and nodes share indices

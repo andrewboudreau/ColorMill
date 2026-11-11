@@ -81,13 +81,15 @@ the grid integrates gravity and applies the boundaries, and the particles
 gather the new velocities back and advect. A fixed number of substeps runs
 per rendered frame, so a run is deterministic whatever the frame rate.
 
-The material model is an **elastoplastic putty**: fixed-corotated elasticity
-with a deviatoric-only plastic return. Each step the shape part of the
-deformation gradient is clamped to a small yield band while the volume part is
-kept, so the pressure term keeps resisting compression and the nip cannot pack
-material beyond rest density. A short viscoplastic relaxation lets yielded
-material keep flowing under sustained shear instead of locking into a shear
-band. The bank slumps into a rolling bank, yields and flows under the nip's
+The material model is an **elasto-viscoplastic putty**: Hencky (logarithmic
+strain) elasticity with a deviatoric-only von Mises return. Each step the shape
+part of the strain is brought back toward the yield surface while the volume
+part is kept, so the pressure keeps resisting compression; beyond yield the
+stress follows a Herschel-Bulkley law, so yielded material flows as a
+shear-thinning fluid under sustained shear instead of locking into a shear
+band. The volume the pressure is computed from is tied to the density the grid
+measures, which keeps the nip from passing much more than the gap holds. The
+bank slumps into a rolling bank, yields and flows under the nip's
 shear, and does not spring back.
 
 The mill itself is a set of grid boundary conditions. The **front roll** is

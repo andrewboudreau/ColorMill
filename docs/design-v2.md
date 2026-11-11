@@ -181,27 +181,30 @@ Boundaries, applied in this order:
    the surface velocity. If `d < R + tackBand` (tackBand = gap + h, i.e. the
    thickness of the sheet the nip produces plus one cell of stencil slack):
    `v = vr` (full no-slip incl. normal — the sheet is carried around; in the
-   channel itself, `|y − axisY| < 0.06`, a node whose render-raster density
+   channel itself, `|y − axisY| < nipReach` with `nipReach = 1.5·gap`
+   (`NIP_REACH`; 0.06 at `low`, where it was tuned, and the same number of
+   gaps at the finer presets instead of 2 and 3), a node whose render-raster density
    (last frame's `pmass / 8`; a gap-wide channel at rest rasters to ~0.65 at
    `low`) is past 0.8 is let go of in proportion,
    `v = mix(vr, v_free, (density − 0.8)/0.4)`, so the material's pressure can
    push excess back up rather than the band conveying it through) **except
-   in the wedge above the nip** (`y > axisY + 0.06`, `z < frontAxisZ`, the
+   in the wedge above the nip** (`y > axisY + nipReach`, `z < frontAxisZ`, the
    region where the bank rests on the roll). There the roll is simply a
    no-slip wall: only the nodes inside its surface (`d ≤ R`) take `v = vr`,
    nothing else is prescribed, and g2p pushes particles out of the roll. The
    surface layer is dragged in as far as the particles' stencils reach (about
    a cell), the bank presses material onto the roll and packs the layer the
    nip is about to take, and when the channel cannot pass what arrives the
-   material's own pressure (ν = 0.47) holds the rest back and the bank rolls
+   material's own pressure (§4) holds the rest back and the bank rolls
    instead of being force-fed.
    Measured (particles per 0.35 rad of sheet; 1650 at `low`, 5550 at `medium`
    is a gap-thick sheet at rest density): `low` 1.2 L 2000–2700 in every bin,
    `low` 2.4 L 2200–2900, `medium` 1.2 L 7700–8300, all steady from 1.3 s to
    3.9 s, nothing dropped, the sheet rendered without a hole. The channel
-   itself is still velocity-prescribed, so it packs the sheet to 1.3–1.5× rest
-   density (more with a heavier bank); that is the remaining dishonesty of the
-   nip and it is bounded.
+   itself is still velocity-prescribed, and next to the rolls the particles
+   pack without their `F` recording it (those counts are 1.2–1.75× a gap-thick
+   rest sheet, and at `high` it was 2.2×); the density tie of §4 is what
+   bounds that now (1.08 / 1.20 / 1.25 at `low` / `medium` / `high`).
    Alternatives tried and rejected: Coulomb friction only (μ = 0.8) starves
    the nip once the bank is small, because the drag scales with the bank's
    weight (lacy, pulsing sheet); a hard tangential tack constraint through the
@@ -215,7 +218,7 @@ Boundaries, applied in this order:
    force-feeds and drops material off the underside; releasing the band's
    normal constraint where it is overpacked drops material off the underside
    too.
-2. **Back roller**. In the wedge above the nip (`y > axisY + 0.06`,
+2. **Back roller**. In the wedge above the nip (`y > axisY + nipReach`,
    `z > backAxisZ`) it is the same tacky no-slip wall as the front roll:
    nodes inside its surface (`d ≤ R`) take `v = vr`, so the bank is drawn in
    from both sides. Everywhere else it is a separating contact with Coulomb
@@ -238,10 +241,11 @@ For each non-kinematic particle:
 
 ```
 gather v_new = Σ wgt · vel[n]
+gather mass  = Σ wgt · m[n]                             (for the density tie, §4)
 gather C_new = (4/h²) · Σ wgt · outer(vel[n], dpos)     (MLS-MPM)
 v = v_new;  C = C_new
 F = (I + dt · C) · F
-F = plasticReturn(F)                            (§4)
+F = plasticReturn(F, mass, x)                   (§4)
 x += dt · v
 x = clamp(x, 1.5h, domain − 1.5h)
 x = pushOutOfRollers(x)   // hard safety: if inside a roller, project to R + 0.25h along n
@@ -355,60 +359,111 @@ the nip and shrinks again as the nip eats it.
 
 ---
 
-## 4. Material model: elastoplastic putty (fixed corotated + yield clamp)
+## 4. Material model: elasto-viscoplastic putty (Hencky + Herschel–Bulkley)
 
 This is the model that makes it a mill and not a puddle: the bank holds its
 shape under gravity, yields and flows under the nip's shear, and does not
-spring back.
+spring back. `src/sim/constitutive.ts` is a CPU mirror of the update in f64
+(`tests/constitutive.test.ts`: the return is idempotent, never raises the
+stress, keeps the volume, and steady simple shear reproduces the flow curve).
 
-Constants (in `config.material`):
+Constants (in `config.material`; URL overrides of the same names):
 
 | name | default | meaning |
 | --- | --- | --- |
 | `E` | 22 | Young's modulus (unit density; at 15 a sheet pulled off the roll by its edge sagged as a film and pigment chunks smeared, at 22 it holds as a slab with the chunks still lumps and the bank still rolls; 60 makes a rigid slab that starves the nip) |
-| `nu` | 0.47 | Poisson ratio (nearly incompressible, bulk modulus ≈ 80: at 0.35 the nip packed the putty to 1.5× rest density and carried 50% more than the gap allows; at 0.45 it still packed the sheet to 1.5× once the viscoplastic drag pulled the bank in, and the wrap ran short; at 0.49 (bulk modulus ≈ 500, dt at ~0.85 of the elastic CFL limit) the sheet was continuous at ~1.0–1.3× rest but the fed pile of a cut & roll blew up, speeds of 10–25; 0.47 is stable through a cut & roll) |
-| `thetaC` | 0.025 | plastic compression threshold |
-| `thetaS` | 0.05 | plastic stretch threshold (tensile cohesion; 0.0075 gives a lacy sheet after operator moves, 0.03 a continuous one that tears where it sticks when pulled by its edge, 0.05 pulls and folds as putty) |
-| `mu`, `lambda` | derived | `mu = E/(2(1+nu))`, `lambda = E·nu/((1+nu)(1−2nu))` |
+| `nu` | 0.47 | Poisson ratio. Bulk modulus `K = E/(3(1−2ν))` = 122, `λ` = 117, `μ` = 7.5. 0.45 (K = 73) leaves more margin under a cut & fold (clean at 1.3× the time step) and packs the nip more; 0.49 (K = 367) is past the time step's limit |
+| `yieldStress` | 0.58 | `τ_y`, yield stress in shear (von Mises: `sqrt(2)·μ·|dev ε|`, the τ_xy of the equivalent simple shear). The old stretch clamp `[0.975, 1.05]` gave 0.3–0.6 depending on direction; 0.58 is its stretch side |
+| `consistency` | 0.45 | `k` of the overstress |
+| `flowIndex` | 0.35 | `n` of the overstress (below 1: shear-thinning) |
+| `densityTolerance` | 0.1 | density tie: `J ≤ (1 + this)/ρ`; 0 turns it off |
+| `volumeMin`, `volumeMax` | 0.7, 1.4 | where the elastic volume saturates |
 
-Fixed corotated (Stomakhin 2013) with the MLS-MPM stress form:
+**Elasticity** is Hencky (logarithmic strain), which makes the return below
+exact and the pressure stiffen in compression:
 
 ```
 [U, Σ, V] = svd(F)                     (3×3, robust; see note)
-Rot = U · Vᵀ
-J = det(F) = Σ0·Σ1·Σ2
-P = 2mu·(F − Rot) + lambda·(J − 1)·J·F⁻ᵀ
-σ = (1/J) · P · Fᵀ                     (Cauchy stress, used in §3.2)
+ε = log Σ                              (principal Hencky strains; Σ clamped to [0.05, 20])
+ln J = ε0 + ε1 + ε2,   e = ε − ln J / 3
+τ = U · diag(2μ·e + K·ln J) · Uᵀ       (Kirchhoff stress = J·σ; what §3.2 scatters)
 ```
 
-Plastic return (after the F update in G2P) is **deviatoric only**: split the
-stretches into the volumetric part `J^(1/3)` and unit-volume deviatoric
-stretches `Σi / J^(1/3)`, clamp only the deviatoric stretches to
-`[1 − thetaC, 1 + thetaS]`, renormalise their product to 1 and put the volume
-back, then rebuild `F = U·diag(Σ)·Vᵀ`. No hardening. Clamping the raw
-singular values (the snow model) lets the material lose volume plastically,
-so the nip packs it to several times rest density and swallows the bank
-(docs/millref-notes.md §5a); putty yields in shape, not in volume, and the
-pressure term must keep resisting compression.
+The fixed corotated law this replaces has the pressure `λ(J − 1)J`, whose
+stiffness `λ(2J − 1)` falls as the putty is compressed and is zero at J = 1/2:
+the more the nip packed it the less it resisted. `K ln J` has the constant
+stiffness K in ln J.
 
-The return is **viscoplastic** (Perzyna): the deviatoric stretch beyond the
-yield range is not discarded at once but relaxes toward it,
-`dev = devC + clamp(dev − devC, ±DEV_CAP) · exp(−dt / TAU_VP)` with
-`TAU_VP` = 0.06 s and `DEV_CAP` = 1.0 (`g2p.wgsl`). For a short while the
-putty carries shear like a viscous fluid (effective viscosity ≈ 2μ·TAU_VP),
-so the drag of the roll surfaces reaches into the bank instead of stopping
-in a thin slip layer at the roll: a perfectly plastic bank sat over the back
-roll as a rigid lump moving at a fifth of roll speed while the rolls slid
-under it (the dead pocket that footage of a real mill does not show); with
-the relaxation its back half is drawn down into the nip at about half roll
-speed and the mass shifts toward the front roll. Measured at `low`, 2.4 L,
-z bands from the back roll to the front axis: mean speed of the back half
-0.05–0.2 → 0.4–0.57, the lump over the back roll clearing within 4 s. The
-extra drag would pack the sheet at the nip (1.5–1.8× rest at ν = 0.45, and
-the wrap then ran short, leaving a bare stretch of roll circulating), which
-is why ν went up: with a stiffer bulk modulus the excess is pushed back up
-the wedge instead of compressed through the gap (0.47; 0.49 was better still
-for the sheet but unstable under a cut & roll).
+**Plastic return** (after the F update in G2P): putty yields in shape, not in
+volume. The volume `ln J` is left alone and the deviatoric strain is brought
+back radially toward the von Mises surface. The return is viscoplastic, with
+a Herschel–Bulkley overstress: with `τ_tr = sqrt(2)·μ·|e|` the shear stress of
+the trial state, solve
+
+```
+τ + μ·dt·((τ − τ_y)/k)^(1/n) = τ_tr        for τ in [τ_y, τ_tr]
+e ← e · τ/τ_tr,     F ← U · exp(e + ln J / 3) · Vᵀ
+```
+
+by four Newton steps from above (`hbShear` in `common.wgsl`; the left side is
+increasing and convex, so it cannot overshoot). In steady shear at rate γ̇ the
+stress is the flow curve `τ = τ_y + k·γ̇ⁿ`: 0.58 at rest, 1.03 at 1/s, 1.6 at
+10/s, 2.8 at 100/s. So the flowing putty carries shear
+like a shear-thinning fluid and the drag of the rolls reaches into the bank
+instead of stopping in a slip layer at the roll surface, while the elastic
+strain it carries stays `τ/2μ` (the relaxation this replaces, a fixed 0.06 s
+time on the stretch, let the stored strain grow with the rate to its cap).
+Sweeps of `k` from 0.45 to 2 and `n` from 0.35 to 1 did not move the nip's
+count or flux by more than a few percent; `k` = 4 breaks up at `high`. Clamping
+the raw singular values (the snow model) lets the material lose volume
+plastically, so the nip packs it to several times rest density and swallows
+the bank (docs/millref-notes.md §5a).
+
+**Volume: the density tie.** `det F` only integrates the velocity gradient a
+particle saw. Next to the rolls (the hard push-out, the band's prescribed
+velocities) particles pack without `F` recording it: with J ≈ 0.95 in the
+sheet the grid measured 1.26 and 1.47 times rest density at `medium` and
+`high`, the pressure never saw it, and the nip passed 1.5–2.2 gaps of rest
+material where calendering theory allows 1.2–1.4. So G2P gathers the node
+mass it already reads, adds the rest mass the rolls displace from the
+particle's kernel (nodes inside a roll hold no particles: a smoothstep of the
+signed distance to each roll over ±1.45 cells, within 0.04 of the node-level
+integral, `tests/diagnostics.test.ts`), and caps the volume:
+
+```
+ρ = mass/(8·pMass) + rollGhost(x)
+ln J ← max(min(ln J, ln((1 + densityTolerance)/ρ)), ln J − TIE_RATE·dt)
+ln J ← clamp(ln J, ln volumeMin, ln volumeMax)
+```
+
+The tie only ever lowers J (a free surface under-reads ρ), and by at most
+`TIE_RATE` = 10 /s: applied in one substep it once threw the fed log of a cut
+& roll at `high`. The second line replaces the old reset of `F` to `I`
+outside J ∈ [0.5, 2], which dropped a particle's whole pressure in one
+substep and its shape history with it; only an `F` that is not a number
+resets now. With no bound at all a prescribed motion (the hand, the fed log)
+can store any amount of energy and a cut & fold blew up 10% past the preset's
+time step.
+
+Measured with `tools/perf/nip.mjs` (6 s of the default batch, then 5 windows;
+`low` / `medium` / `high`; the count is the sheet's particles over those of a
+gap-thick sheet at rest density, the flux is over `U·gap·ρ0·L`):
+
+| | fixed corotated, clamp, reset | Hencky + HB | + volume bounds, tie, `nipReach` |
+| --- | --- | --- | --- |
+| F resets /s | 27 / 483 / 7759 | 0 / 23 / 166 | 0 / 0 / 0 |
+| sheet count | 1.09 / 1.59 / 2.24 | 1.09 / 1.47 / 1.75 | 1.08 / 1.20 / 1.25 |
+| nip flux | 1.17 / 1.55 / 2.20 | 1.10 / 1.52 / 1.85 | 1.14 / 1.26 / 1.29 |
+| sheet density (grid) | 0.90 / 1.26 / 1.47 | 0.90 / 1.18 / 1.24 | 0.87 / 0.93 / 0.93 |
+| bank, back half / roll speed | 0.84 / 0.80 / 0.71 | 0.80 / 0.56 / 0.15 | 0.78 / 0.16 / 0.08 |
+| bank particles | 9157 / 31117 / 78920 | 8887 / 36899 / 129391 | 9179 / 53996 / 177765 |
+
+The last two rows are the price: a sheet that no longer hoards material
+leaves a bank several times larger at `medium` and `high`, and the back half
+of a large bank over the back roll is nearly static (the speed follows the
+bank's size, not `k` or `n`: at `low` with twice the batch both models give
+about 0.2). Pigment dropped on that bank takes longer to be drawn in. `low`
+(gap 1.28 cells, as at `high`) stays below the band at 1.08–1.14.
 
 SVD note: implement a 3×3 SVD as Jacobi eigen-decomposition of `FᵀF`
 (≤ 8 sweeps) to get `V` and `Σ²`, then `U = F·V·Σ⁻¹` with a guard for tiny
@@ -416,11 +471,19 @@ singular values, and fix the sign so `det(U)·det(V) > 0`. Alternatively use
 the polar decomposition for `Rot` and the eigendecomposition only for the
 clamp. Precision: f32 is fine.
 
-Stability: sound speed `c = sqrt((lambda + 2mu)/ρ)` with ρ = 1; the measured
-stable limit is `dt ≈ 0.8·h/sqrt(E)` (docs/millref-notes.md §2) and the
-presets use `0.4·h/sqrt(60)`, i.e. a safety factor of 2 at E = 60 and 4 at
-the default E = 22. Keep the constants of §4 the same across presets; only
-`dt` and `substepsPerFrame` change.
+Stability: the sound speed is `c = sqrt((λ + 2μ)/ρ)` = 11.5 with ρ = 1
+(`soundSpeed` in `mill.ts`), and with the Hencky law it does not change with
+J. All three presets run at `c·dt/h` = 0.59 (`courantNumber`; 0.65–0.67 with
+the material's own speed added). That is the margin, and it is not large: an
+earlier version of this paragraph claimed a safety factor of 4 from
+`0.8·h/sqrt(E)`, which leaves ν out; at ν = 0.47 `c` is 2.45·sqrt(E). Measured
+by scaling `dt` (`nip.mjs --dt-scale`): steady milling holds to about
+`c·dt/h` = 0.85; the operator moves are the tighter case, clean at 1.2× the
+preset's step on all three presets (a cut & fold then peaks at 1.2–1.5 of
+`2ωR`, at most one particle on the tray) and failing at 1.3× at `high`. Keep
+the constants of §4 the same across presets; only `dt` and
+`substepsPerFrame` change, and a stiffer `E` or `nu` needs `dt` scaled by
+`1/c`.
 
 ---
 

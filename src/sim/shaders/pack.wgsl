@@ -46,7 +46,12 @@ fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>) {
   let w = decodeFixed(pload[n], MASS_SCALE);
   let cov = decodeFixed(pcov[n], MASS_SCALE);
   var l : array<f32, 7>;
-  for (var c = 0u; c < 7u; c++) { l[c] = decodeFixed(plat[7u * n + c], LAT_SCALE) * norm; }
+  if (w > 0.0) {
+    for (var c = 0u; c < 7u; c++) { l[c] = decodeFixed(plat[7u * n + c], LAT_SCALE) * norm; }
+  } else {
+    // no pigment here (most texels: clear base and empty space): nothing to read
+    for (var c = 0u; c < 7u; c++) { l[c] = 0.0; }
+  }
   let coord = vec3<i32>(gid);
   textureStore(volA, coord, vec4<f32>(w * norm, l[0], l[1], l[2]));
   textureStore(volB, coord, vec4<f32>(l[3], l[4], l[5], l[6]));

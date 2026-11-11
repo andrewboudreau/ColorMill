@@ -50,6 +50,15 @@ export const WHITE_LATENT: Latent = [0, 0, 0, 1, 0.00481862, 0.00021851, 0.00295
  */
 export const LAMINA_PER_SUBSTEP = false;
 
+/**
+ * How far past the roll surfaces the nip's velocity profile is carried on into the rolls' nodes, in gaps
+ * (grid.wgsl, design §3.3). 0 holds the nodes inside a roll at that roll's surface speed and the particles'
+ * C then reads 0.6 to 0.67 of the nominal shear rate; 0.6 covers the stencil of a particle in the middle of
+ * a 1.3 cell gap and reads 0.9 to 0.95. 1.2 and more measure the same in steady milling, and at `high` the
+ * fastest particle of a cut & fold went from 0.96 to 1.22 of twice the roll speed.
+ */
+export const NIP_PROFILE_REACH = 0.6;
+
 /** The matrix buffer (common.wgsl: MAT_STRIDE vec4 = 28 floats a particle): where the P2G affine matrix, F and C start, 9 floats each. */
 export const MAT_FLOATS = 28;
 export const MAT_AFFINE = 0;
@@ -761,7 +770,8 @@ export class GpuMpm implements GpuMpmSim {
     // held pigment chunks (chunk.wgsl): a medium chunk sinks its own height in chunkFeed seconds
     // carrying two particles' mass is the bank
     // (two particles' mass at a node is the bank under it)
-    f.set([p.chunkFeed > 0 ? (2 * PIGMENT_CHUNK_RADIUS) / p.chunkFeed : 0, 2 * pMass, 0, 0], o + 56);
+    // the nip's shear (grid.wgsl): the friction ratio less one, and the reach of the profile past the roll surfaces
+    f.set([p.chunkFeed > 0 ? (2 * PIGMENT_CHUNK_RADIUS) / p.chunkFeed : 0, 2 * pMass, p.frictionRatio - 1, NIP_PROFILE_REACH], o + 56);
     // the putty's flow law (common.wgsl hbShear): 1 / n; the density tie and the volume bounds (g2p.wgsl)
     f.set([1 / Math.min(Math.max(mat.flowIndex, 0.05), 1), mat.densityTolerance, Math.log(mat.volumeMin) / 3, Math.log(mat.volumeMax) / 3], o + 60);
   }

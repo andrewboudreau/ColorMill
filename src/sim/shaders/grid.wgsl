@@ -16,6 +16,12 @@
 // far back from the crown along the front face, in radians.
 const PEEL_ARC : f32 = 0.7;
 
+// The nip's shear (design §3.3, "Friction ratio"): the band's nodes in the channel carry the back roll's extra
+// surface speed in proportion to their place across the gap, down to NIP_EXIT below the roll axes' height in
+// full and fading out by the channel's lower end.
+const NIP_HALF : f32 = 0.06;   // the channel's half height (the same 0.06 as below)
+const NIP_EXIT : f32 = 0.03;
+
 @compute @workgroup_size(4, 4, 4)
 fn main(@builtin(global_invocation_id) lid : vec3<u32>) {
   let gid = lid + vec3<u32>(box[BOX_GRID], box[BOX_GRID + 1u], box[BOX_GRID + 2u]);
@@ -68,10 +74,28 @@ fn main(@builtin(global_invocation_id) lid : vec3<u32>) {
   //    hand holds can come off the roll instead of the hand tearing out of the sheet (the band
   //    clamps every node the sheet sits on, so the hand could pull only through the outermost
   //    layer of nodes and the putty gave way there).
+  //    Friction ratio: in the channel the band is not a plug at the front roll's speed. Its velocity
+  //    there is the front roll's rotation plus the back roll's extra surface speed times s, the
+  //    node's place across the local gap (0 on the front roll's surface, 1 on the back roll's): a
+  //    Couette profile, so the material against the back roll goes through at the back roll's
+  //    speed, the shear rate across the gap is (U_back - U_front) / gap and the channel conveys at
+  //    the mean of the two speeds. s is not clamped at the surfaces: the nodes inside the rolls
+  //    carry the line on (ghost nodes, as far as P.chunk.w gaps), so what a particle in the gap
+  //    gathers, velocity and C, is the linear profile itself and not one flattened at the walls
+  //    (clamped, C held 0.6 to 0.67 of the nominal shear rate; carried on, 0.9). The profile is
+  //    imposed, not solved: a gap of 1.3 cells has one layer of nodes in it. With equal roll
+  //    speeds the term is zero and the band is the plug it was.
   let df = rollerDist(P.front.x, P.front.y, p);
+  let db = rollerDist(P.back.x, P.back.y, p);
   let inWedge = p.y > P.front.x + 0.06 && p.z < P.front.y;
   if (df < R + P.bands.x && !(inWedge && df > R)) {
-    let vr = rollerVel(P.front.x, P.front.y, P.front.z, p);
+    var vr = rollerVel(P.front.x, P.front.y, P.front.z, p);
+    let dyN = p.y - P.front.x;
+    if (abs(dyN) < NIP_HALF && p.z < P.front.y && p.z > P.back.y) {
+      let s = clamp((df - R) / max(df + db - 2.0 * R, 0.25 * h), -P.chunk.w, 1.0 + P.chunk.w);
+      let across = s * smoothstep(-NIP_HALF, -NIP_EXIT, dyN);
+      vr += (across * P.chunk.z * R / max(df, 0.5 * R)) * vr;
+    }
     let inChannel = abs(p.y - P.front.x) < 0.06 && p.z < P.front.y && df > R;
     let peel = P.fold.x > 1.5 && df > R && p.z >= P.front.y && p.y - P.front.x > df * cos(PEEL_ARC);
     if (peel) {
@@ -93,7 +117,6 @@ fn main(@builtin(global_invocation_id) lid : vec3<u32>) {
   //    material resting against the back roll. Everywhere else it is a
   //    separating contact with Coulomb friction, so the sheet peels off it cleanly
   //    below the nip and follows the (stickier) front roll.
-  let db = rollerDist(P.back.x, P.back.y, p);
   let inWedgeB = p.y > P.back.x + 0.06 && p.z > P.back.y;
   if (inWedgeB && db <= R) {
     v = rollerVel(P.back.x, P.back.y, P.back.z, p);

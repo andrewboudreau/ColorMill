@@ -40,7 +40,12 @@ try {
       preset, ...info, resets: mean((w) => w.resetsPerSecond), pushOuts: mean((w) => w.pushOutsPerSecond),
       sheet: reg('sheet'), bank: reg('bank'), sheetCount: mean((w) => w.sheetCount), bankBack: mean((w) => w.bankBackSpeed), bankFront: mean((w) => w.bankFrontSpeed), flux: mean((w) => w.flux),
       ratio: await page.evaluate(() => window.__colormill.sim.params.frictionRatio),
-      nip: Object.fromEntries(['n', 'meanSpeed', 'speedDifference', 'speedDifferenceOverNominal', 'shearRate', 'shearRateOverNominal', 'strainRate'].map((k) => [k, mean((w) => w.nip[k])])),
+      // the nip's profile over the windows that had material in the nip (the start-up's gap in the sheet comes round
+      // for a few revolutions and a window can find the nip empty; the count is over every window)
+      nip: Object.fromEntries(['n', 'meanSpeed', 'speedDifference', 'speedDifferenceOverNominal', 'shearRate', 'shearRateOverNominal', 'strainRate'].map((k) => {
+        const v = win.map((w) => w.nip[k]).filter((x) => k === 'n' || Number.isFinite(x));
+        return [k, v.length ? v.reduce((a, x) => a + x, 0) / v.length : NaN];
+      })),
       thickness: mean((w) => w.thicknessGaps), vmax: max((w) => w.maxSpeed), vOverLimit: max((w) => w.maxSpeedOverLimit),
       courant: max((w) => w.courant), tray: max((w) => w.tray), Jmin: Math.min(...win.map((w) => w.Jmin)), Jmax: max((w) => w.Jmax)
     };

@@ -42,6 +42,10 @@ export interface NipDiagnostics {
   readonly sheet: RegionStats;
   /** the bank: particles between the roll axes above the nip channel */
   readonly bank: RegionStats;
+  /** mean speed of the bank's back half (z behind the nip plane) and front half, over the front roll's surface speed:
+   *  whether the rolls' drag reaches into the bank (design §4: the back half at about half roll speed) */
+  readonly bankBackSpeed: number;
+  readonly bankFrontSpeed: number;
   /** sheet particles per unit arc over those of a gap-thick sheet at rest density (calendering theory: 1.2 to 1.4) */
   readonly sheetCount: number;
   /** net particles through the nip plane per second over U_front · gap · rho0 · L */
@@ -152,6 +156,7 @@ export function nipDiagnostics(a: DiagSnapshot, b: DiagSnapshot, o: DiagOptions)
   const sJ: number[] = [], sRho: number[] = [], sGhost: number[] = [], depth: number[] = [];
   const bJ: number[] = [], bRho: number[] = [], bGhost: number[] = [];
   let vmax = 0, tray = 0, Jmin = Infinity, Jmax = -Infinity;
+  let backSpeed = 0, backN = 0, frontSpeed = 0, frontN = 0;
   const tackReach = R + gap + 4 * h;
   for (let p = 0; p < n; p++) {
     const x = pos[3 * p], y = pos[3 * p + 1], z = pos[3 * p + 2];
@@ -171,6 +176,10 @@ export function nipDiagnostics(a: DiagSnapshot, b: DiagSnapshot, o: DiagOptions)
     const inBand = x > DIAG_X_BAND[0] && x < DIAG_X_BAND[1];
     const inSheet = inBand && d < tackReach && th > DIAG_ARC[0] && th < DIAG_ARC[1];
     const inBank = y > ay + 0.06 && z > azB && z < azF;
+    if (inBank) {
+      const sp = Math.hypot(vx, vy, vz);
+      if (z < GEOMETRY.nipZ) { backSpeed += sp; backN++; } else { frontSpeed += sp; frontN++; }
+    }
     if (!inSheet && !inBank) continue;
     weights(p);
     let rho = 0, rhoG = 0;
@@ -213,6 +222,8 @@ export function nipDiagnostics(a: DiagSnapshot, b: DiagSnapshot, o: DiagOptions)
     pushOutsPerSecond: o.pushOuts === undefined ? NaN : o.pushOuts / o.seconds,
     sheet: { n: sJ.length, J: spread(sJ), rho: spread(sRho), rhoGhost: spread(sGhost) },
     bank: { n: bJ.length, J: spread(bJ), rho: spread(bRho), rhoGhost: spread(bGhost) },
+    bankBackSpeed: backSpeed / Math.max(backN, 1) / Uf,
+    bankFrontSpeed: frontSpeed / Math.max(frontN, 1) / Uf,
     sheetCount: sJ.length / restSheet,
     flux,
     thicknessGaps: depth.length ? depth[Math.floor(0.9 * (depth.length - 1))] / gap : NaN,

@@ -2,7 +2,8 @@
 // and print what the nip does to the material's volume. Averages `--windows` windows of `--frames` frames
 // after `--settle` sim seconds; with --moves it then makes a cut & fold and a cut & roll and reports
 // whether the material came through them.
-// usage: node tools/perf/nip.mjs [low medium high] [--settle=5] [--windows=5] [--frames=20] [--moves] [--json=out.json] [--query=&x=y]
+// usage: node tools/perf/nip.mjs [low medium high] [--settle=5] [--windows=5] [--frames=20] [--moves] [--json=out.json] [--query=&x=y] [--dt-scale=1]
+// --dt-scale multiplies the preset's time step (substeps unchanged): how far the explicit step is from its stability limit
 import { writeFileSync } from 'node:fs';
 import { launch, openApp } from './lib.mjs';
 
@@ -13,13 +14,15 @@ if (!presets.length) presets.push('low', 'medium', 'high');
 const SETTLE = Number(opt('settle', 5)), WINDOWS = Number(opt('windows', 5)), FRAMES = Number(opt('frames', 20));
 const QUERY = opt('query', '');
 const MOVES = args.includes('--moves');
+const DT_SCALE = Number(opt('dt-scale', 1));
 
 const ctx = await launch();
 const rows = [];
 try {
   for (const preset of presets) {
     const page = await openApp(ctx.browser, ctx.server.baseUrl, preset, { width: 640, height: 480, query: QUERY });
-    const spf = await page.evaluate(() => window.__colormill.stats().simSecondsPerFrame);
+    if (DT_SCALE !== 1) await page.evaluate((k) => { const s = window.__colormill.sim; s.quality = { ...s.quality, dt: s.quality.dt * k }; }, DT_SCALE);
+    const spf = (await page.evaluate(() => window.__colormill.stats().simSecondsPerFrame)) * DT_SCALE;
     const step = async (frames) => { for (let left = frames; left > 0; left -= 100) await page.evaluate((n) => window.__colormill.stepFrames(n), Math.min(100, left)); };
     await step(Math.round(SETTLE / spf));
     const win = [];
@@ -35,7 +38,7 @@ try {
     });
     const row = {
       preset, ...info, resets: mean((w) => w.resetsPerSecond), pushOuts: mean((w) => w.pushOutsPerSecond),
-      sheet: reg('sheet'), bank: reg('bank'), sheetCount: mean((w) => w.sheetCount), flux: mean((w) => w.flux),
+      sheet: reg('sheet'), bank: reg('bank'), sheetCount: mean((w) => w.sheetCount), bankBack: mean((w) => w.bankBackSpeed), bankFront: mean((w) => w.bankFrontSpeed), flux: mean((w) => w.flux),
       thickness: mean((w) => w.thicknessGaps), vmax: max((w) => w.maxSpeed), vOverLimit: max((w) => w.maxSpeedOverLimit),
       courant: max((w) => w.courant), tray: max((w) => w.tray), Jmin: Math.min(...win.map((w) => w.Jmin)), Jmax: max((w) => w.Jmax)
     };
@@ -78,6 +81,7 @@ const lines = [
   ['bank density (ghost)', ...rows.map((r) => tri(r.bank.rhoGhost))],
   ['bank density (raw gather)', ...rows.map((r) => tri(r.bank.rho))],
   ['bank particles', ...rows.map((r) => f(r.bank.n, 0))],
+  ['bank speed back / front half (/ U)', ...rows.map((r) => `${f(r.bankBack)} / ${f(r.bankFront)}`)],
   ['sheet count / gap-thick rest sheet', ...rows.map((r) => f(r.sheetCount))],
   ['nip flux / (U gap rho0 L)', ...rows.map((r) => f(r.flux))],
   ['sheet thickness p90 / gap', ...rows.map((r) => f(r.thickness))],
@@ -92,7 +96,7 @@ if (MOVES) {
   lines.push(['cut & roll: same', ...rows.map((r) => mv(r.moves.roll))]);
   lines.push(['3 s after: count, flux, tray', ...rows.map((r) => `${f(r.moves.after.sheetCount)}, ${f(r.moves.after.flux)}, ${r.moves.after.tray}`)]);
 }
-console.log(`milled ${SETTLE} s, then ${WINDOWS} windows of ${FRAMES} frames${QUERY ? `, query ${QUERY}` : ''}`);
+console.log(`milled ${SETTLE} s, then ${WINDOWS} windows of ${FRAMES} frames${QUERY ? `, query ${QUERY}` : ''}${DT_SCALE !== 1 ? `, dt x ${DT_SCALE}` : ''}`);
 const w0 = Math.max(...lines.map((l) => l[0].length));
 for (const l of lines) console.log('| ' + l[0].padEnd(w0) + ' | ' + l.slice(1).map((c) => c.padEnd(28)).join(' | ') + ' |');
 const json = opt('json', '');

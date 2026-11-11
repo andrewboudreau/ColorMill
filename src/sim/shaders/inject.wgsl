@@ -31,7 +31,7 @@ struct Inject {
 // down unthinned, as laminae as thick as the dollop is across, their normal along its radius (the way its load
 // falls off).
 @group(0) @binding(5) var<storage, read_write> lam : array<vec4<f32>>;
-@group(0) @binding(6) var<storage, read_write> mixs : array<vec2<f32>>;
+@group(0) @binding(6) var<storage, read_write> mixs : array<vec4<f32>>;
 
 @compute @workgroup_size(128)
 fn probeColumn(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
@@ -70,7 +70,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   if (I.mode.x == 1u) {
     // ... and no laminae: any normal, nothing thinned, nothing blended
     lam[p] = vec4<f32>(seedDir(p), 0.0);
-    mixs[p] = vec2<f32>(0.0, 0.0);
+    mixs[p] = vec4<f32>(0.0);
     // set-all: the clear base carries no pigment; its latent slot is set but has no weight
     for (var c = 0u; c < 7u; c++) { lat[7u * p + c] = zp[c]; }
     pos[p].w = 0.0;
@@ -81,9 +81,11 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   let gained = a * PIGMENT_LOAD;
   let wNew = kept + gained;
   let lnS0 = log(select(2.0 * I.center.w, I.lamina.w, I.lamina.w > 0.0));
-  let blend = laminaTakeFresh(lam[p], mixs[p], kept, gained, radial, lnS0);
+  let mx = mixs[p];
+  let blend = laminaTakeFresh(lam[p], mx.xy, kept, gained, radial, lnS0);
   lam[p] = blend.lam;
-  mixs[p] = blend.mixs;
+  // fresh masterbatch is undispersed: agglomerates the nip has yet to break down (design §5)
+  mixs[p] = vec4<f32>(blend.mixs, undispersedTakeFresh(mx.z, 1.0 - a, gained, wNew), 0.0);
   if (wNew > 1e-9) {
     for (var c = 0u; c < 7u; c++) {
       lat[7u * p + c] = (kept * lat[7u * p + c] + gained * zp[c]) / wNew;

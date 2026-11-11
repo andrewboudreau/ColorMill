@@ -15,15 +15,17 @@
 @group(0) @binding(5) var<storage, read_write> pload : array<atomic<i32>>;
 // Pigment coverage (colour raster only): the mass of pigment-carrying particles per node, so the
 // renderer can tell a cell that is one-eighth masterbatch (a lamina edge) from one that is evenly
-// tinted, which the load ratio alone cannot. The solver-grid kernel binds a small dummy here and
-// never writes it (nothing reads coverage on the solver grid).
+// tinted, which the load ratio alone cannot; and, in the same buffer (2 per node: coverage, then this),
+// the UNDISPERSED load, the part of the node's pigment load still in agglomerates (design §5), which
+// the renderer draws at a fraction of its tinting strength and as specks. The solver-grid kernel
+// binds a small dummy here and never writes it (nothing reads either on the solver grid).
 @group(0) @binding(6) var<storage, read_write> pcov : array<atomic<i32>>;
 // the material's box (box.wgsl): the colour raster's lattice (BOX_FINE)
 @group(0) @binding(7) var<storage, read> box : array<u32>;
 // the lamina state per particle (lamina.wgsl; lamina_common.wgsl is concatenated before this file):
 // normal xyz and q = ln(s / s0), then ln s0 and the exchange's reference; only the colour raster reads them
 @group(0) @binding(8) var<storage, read> lam : array<vec4<f32>>;
-@group(0) @binding(9) var<storage, read> mixs : array<vec2<f32>>;
+@group(0) @binding(9) var<storage, read> mixs : array<vec4<f32>>;
 
 // A particle counts as covered (pigment) above this load. Dispersion relaxes every particle of a
 // milled few-percent batch toward load ~1, and that must still count as covered so a homogeneous
@@ -41,6 +43,9 @@ fn scatterAt(p : u32, x : vec3<f32>, scale : f32, ink : f32, invh : f32, origin 
   // real weight: it whitened thin pigment and, through disperse, tinted clear material from nothing.)
   let load = max(pos[p].w, 0.0) * ink;
   let inked = load > 0.0;
+  // the undispersed part of that load, drawn with the same ink (so a tap carries the particle's own fraction)
+  var und = clamp(mixs[p].z, 0.0, max(pos[p].w, 0.0)) * ink;
+  if (isBad(und)) { und = 0.0; }
   let covered = withCov && pos[p].w > COVERAGE_MIN_LOAD;
   var z : array<f32, 7>;
   for (var c = 0u; c < 7u; c++) { z[c] = lat[7u * p + c]; }
@@ -59,9 +64,10 @@ fn scatterAt(p : u32, x : vec3<f32>, scale : f32, ink : f32, invh : f32, origin 
         let c = clamp(base + o, vec3<i32>(0), nmax);
         let n = (u32(c.z) * u32(dims.y) + u32(c.y)) * u32(dims.x) + u32(c.x);
         atomicAdd(&pmass[n], encodeFixed(wgt, MASS_SCALE));
-        if (covered) { atomicAdd(&pcov[n], encodeFixed(wgt, MASS_SCALE)); }
+        if (covered) { atomicAdd(&pcov[2u * n], encodeFixed(wgt, MASS_SCALE)); }
         if (inked) {
           atomicAdd(&pload[n], encodeFixed(wgt * load, MASS_SCALE));
+          if (withCov && und > 0.0) { atomicAdd(&pcov[2u * n + 1u], encodeFixed(wgt * und, MASS_SCALE)); }
           for (var cc = 0u; cc < 7u; cc++) {
             atomicAdd(&plat[7u * n + cc], encodeFixed(wgt * load * z[cc], LAT_SCALE));
           }

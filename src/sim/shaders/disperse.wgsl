@@ -13,7 +13,10 @@
 // mirror). k = P.part.w (MillParams.dispersion), 1 for the argument above.
 //
 // What is transported is the conserved pair itself: the pigment load w (pos.w) and the load-weighted
-// latent w·z (seven channels), and with the pigment its lamina state (load-weighted q and ln s).
+// latent w·z (seven channels), and with the pigment its lamina state (load-weighted q and ln s) and
+// its UNDISPERSED part u (mixs.z, the load still in agglomerates): an amount like w, pooled and shared
+// out the same way, so the exchange moves agglomerates with the pigment that holds them and neither
+// makes nor breaks any (lamina.wgsl has the kinetics that do).
 //
 //   mark_ (scatter)  each particle with beta > 0 raises the 8 nodes round it to its beta (a max).
 //   give_ (scatter)  each particle has a rate alpha: its own beta, or, for a particle with room for
@@ -47,11 +50,11 @@
 @group(0) @binding(2) var<storage, read_write> lat : array<f32>;
 @group(0) @binding(3) var<storage, read> flags : array<u32>;
 @group(0) @binding(4) var<storage, read_write> lam : array<vec4<f32>>;
-@group(0) @binding(5) var<storage, read_write> mixs : array<vec2<f32>>;
+@group(0) @binding(5) var<storage, read_write> mixs : array<vec4<f32>>;
 @group(0) @binding(6) var<storage, read_write> xcap : array<atomic<i32>>;    // sum of N · alpha · m
 @group(0) @binding(7) var<storage, read_write> xload : array<atomic<i32>>;   // sum of N · alpha · w
 @group(0) @binding(8) var<storage, read_write> xlat : array<atomic<i32>>;    // sum of N · alpha · w · z, 7 per node
-@group(0) @binding(9) var<storage, read_write> xq : array<atomic<i32>>;      // sum of N · alpha · w · (q, ln(s / delta)), 2 per node
+@group(0) @binding(9) var<storage, read_write> xq : array<atomic<i32>>;      // 3 per node: sums of N · alpha · w · (q, ln(s / delta)), and of N · alpha · u
 @group(0) @binding(10) var<storage, read_write> xbeta : array<atomic<u32>>;  // max of beta over the particles round the node (float bits)
 
 // Fixed point of the exchange terms, 2^21: a node's pool holds up to 1024 (mass · load · alpha;
@@ -76,6 +79,13 @@ fn ownBeta(p : u32) -> f32 {
   let ref_ = min(mixs[p].y, lnSpacing());
   if (isBad(lnS) || isBad(ref_) || !(lnS < ref_)) { return 0.0; }
   return clamp(1.0 - exp(k * (lnS - ref_)), 0.0, 1.0);
+}
+
+/// The undispersed load of particle p, whose load is w: never more than the load.
+fn undispersedOf(p : u32, w : f32) -> f32 {
+  let u = mixs[p].z;
+  if (isBad(u)) { return 0.0; }
+  return clamp(u, 0.0, w);
 }
 
 /// The 8 nodes round a particle and their trilinear weights: the solver-grid raster's stencil
@@ -135,6 +145,7 @@ fn give_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
   for (var c = 0u; c < 7u; c++) { z[c] = lat[7u * p + c]; }
   let q = clamp(lam[p].w, LAMINA_Q_MIN, LAMINA_Q_MAX);
   let rel = relThickness(p);
+  let u = undispersedOf(p, w);
   for (var i = 0u; i < 8u; i++) {
     let a = st.weight[i] * alpha;
     let cap = encodeFixed(a * P.part.y, EX_SCALE);
@@ -142,12 +153,13 @@ fn give_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
     let n = st.node[i];
     atomicAdd(&xcap[n], cap);
     if (w > 0.0) {
+      atomicAdd(&xq[3u * n + 2u], encodeFixed(a * u, EX_SCALE));
       atomicAdd(&xload[n], encodeFixed(a * w, EX_SCALE));
       for (var c = 0u; c < 7u; c++) {
         atomicAdd(&xlat[7u * n + c], encodeFixed(a * w * z[c], EX_SCALE));
       }
-      atomicAdd(&xq[2u * n], encodeFixed(a * w * q, XQ_SCALE));
-      atomicAdd(&xq[2u * n + 1u], encodeFixed(a * w * rel, XQ_SCALE));
+      atomicAdd(&xq[3u * n], encodeFixed(a * w * q, XQ_SCALE));
+      atomicAdd(&xq[3u * n + 1u], encodeFixed(a * w * rel, XQ_SCALE));
     }
   }
 }
@@ -168,6 +180,8 @@ fn take_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
   var inW = 0.0;            // what it takes, in counts
   var inQ = 0.0;            // ... and the lamina state that comes with it (XQ counts)
   var inR = 0.0;
+  let u = undispersedOf(p, w);
+  var du = 0.0;             // change of the undispersed load, in fixed-point counts
   for (var i = 0u; i < 8u; i++) {
     // the very terms give_ added (the same expressions on the same inputs)
     let a = st.weight[i] * alpha;
@@ -179,13 +193,15 @@ fn take_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
     let got = share * f32(atomicLoad(&xload[n]));
     dw += got;
     inW += got;
-    inQ += share * f32(atomicLoad(&xq[2u * n]));
-    inR += share * f32(atomicLoad(&xq[2u * n + 1u]));
+    inQ += share * f32(atomicLoad(&xq[3u * n]));
+    inR += share * f32(atomicLoad(&xq[3u * n + 1u]));
+    du += share * f32(atomicLoad(&xq[3u * n + 2u]));
     for (var c = 0u; c < 7u; c++) { dq[c] += share * f32(atomicLoad(&xlat[7u * n + c])); }
     if (w > 0.0) {
       let gave = f32(encodeFixed(a * w, EX_SCALE));
       dw -= gave;
       outW += gave;
+      du -= f32(encodeFixed(a * u, EX_SCALE));
       for (var c = 0u; c < 7u; c++) { dq[c] -= f32(encodeFixed(a * w * z[c], EX_SCALE)); }
     }
   }
@@ -214,10 +230,13 @@ fn take_(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups
     let mixedNew = lnD + (kept * clamp(mixedOwn - lnD, -LAMINA_REL_MAX, LAMINA_REL_MAX) + inR / XQ_SCALE) / total;
     if (!isBad(q) && !isBad(lnSNew) && !isBad(mixedNew)) {
       lam[p] = vec4<f32>(st0.xyz, q);
-      mixs[p] = vec2<f32>(lnSNew - q, min(mixedNew, lnSNew));
+      mixs[p] = vec4<f32>(lnSNew - q, min(mixedNew, lnSNew), mx.zw);
     }
   } else if (!isBad(mixedOwn)) {
-    mixs[p] = vec2<f32>(mx.x, mixedOwn);
+    mixs[p] = vec4<f32>(mx.x, mixedOwn, mx.zw);
   }
+  // the agglomerates that came and went with the pigment
+  let uNew = u + du / EX_SCALE;
+  mixs[p].z = select(clamp(uNew, 0.0, wNew), 0.0, isBad(uNew));
   pos[p].w = wNew;
 }

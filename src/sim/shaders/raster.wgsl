@@ -1,6 +1,7 @@
-// Pigment raster (design §3.5): scatter particle mass and mass-weighted latent
-// to the node accumulators used by disperse and pack. Kinematic particles are
-// included (they carry pigment and must be visible).
+// Pigment raster (design §3.5): scatter particle mass, pigment load and load-weighted
+// latent to the node accumulators used by disperse and pack. Kinematic particles are
+// included (they carry pigment and must be visible). The clear base has load 0 and
+// scatters mass only: its latent slot has no weight anywhere.
 // Uses the tight 8-node trilinear stencil (not the solver's 27-node quadratic
 // one): pigment streaks in a milled sheet are one or two cells thick, and the
 // wide kernel averaged them into the surrounding white before they were drawn.
@@ -31,7 +32,10 @@ const COVERAGE_MIN_LOAD : f32 = 0.3;
 /// colour raster only).
 fn scatterAt(p : u32, x : vec3<f32>, scale : f32, ink : f32, invh : f32, origin : vec3<i32>, dims : vec3<i32>, withCov : bool) {
   let pMass = P.part.y;
-  let load = max(pos[p].w, 1e-3) * ink;
+  // no floor: a clear particle (load 0) adds mass only. (A floor of 1e-3 gave the base's white latent
+  // real weight: it whitened thin pigment and, through disperse, tinted clear material from nothing.)
+  let load = max(pos[p].w, 0.0) * ink;
+  let inked = load > 0.0;
   let covered = withCov && pos[p].w > COVERAGE_MIN_LOAD;
   var z : array<f32, 7>;
   for (var c = 0u; c < 7u; c++) { z[c] = lat[7u * p + c]; }
@@ -50,10 +54,12 @@ fn scatterAt(p : u32, x : vec3<f32>, scale : f32, ink : f32, invh : f32, origin 
         let c = clamp(base + o, vec3<i32>(0), nmax);
         let n = (u32(c.z) * u32(dims.y) + u32(c.y)) * u32(dims.x) + u32(c.x);
         atomicAdd(&pmass[n], encodeFixed(wgt, MASS_SCALE));
-        atomicAdd(&pload[n], encodeFixed(wgt * load, MASS_SCALE));
         if (covered) { atomicAdd(&pcov[n], encodeFixed(wgt, MASS_SCALE)); }
-        for (var cc = 0u; cc < 7u; cc++) {
-          atomicAdd(&plat[7u * n + cc], encodeFixed(wgt * load * z[cc], LAT_SCALE));
+        if (inked) {
+          atomicAdd(&pload[n], encodeFixed(wgt * load, MASS_SCALE));
+          for (var cc = 0u; cc < 7u; cc++) {
+            atomicAdd(&plat[7u * n + cc], encodeFixed(wgt * load * z[cc], LAT_SCALE));
+          }
         }
       }
     }

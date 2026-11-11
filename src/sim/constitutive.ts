@@ -7,6 +7,7 @@
  *   trial   F <- (I + dt C) F,  [U, S, V] = svd(F),  eps = log S
  *   split   lnJ = tr eps,  e = eps - lnJ / 3,  tau_tr = sqrt(2) mu |e|     (the shear stress of the state)
  *   return  tau_tr > tau_y:  solve  tau + mu dt ((tau - tau_y) / k)^(1/n) = tau_tr,  e <- e tau / tau_tr
+ *   volume  lnJ <- clamp(min(lnJ, ln((1 + tol) / density)), ln volumeMin, ln volumeMax)
  *   F <- U exp(e + lnJ / 3) V^T,   Kirchhoff stress  U diag(2 mu e + K lnJ) U^T
  *
  * In steady simple shear at rate g the plastic rate equals g, so the shear stress is the
@@ -54,14 +55,20 @@ export function shearStress(eps: Vec3, m: MaterialConstants): number {
   return Math.SQRT2 * lameParameters(m).mu * Math.hypot(e[0], e[1], e[2]);
 }
 
-/** The plastic return on principal Hencky strains: radial in the deviatoric plane, the volume untouched. */
-export function plasticReturn(eps: Vec3, m: MaterialConstants, dt: number): Vec3 {
+/**
+ * The plastic return on principal Hencky strains: radial in the deviatoric plane; the volume is untouched
+ * inside [volumeMin, volumeMax] and saturates at those bounds. `density` (the particle density the grid
+ * measures, rest = 1) applies the density tie as well: J may not exceed (1 + densityTolerance) / density.
+ */
+export function plasticReturn(eps: Vec3, m: MaterialConstants, dt: number, density?: number): Vec3 {
   const { mu } = lameParameters(m);
   const { e, lnJ } = split(eps);
+  let v = lnJ;
+  if (density !== undefined && m.densityTolerance > 0) v = Math.min(v, Math.log((1 + m.densityTolerance) / Math.max(density, 1e-3)));
+  v = Math.min(Math.max(v, Math.log(m.volumeMin)), Math.log(m.volumeMax)) / 3;
   const trial = Math.SQRT2 * mu * Math.hypot(e[0], e[1], e[2]);
-  if (!(trial > m.yieldStress)) return [eps[0], eps[1], eps[2]];
-  const s = hbShear(trial, m.yieldStress, m.consistency, m.flowIndex, mu * dt) / trial;
-  return [e[0] * s + lnJ / 3, e[1] * s + lnJ / 3, e[2] * s + lnJ / 3];
+  const s = trial > m.yieldStress ? hbShear(trial, m.yieldStress, m.consistency, m.flowIndex, mu * dt) / trial : 1;
+  return [e[0] * s + v, e[1] * s + v, e[2] * s + v];
 }
 
 /** Principal Kirchhoff stresses of a principal Hencky strain: 2 mu dev eps + K ln J. */

@@ -45,7 +45,8 @@ struct Params {
   // held pigment chunks (chunk.wgsl): feed speed (how fast a chunk sinks through its level), the node mass that
   // counts as material under it, 0, 0
   chunk : vec4<f32>,
-  // material, continued: 1 / n (n the Herschel-Bulkley index), 0, 0, 0
+  // material, continued: 1 / n (n the Herschel-Bulkley index), the density tie's tolerance (0 = off),
+  // the bounds of ln J / 3
   mat2 : vec4<f32>,
 };
 

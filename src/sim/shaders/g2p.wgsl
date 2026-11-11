@@ -31,6 +31,20 @@ fn growBox(x : vec3<f32>) {
   if (c.z >= boxLast[5]) { atomicMax(&box[BOX_ACC + 5u], c.z); }
 }
 
+/// The rest mass (as a share of rest density) the rolls displace from a particle's kernel at x:
+/// the gather of node mass reads low next to a roll, since nodes inside it hold no particles. For a
+/// node at signed distance s cells from a flat wall the share of its kernel behind the wall is the
+/// integral of the quadratic B-spline, and gathering that with the particle's own weights
+/// convolves it with the spline once more: the distribution of a sum of six uniforms, standard
+/// deviation sqrt(1/2) cell, which a smoothstep of half-width GHOST_REACH matches to 0.04
+/// (tests/diagnostics.test.ts).
+const GHOST_REACH : f32 = 1.45;
+fn rollGhost(x : vec3<f32>) -> f32 {
+  let sF = (rollerDist(P.front.x, P.front.y, x) - P.front.w) * P.hdt.y;
+  let sB = (rollerDist(P.back.x, P.back.y, x) - P.front.w) * P.hdt.y;
+  return (1.0 - smoothstep(-GHOST_REACH, GHOST_REACH, sF)) + (1.0 - smoothstep(-GHOST_REACH, GHOST_REACH, sB));
+}
+
 const FOLD_SETTLE : f32 = 0.5;   // s: material just let go of the log does not count as pile yet
 
 fn loadMatF(p : u32) -> mat3x3<f32> {
@@ -84,6 +98,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   let wz = quadWeights(fx.z);
 
   var v = vec3<f32>(0.0);
+  var mass = 0.0;
   var B = mat3x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
   for (var k = 0; k < 3; k++) {
     for (var j = 0; j < 3; j++) {
@@ -91,8 +106,10 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
         let off = vec3<i32>(i, j, k);
         let dpos = (vec3<f32>(off) - fx) * h;
         let wgt = wx[i] * wy[j] * wz[k];
-        let gv = gvel[nodeIndexI(base + off)].xyz;
+        let g = gvel[nodeIndexI(base + off)];
+        let gv = g.xyz;
         v += wgt * gv;
+        mass += wgt * g.w;
         // outer(gv, dpos): column c = gv * dpos[c]  (B[r][c] = gv_r * dpos_c)
         B += wgt * mat3x3<f32>(gv * dpos.x, gv * dpos.y, gv * dpos.z);
       }
@@ -103,10 +120,8 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   // deformation gradient update + plastic return (design §4)
   var F = (identity3() + dt * C) * loadMatF(p);
   let J = det3(F);
-  // a particle squeezed or stretched far beyond anything the putty can carry has
-  // lost its history to a numerical event; restart it unstressed rather than
-  // let its pressure fire it across the mill
-  if (isBad(J) || J < 0.5 || J > 2.0 || isBadMat(F)) {
+  // a particle whose F is not a number restarts unstressed (counted: BOX_DIAG)
+  if (isBad(J) || isBadMat(F)) {
     F = identity3();
     atomicAdd(&box[BOX_DIAG], 1u);
   }
@@ -118,8 +133,22 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   // shear-thinning fluid and the drag of the rolls reaches into the bank instead of stopping in a
   // thin slip layer at the roll surface, while the elastic strain it carries stays tau / 2 mu.
   let eps = henckyStrain(d.S);
-  let ev = (eps.x + eps.y + eps.z) / 3.0;
+  var ev = (eps.x + eps.y + eps.z) / 3.0;
   var e = eps - vec3<f32>(ev);
+  // Density tie (design §4): the volume the pressure is computed from may not exceed what the
+  // density the grid measures at the particle allows. det F only integrates the velocity gradient
+  // the particle saw, and next to the rolls (push-out, the band's prescribed velocities) the
+  // particles pack without F hearing of it; then the nip passes more than the gap holds.
+  if (P.mat2.y > 0.0) {
+    let rho = mass / (8.0 * P.part.y) + rollGhost(x);
+    ev = min(ev, log((1.0 + P.mat2.y) / max(rho, 1e-3)) / 3.0);
+  }
+  // The elastic volume saturates (design §4, Stability): a particle the hand, the fed log or the
+  // rolls' push-out squeeze further than the putty can carry keeps its shape history and a bounded
+  // pressure, K ln(1 / volumeMin). (Resetting F to I at J = 1/2, as before, dropped the whole
+  // pressure in one substep and kicked the neighbours; no bound at all lets a prescribed motion
+  // store any amount of energy, and the cut & fold then blows up 10% past the preset's time step.)
+  ev = clamp(ev, P.mat2.z, P.mat2.w);
   let trial = 1.41421356 * P.mat.x * length(e);
   if (trial > P.mat.z) { e *= hbShear(trial) / trial; }
   let epsN = e + vec3<f32>(ev);

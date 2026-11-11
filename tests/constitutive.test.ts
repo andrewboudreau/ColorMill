@@ -72,8 +72,29 @@ describe('plasticReturn', () => {
   it('leaves a state inside the yield surface alone (elastic), and a pure volume change at any size', () => {
     const small: Vec3 = [0.01, -0.004, -0.02];
     expect(shearStress(small, m)).toBeLessThan(m.yieldStress);
-    expect(plasticReturn(small, m, dt)).toEqual(small);
-    expect(plasticReturn([-0.4, -0.4, -0.4], m, dt)).toEqual([-0.4, -0.4, -0.4]);
+    const kept = plasticReturn(small, m, dt);
+    for (let i = 0; i < 3; i++) expect(kept[i]).toBeCloseTo(small[i], 14);
+    const squeezed = plasticReturn([-0.1, -0.1, -0.1], m, dt);
+    for (let i = 0; i < 3; i++) expect(squeezed[i]).toBeCloseTo(-0.1, 14);
+  });
+
+  it('the volume saturates at its bounds, the shape untouched', () => {
+    const r = plasticReturn([-0.39, -0.4, -0.41], m, dt);
+    expect(r[0] + r[1] + r[2]).toBeCloseTo(Math.log(m.volumeMin), 12);
+    expect(r[0] - r[1]).toBeCloseTo(0.01, 12);
+    const s = plasticReturn([0.3, 0.3, 0.3], m, dt);
+    expect(s[0] + s[1] + s[2]).toBeCloseTo(Math.log(m.volumeMax), 12);
+  });
+
+  it('the density tie lowers J to what the measured density allows and never raises it', () => {
+    const tied = { ...m, densityTolerance: 0.1 };
+    const at = (lnJ: number, rho: number): number => { const r = plasticReturn([lnJ / 3, lnJ / 3, lnJ / 3], tied, dt, rho); return Math.exp(r[0] + r[1] + r[2]); };
+    expect(at(Math.log(0.95), 1.375)).toBeCloseTo(0.8, 12);      // packed to 1.375: J = 1.1 / 1.375
+    expect(at(Math.log(0.95), 1.0)).toBeCloseTo(0.95, 12);       // within the tolerance: untouched
+    expect(at(Math.log(0.75), 1.2)).toBeCloseTo(0.75, 12);       // already below: untouched
+    expect(at(Math.log(1.2), 0.6)).toBeCloseTo(1.2, 12);         // a free surface under-reads: never raised
+    expect(at(Math.log(0.95), 3)).toBeCloseTo(tied.volumeMin, 12);
+    expect(plasticReturn([0, 0, 0], m, dt, 2)).toEqual([0, 0, 0]);   // tolerance 0: off
   });
 
   it('is idempotent in the rate-independent limit: a returned state is on the yield surface and stays', () => {

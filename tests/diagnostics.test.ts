@@ -19,6 +19,25 @@ describe('splineCdf', () => {
   });
 });
 
+describe('the particle-level ghost share of g2p.wgsl', () => {
+  it('a smoothstep of half-width 1.45 cells matches the gather of the ghost shares of the nodes', () => {
+    const smooth = (s: number): number => { const t = Math.min(Math.max((s + 1.45) / 2.9, 0), 1); return 1 - t * t * (3 - 2 * t); };
+    let worst = 0;
+    // a flat wall at 0 along one axis, the particle at s cells outside it, the grid at every offset
+    for (let s = -3; s <= 3; s += 0.05) {
+      for (let shift = 0; shift < 1; shift += 0.1) {
+        const g = s + shift + 10;          // particle's grid coordinate; the wall is at shift + 10
+        const b0 = Math.floor(g - 0.5), f = g - b0;
+        const w = [0.5 * (1.5 - f) ** 2, 0.75 - (f - 1) ** 2, 0.5 * (f - 0.5) ** 2];
+        let exact = 0;
+        for (let i = 0; i < 3; i++) exact += w[i] * splineCdf(-(b0 + i - shift - 10));
+        worst = Math.max(worst, Math.abs(exact - smooth(s)));
+      }
+    }
+    expect(worst).toBeLessThan(0.04);
+  });
+});
+
 describe('nipDiagnostics', () => {
   const q = QUALITY_PRESETS.low;
   const dims = gridDims(q);

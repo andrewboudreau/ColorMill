@@ -53,6 +53,11 @@ export interface MaterialConstants {
   readonly consistency: number;
   /** Herschel-Bulkley index n (0 < n <= 1; below 1 the putty shear-thins) */
   readonly flowIndex: number;
+  /** density tie: det F may not exceed (1 + this) / (density gathered from the grid, rest = 1); 0 turns it off */
+  readonly densityTolerance: number;
+  /** the elastic volume ratio J = det F saturates at these bounds (the pressure K ln J with it) */
+  readonly volumeMin: number;
+  readonly volumeMax: number;
 }
 
 /*
@@ -75,7 +80,13 @@ export const DEFAULT_MATERIAL: MaterialConstants = {
   yieldStress: 0.58,
   /* consistency and index: design §4 has the measurements that chose them */
   consistency: 0.45,
-  flowIndex: 0.35
+  flowIndex: 0.35,
+  densityTolerance: 0,
+  /* with J free the cut & fold blows up 10% past the preset's time step, with [0.5, 2] the fed log of a cut &
+     roll does at `high`; [0.7, 1.4] is clean at 1.2x the step on every preset (design §4, Stability). Steady
+     milling does not reach the bounds: the sheet's J is 0.76 to 1.06 (5th to 95th percentile, `high`). */
+  volumeMin: 0.7,
+  volumeMax: 1.4
 };
 
 /** Lame parameters derived from E and nu. */

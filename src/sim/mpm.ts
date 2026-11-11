@@ -728,8 +728,8 @@ export class GpuMpm implements GpuMpmSim {
     // carrying two particles' mass is the bank
     // (two particles' mass at a node is the bank under it)
     f.set([p.chunkFeed > 0 ? (2 * PIGMENT_CHUNK_RADIUS) / p.chunkFeed : 0, 2 * pMass, 0, 0], o + 56);
-    // the putty's flow law (common.wgsl hbShear): 1 / n
-    f.set([1 / Math.min(Math.max(mat.flowIndex, 0.05), 1), 0, 0, 0], o + 60);
+    // the putty's flow law (common.wgsl hbShear): 1 / n; the density tie and the volume bounds (g2p.wgsl)
+    f.set([1 / Math.min(Math.max(mat.flowIndex, 0.05), 1), mat.densityTolerance, Math.log(mat.volumeMin) / 3, Math.log(mat.volumeMax) / 3], o + 60);
   }
 
   // ---------------------------------------------------------------------------

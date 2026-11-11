@@ -633,9 +633,9 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   // --- build / rebuild --------------------------------------------------------------
   // material constants can be overridden from the URL for experiments (?E=30&flowIndex=0.4)
   const materialOverride: { -readonly [K in keyof MaterialConstants]: number } = { ...DEFAULT_MATERIAL };
-  for (const k of ['E', 'nu', 'yieldStress', 'consistency', 'flowIndex'] as const) {
+  for (const k of ['E', 'nu', 'yieldStress', 'consistency', 'flowIndex', 'densityTolerance', 'volumeMin', 'volumeMax'] as const) {
     const v = parseFloat(query.get(k) ?? '');
-    if (Number.isFinite(v) && v > 0) materialOverride[k] = v;
+    if (Number.isFinite(v) && v >= 0 && (v > 0 || k === 'densityTolerance')) materialOverride[k] = v;
   }
   const material: MaterialConstants = materialOverride;
   const tackQuery = parseFloat(query.get('tack') ?? '');

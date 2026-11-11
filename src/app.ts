@@ -21,7 +21,7 @@ import { nipDiagnostics } from './sim/diagnostics';
 import { clampParam, formatMillQuery, isDefaultParam, parseExperimental, parseInk, parseMillParams, parseRollStyle } from './config/link';
 import { fitStamp, parseStampText, rgbaToStamp, stampDims } from './stamp';
 import {
-  BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, lameParameters, materialLitres,
+  BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres, soundSpeed,
   type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
@@ -631,9 +631,9 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   document.addEventListener('visibilitychange', onVisibility);
 
   // --- build / rebuild --------------------------------------------------------------
-  // material constants can be overridden from the URL for experiments (?E=30&thetaS=0.02)
+  // material constants can be overridden from the URL for experiments (?E=30&flowIndex=0.4)
   const materialOverride: { -readonly [K in keyof MaterialConstants]: number } = { ...DEFAULT_MATERIAL };
-  for (const k of ['E', 'nu', 'thetaC', 'thetaS'] as const) {
+  for (const k of ['E', 'nu', 'yieldStress', 'consistency', 'flowIndex'] as const) {
     const v = parseFloat(query.get(k) ?? '');
     if (Number.isFinite(v) && v > 0) materialOverride[k] = v;
   }
@@ -765,10 +765,9 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       await api.stepFrames(frames);
       const b = await s.readParticles();
       const cb = await s.readCounters();
-      const { mu, lambda } = lameParameters(s.config.material);
       return nipDiagnostics(a, b, {
         dims: s.stats.grid, params: s.params, dt: s.quality.dt, seconds: s.stats.simTime - t0,
-        soundSpeed: Math.sqrt(lambda + 2 * mu),
+        soundSpeed: soundSpeed(s.config.material),
         resets: (cb.resets - ca.resets) >>> 0, pushOuts: (cb.pushOuts - ca.pushOuts) >>> 0
       });
     },

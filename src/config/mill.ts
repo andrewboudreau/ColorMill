@@ -47,10 +47,12 @@ export interface MaterialConstants {
   readonly E: number;
   /** Poisson ratio */
   readonly nu: number;
-  /** plastic compression threshold (singular values clamped to >= 1 - thetaC) */
-  readonly thetaC: number;
-  /** plastic stretch threshold (singular values clamped to <= 1 + thetaS) */
-  readonly thetaS: number;
+  /** yield stress in shear, tau_y: below it the putty is an elastic solid (the bank holds its shape) */
+  readonly yieldStress: number;
+  /** Herschel-Bulkley consistency k: flowing at shear rate g the shear stress is tau_y + k g^n */
+  readonly consistency: number;
+  /** Herschel-Bulkley index n (0 < n <= 1; below 1 the putty shear-thins) */
+  readonly flowIndex: number;
 }
 
 /*
@@ -64,27 +66,43 @@ export interface MaterialConstants {
  */
 export const DEFAULT_MATERIAL: MaterialConstants = {
   E: 22,
-  /* nearly incompressible: at 0.35 the nip packed the putty to 1.5x rest density
-     and carried 50% more through than the gap allows; at 0.45 it still packed
-     the sheet to 1.5x once the viscoplastic drag pulled the bank in (and the
-     wrap ran short); at 0.49 (bulk modulus ~500) the sheet came out at
-     ~1.0-1.3x rest but the fed pile of a cut & roll blew up (speeds of 10-25,
-     dt at ~0.85 of the elastic CFL limit); 0.47 (bulk modulus ~80) is stable
-     through a cut & roll. */
+  /* nearly incompressible. With E = 22, nu 0.35 / 0.45 / 0.47 / 0.49 is a bulk modulus K = E / 3(1 - 2 nu) of
+     24 / 73 / 122 / 367 and a sound speed sqrt(K + 4 mu / 3) of 5.9 / 9.1 / 11.5 / 19.4, which is a Courant
+     number c dt / h of 0.30 / 0.47 / 0.59 / 0.99 on every preset (soundSpeed and courantNumber below; the
+     measured limit is in design §4, Stability). */
   nu: 0.47,
-  thetaC: 0.025,
-  /* tensile cohesion: at 0.0075 the sheet re-forming after an operator move
-     comes out lacy; 0.03 keeps it continuous but a sheet pulled off the roll by
-     its edge thins to a film and tears where it sticks; 0.05 pulls and folds as
-     putty, a thick slab (validated headlessly, cut & fold frames) */
-  thetaS: 0.05
+  /* the bank holds its shape under gravity 2 and a sheet pulled by its edge folds as a slab */
+  yieldStress: 0.58,
+  /* consistency and index: design §4 has the measurements that chose them */
+  consistency: 0.45,
+  flowIndex: 0.35
 };
 
-/** Lamé parameters derived from E and nu. */
-export function lameParameters(m: MaterialConstants): { mu: number; lambda: number } {
+/** Lame parameters derived from E and nu. */
+export function lameParameters(m: Pick<MaterialConstants, 'E' | 'nu'>): { mu: number; lambda: number } {
   const mu = m.E / (2 * (1 + m.nu));
   const lambda = (m.E * m.nu) / ((1 + m.nu) * (1 - 2 * m.nu));
   return { mu, lambda };
+}
+
+/** Bulk modulus K = E / 3(1 - 2 nu) = lambda + 2 mu / 3: the Kirchhoff pressure is K ln J (design §4). */
+export function bulkModulus(m: Pick<MaterialConstants, 'E' | 'nu'>): number {
+  return m.E / (3 * (1 - 2 * m.nu));
+}
+
+/**
+ * Elastic (P-wave) speed at unit density, sqrt(K + 4 mu / 3) = sqrt(lambda + 2 mu). The Kirchhoff stress
+ * is linear in Hencky strain, so the stiffness the grid sees per unit of particle mass, and with it this
+ * speed, does not change with compression (design §4, Stability).
+ */
+export function soundSpeed(m: Pick<MaterialConstants, 'E' | 'nu'>): number {
+  const { mu, lambda } = lameParameters(m);
+  return Math.sqrt(lambda + 2 * mu);
+}
+
+/** (c + |v|) dt / h for a preset: the Courant number of the explicit step. */
+export function courantNumber(q: { readonly dt: number; readonly cellsPerUnit: number }, m: Pick<MaterialConstants, 'E' | 'nu'>, speed = 0): number {
+  return (soundSpeed(m) + speed) * q.dt * q.cellsPerUnit;
 }
 
 /** Live, user-adjustable mill parameters (all in sim units). */

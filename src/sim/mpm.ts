@@ -14,7 +14,7 @@
  */
 import {
   DEFAULT_PARAMS, PIGMENT_CHUNK_RADIUS, PIGMENT_POOL_FRACTION,
-  GEOMETRY, bankTopY, colourGridDims, gridDims, lameParameters, rollerPoses, seedBankPositions,
+  GEOMETRY, bankTopY, bulkModulus, colourGridDims, gridDims, lameParameters, rollerPoses, seedBankPositions,
   type GridDims, type MillConfig, type MillParams, type QualitySettings, type RollStyle
 } from '../config/mill';
 import type {
@@ -687,7 +687,8 @@ export class GpuMpm implements GpuMpmSim {
     const q = this.quality;
     const p = this.params;
     const { back, front } = rollerPoses(p);
-    const { mu, lambda } = lameParameters(this.config.material);
+    const mat = this.config.material;
+    const { mu } = lameParameters(mat);
     const h = d.h;
     const pVol = (h * h * h) / 8;
     const pMass = 1;
@@ -699,7 +700,7 @@ export class GpuMpm implements GpuMpmSim {
     f.set([GEOMETRY.domain[0], GEOMETRY.domain[1], GEOMETRY.domain[2], q.dt * q.substepsPerFrame], o + 8);
     f.set([back.axisY, back.axisZ, back.omegaX, p.backFriction], o + 12);
     f.set([front.axisY, front.axisZ, front.omegaX, GEOMETRY.radius], o + 16);
-    f.set([mu, lambda, this.config.material.thetaC, this.config.material.thetaS], o + 20);
+    f.set([mu, bulkModulus(mat), mat.yieldStress, mat.consistency], o + 20);
     f.set([pVol, pMass, pMass / (pVol * MATERIAL_DENSITY), p.dispersion], o + 24);
     if (this.foldMode === 1) f.set([foldActive ? 1 : 0, foldT, this.foldRollSeconds, this.foldFeed], o + 28);
     else f.set([foldActive ? this.foldMode : 0, foldT, this.hand.lift, 0], o + 28);
@@ -727,6 +728,8 @@ export class GpuMpm implements GpuMpmSim {
     // carrying two particles' mass is the bank
     // (two particles' mass at a node is the bank under it)
     f.set([p.chunkFeed > 0 ? (2 * PIGMENT_CHUNK_RADIUS) / p.chunkFeed : 0, 2 * pMass, 0, 0], o + 56);
+    // the putty's flow law (common.wgsl hbShear): 1 / n
+    f.set([1 / Math.min(Math.max(mat.flowIndex, 0.05), 1), 0, 0, 0], o + 60);
   }
 
   // ---------------------------------------------------------------------------

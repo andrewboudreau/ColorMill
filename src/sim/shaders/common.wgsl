@@ -21,7 +21,7 @@ struct Params {
   back : vec4<f32>,
   // front roller: axisY, axisZ, omegaX, radius
   front : vec4<f32>,
-  // material: mu, lambda, thetaC, thetaS
+  // material (design §4): shear modulus mu, bulk modulus K, yield stress tau_y, Herschel-Bulkley consistency k
   mat : vec4<f32>,
   // pVol, pMass, stressScale, dispersion k
   part : vec4<f32>,
@@ -45,6 +45,8 @@ struct Params {
   // held pigment chunks (chunk.wgsl): feed speed (how fast a chunk sinks through its level), the node mass that
   // counts as material under it, 0, 0
   chunk : vec4<f32>,
+  // material, continued: 1 / n (n the Herschel-Bulkley index), 0, 0, 0
+  mat2 : vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> P : Params;
@@ -240,13 +242,44 @@ fn svd3(F : mat3x3<f32>) -> Svd3 {
   return out;
 }
 
-/// Fixed corotated Kirchhoff stress tau = P F^T (design §4 with the MLS-MPM
-/// volume: the P2G force term is V0 * P * F^T, not V0 * sigma):
-/// P = 2mu (F - R) + lambda (J - 1) J F^-T, so tau = 2mu (F - R) F^T + lambda (J - 1) J I.
-fn kirchhoffStress(F : mat3x3<f32>, R : mat3x3<f32>, J : f32, mu : f32, lambda : f32) -> mat3x3<f32> {
-  let a = (2.0 * mu) * ((F - R) * transpose(F));
-  let b = lambda * (J - 1.0) * J;
-  return a + mat3x3<f32>(vec3<f32>(b, 0.0, 0.0), vec3<f32>(0.0, b, 0.0), vec3<f32>(0.0, 0.0, b));
+// ---------------------------------------------------------------------------
+// The putty (design §4; src/sim/constitutive.ts is the CPU mirror, unit tested): Hencky elasticity,
+// a von Mises radial return with a Herschel-Bulkley overstress, and a pressure K ln J.
+// ---------------------------------------------------------------------------
+const HB_NEWTON : i32 = 4;
+
+/// The shear stress after one backward-Euler step of the Herschel-Bulkley overstress from a trial
+/// shear stress: the root of  tau + mu dt ((tau - tau_y) / k)^(1/n) = trial  in [tau_y, trial]. The
+/// left side is increasing and convex (n <= 1), so Newton from above cannot overshoot; it starts from
+/// the smaller of the trial value and the root of the power term alone, within a factor of two of
+/// the root.
+fn hbShear(trial : f32) -> f32 {
+  let ty = P.mat.z;
+  if (!(trial > ty)) { return trial; }
+  let xt = trial - ty;
+  let k = max(P.mat.w, 1e-6);
+  let p = P.mat2.x;
+  let a = P.mat.x * P.hdt.z;
+  var x = min(xt, k * pow(xt / a, 1.0 / p));
+  for (var i = 0; i < HB_NEWTON; i++) {
+    let w = a * pow(x / k, p);
+    x = max(x - (x - xt + w) / (1.0 + p * w / max(x, 1e-20)), 0.0);
+  }
+  return ty + min(x, xt);
+}
+
+/// Principal Hencky strains of the singular values (floored: a log needs a positive stretch).
+fn henckyStrain(S : vec3<f32>) -> vec3<f32> {
+  return log(clamp(S, vec3<f32>(0.05), vec3<f32>(20.0)));
+}
+
+/// Kirchhoff stress of principal Hencky strains eps in the frame U: U diag(2 mu dev eps + K ln J) U^T.
+/// (The P2G force term is V0 * tau, design §3.2.) Linear in the strain: the Cauchy pressure
+/// -K ln J / J has no ceiling in compression, and the stiffness per unit mass does not change with J.
+fn henckyStress(U : mat3x3<f32>, eps : vec3<f32>) -> mat3x3<f32> {
+  let lnJ = eps.x + eps.y + eps.z;
+  let t = (2.0 * P.mat.x) * (eps - vec3<f32>(lnJ / 3.0)) + vec3<f32>(P.mat.y * lnJ);
+  return mat3x3<f32>(U[0] * t.x, U[1] * t.y, U[2] * t.z) * transpose(U);
 }
 
 /// The matrix P2G multiplies dpos by (design §3.2), premultiplied once in G2P:
@@ -257,13 +290,11 @@ fn p2gAffine(tau : mat3x3<f32>, C : mat3x3<f32>) -> mat3x3<f32> {
   return (-dt * P.part.x * 4.0 * invh * invh * P.part.z) * tau + P.part.y * C;
 }
 
-/// Kirchhoff stress of an already plastically-clamped F (SVD inside; used by the
-/// fold release, where G2P has not run for the particle in a while).
+/// Kirchhoff stress of an already returned F (SVD inside; used by the fold release, where G2P
+/// has not run for the particle in a while).
 fn kirchhoffStressOf(F : mat3x3<f32>) -> mat3x3<f32> {
   let d = svd3(F);
-  let Rot = d.U * transpose(d.V);
-  let J = d.S.x * d.S.y * d.S.z;
-  return kirchhoffStress(F, Rot, J, P.mat.x, P.mat.y);
+  return henckyStress(d.U, henckyStrain(d.S));
 }
 
 /// Store a mat3x3 row-major into a flat f32 array slot (9 floats per particle).

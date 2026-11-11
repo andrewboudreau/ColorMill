@@ -26,6 +26,7 @@ import {
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
 import type { CameraState, Renderer } from './render/types';
 import type { DebugApi, GpuMpmSim, Latent, ParticleSnapshot, SimStats, StampImage } from './sim/types';
+import { mixingMetrics, pigmentInventory, type MixingMetrics, type PigmentInventory } from './sim/metrics';
 import { Hud } from './ui/hud';
 import { installKeyboard } from './ui/keys';
 import { installOrbitControls, type OrbitControls } from './ui/orbit';
@@ -756,6 +757,11 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     },
     snapshot(): Promise<ParticleSnapshot> { return (sim as GpuMpmSim).readParticles(); },
     stats(): SimStats { return (sim as GpuMpmSim).stats; },
+    async inventory(): Promise<PigmentInventory> { return pigmentInventory(await (sim as GpuMpmSim).readParticles()); },
+    async mixing(): Promise<MixingMetrics> {
+      const s = sim as GpuMpmSim;
+      return mixingMetrics(await s.readParticles(), s.stats.grid.h);
+    },
     tapPigment,
     setDropSlot,
     get dropSlot(): number { return dropSlot; },

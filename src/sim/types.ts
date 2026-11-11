@@ -4,6 +4,7 @@
  */
 import type { GridDims, MillConfig, MillParams, QualitySettings, RollStyle } from '../config/mill';
 import type { Drop } from '../drops';
+import type { MixingMetrics, PigmentInventory } from './metrics';
 
 /** A 7-float Mixbox latent. */
 export type Latent = readonly [number, number, number, number, number, number, number];
@@ -185,6 +186,11 @@ export interface DebugApi {
   snapshot(): Promise<ParticleSnapshot>;
   /** Last frame's stats */
   stats(): SimStats;
+  /** Total pigment and its colour over the particles (sum of load x mass, and of load x mass x latent per channel):
+   *  conserved by milling, dispersion and the operator's moves; only a drop, an inject, a stamp or a reset changes it. */
+  inventory(): Promise<PigmentInventory>;
+  /** Mixing measures of the pigment load: Danckwerts' intensity of segregation at boxes of h, 2h and 4h, and the axial segregation. */
+  mixing(): Promise<MixingMetrics>;
   /** Inject a named pigment (key of PIGMENTS) at a random bank spot, as a UI tap would. */
   tapPigment(name: string, slot?: number, size?: number): void;
   /** Choose the drop slot (0-based, left to right) that taps land on. */

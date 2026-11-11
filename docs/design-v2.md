@@ -628,8 +628,9 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   what the particle gave and takes from each node's pool the share its
   capacity term is of the node's. One rate for giving and taking, so an even
   field stays even; the shares of a pool sum to 1, so the batch's total load
-  and each load-weighted latent channel change only by round-off (about 1e-8
-  of the total over 60 s of milling with the operator's moves, any preset).
+  and each load-weighted latent channel change only by round-off (measured 1.2e-7 to 1.5e-7
+  of the total over 60 s of milling with the operator's moves, growing
+  steadily and always upward: a rounding bias, not yet tracked down).
   The latent follows as `z = (w·z)/w`, so a clear particle takes the colour
   of the pigment it receives outright. The lamina state travels with the
   pigment: two more pools carry `w·q` and `w·ln(s/Δ)`, and a particle's new

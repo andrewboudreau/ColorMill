@@ -44,6 +44,7 @@ fn loadMatF(p : u32) -> mat3x3<f32> {
 fn pushOut(axisY : f32, axisZ : f32, R : f32, x : vec3<f32>, h : f32) -> vec3<f32> {
   let d = rollerDist(axisY, axisZ, x);
   if (d < R) {
+    atomicAdd(&box[BOX_DIAG + 1u], 1u);
     let nrm = rollerNormal(axisY, axisZ, x);
     return vec3<f32>(x.x, axisY + nrm.y * (R + 0.25 * h), axisZ + nrm.z * (R + 0.25 * h));
   }
@@ -110,6 +111,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   // let its pressure (bulk modulus ~500) fire it across the mill
   if (isBad(J) || J < 0.5 || J > 2.0 || isBadMat(F)) {
     F = identity3();
+    atomicAdd(&box[BOX_DIAG], 1u);
   }
   var d = svd3(F);
   // Deviatoric plastic return: putty yields in shape but not in volume.

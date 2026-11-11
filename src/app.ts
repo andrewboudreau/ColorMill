@@ -17,10 +17,11 @@
 import './styles.css';
 import { BASE_LATENT, PIGMENTS, findPigment, loadMixbox, rgbToLatentAsync } from './color/pigments';
 import { parseDrops, type Drop } from './drops';
+import { nipDiagnostics } from './sim/diagnostics';
 import { clampParam, formatMillQuery, isDefaultParam, parseExperimental, parseInk, parseMillParams, parseRollStyle } from './config/link';
 import { fitStamp, parseStampText, rgbaToStamp, stampDims } from './stamp';
 import {
-  BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres,
+  BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, lameParameters, materialLitres,
   type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
@@ -756,6 +757,21 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     },
     snapshot(): Promise<ParticleSnapshot> { return (sim as GpuMpmSim).readParticles(); },
     stats(): SimStats { return (sim as GpuMpmSim).stats; },
+    async nipDiagnostics(frames: number) {
+      const s = sim as GpuMpmSim;
+      const a = await s.readParticles();
+      const ca = await s.readCounters();
+      const t0 = s.stats.simTime;
+      await api.stepFrames(frames);
+      const b = await s.readParticles();
+      const cb = await s.readCounters();
+      const { mu, lambda } = lameParameters(s.config.material);
+      return nipDiagnostics(a, b, {
+        dims: s.stats.grid, params: s.params, dt: s.quality.dt, seconds: s.stats.simTime - t0,
+        soundSpeed: Math.sqrt(lambda + 2 * mu),
+        resets: (cb.resets - ca.resets) >>> 0, pushOuts: (cb.pushOuts - ca.pushOuts) >>> 0
+      });
+    },
     tapPigment,
     setDropSlot,
     get dropSlot(): number { return dropSlot; },

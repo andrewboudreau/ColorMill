@@ -70,6 +70,8 @@ const BOX_SLACK : i32 = 1;    // extra cells around every box
 const BOX_FINE : u32 = 32u;        // lattice index xyz of its texel 0, FINE_K
 const BOX_FINE_RANGE : u32 = 36u;  // texels xyz its clear and pack cover (this frame's range and the last one's)
 const BOX_FINE_PREV : u32 = 40u;   // texels xyz of the previous frame's own range
+// diagnostics (physics review 4.5): G2P counts its F resets and its roller push-outs here; nothing in the solver reads them
+const BOX_DIAG : u32 = 44u;
 const FINE_K_MIN : i32 = 8;
 const FINE_K_MAX : i32 = 64;
 

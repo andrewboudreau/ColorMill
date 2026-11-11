@@ -671,6 +671,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
       }
       next.paused = old.paused;
       renderer.setVolumes(next.volumes);
+      renderer.reflections = p !== 'low';
       sim = next;
       preset = p;
       batch = b;
@@ -714,6 +715,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   try {
     renderer = opts.makeRenderer(ctx, canvas);
     renderer.renderScale = renderScale;
+    renderer.reflections = preset !== 'low';   // the roll mirror's march is not worth its samples on the low preset's GPUs
     if (offscreen) renderer.setPresentation?.(false);
     const isoQuery = parseFloat(query.get('iso') ?? '');
     if (Number.isFinite(isoQuery) && isoQuery > 0.05 && isoQuery < 1) renderer.iso = isoQuery;   // debug: iso-surface threshold

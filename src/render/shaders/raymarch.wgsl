@@ -80,9 +80,9 @@ const COV_DITHER: f32 = 0.08;
 // Look of the materials (everything that happens to light once albedo, pigment opacity and the
 // surface are known).
 // body colour of the unpigmented base where it scatters: a faintly cool milk
-const CLEAR_BODY: vec3f = vec3f(0.56, 0.61, 0.63);
+const CLEAR_BODY: vec3f = vec3f(0.60, 0.65, 0.67);
 // the clear base turns hazy over this many solver cells of thickness (1/e of the light passes)
-const CLEAR_HAZE_CELLS: f32 = 6.5;
+const CLEAR_HAZE_CELLS: f32 = 3.2;
 // roughness of the putty's skin (glossy, not a mirror) and of the rolls around their circumference
 const PUTTY_ROUGH: f32 = 0.11;
 const ROLL_ROUGH: f32 = 0.13;
@@ -1069,7 +1069,8 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     var body = shade.diffuse;
     if (opacity < 0.99) {
       // a thin parallel sheet only offsets the ray; a thick body bends it like a lens
-      let bend = 0.2 + 0.6 * saturate(thickness / (4.0 * h));
+      // (less where the normal is cell-scale noise, or the roll behind looks like crumpled foil)
+      let bend = (0.1 + 0.5 * saturate(thickness / (4.0 * h))) * (1.0 - 0.7 * sn.rough);
       let rb = normalize(mix(rd, refract(rd, n, 1.0 / 1.41), bend));
       let bs = traceScene(p, rb);
       let behind = shadeScene(p, rb, bs, true);

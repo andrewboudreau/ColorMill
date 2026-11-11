@@ -36,6 +36,8 @@ export interface Renderer {
   iso?: number;
   /** colour mode (see RenderMode) */
   mode?: RenderMode;
+  /** The rolls mirror the putty next to them (a short density march per roll pixel); default on. */
+  reflections?: boolean;
   /** Backing-store resolution multiplier, 0.5 to 1; independent of simulation quality. */
   renderScale?: number;
   /** Swap the volumes the ray-marcher samples (called when the sim is rebuilt). */

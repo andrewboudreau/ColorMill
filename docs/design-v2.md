@@ -893,18 +893,40 @@ Single fullscreen ray-march pass (`src/render/shaders/raymarch.wgsl`):
    thin sheet, and the bank goes milky with thickness); pigment makes it
    opaque with the pigments' own colour, never a pastel of it.
 4. Shading: key light (warm, upper right front), fill (cool, left), rim from
-   behind; Blinn-Phong specular with a wide + narrow lobe (silicone putty is
-   glossy); ambient occlusion from density sampled along the normal plus an
-   analytic hemisphere occlusion by each roll (darkens the crease between
-   bank and rolls); a thin-sheet transmittance term (thickness from a short
-   march along −n, transmitted colour ≈ albedo²) so sheet edges glow.
-5. Rollers: analytic ray/cylinder intersection with end caps; brushed metal
-   shading with a rotating stripe pattern (angle = `rollerAngle`) so rotation
-   speed is visible. Depth-composite against the volume hit.
-6. Tray/floor plane with a soft contact shadow under the front roller;
-   translucent end-guide plates at x = 0 and x = L; background: dark
-   vertical gradient.
-7. Output sRGB. The canvas uses `navigator.gpu.getPreferredCanvasFormat()`.
+   behind, each a **soft box** in an analytic studio environment
+   (`envRadiance`: three rectangles along the rig's directions whose edges
+   blur with roughness, dark walls, ceiling and bench bounce; no texture).
+   Diffuse is wrapped Lambert from the three lights plus the studio's
+   ambient. The putty's gloss is a dielectric skin (F0 = 0.04, Schlick
+   Fresnel, roughness 0.11 widened where the normal is cell-scale noise)
+   mirroring that environment, the rolls and the bench (`reflectScene`,
+   analytic), with specular occlusion from the AO. Ambient occlusion from
+   density sampled along the normal plus an analytic hemisphere occlusion by
+   each roll; a shadow march toward the key (dithered start, skipped where
+   the key cannot reach); a thin-sheet transmittance term (thickness from a
+   short march along −n, transmitted colour ≈ albedo²) so sheet edges glow.
+   The clear base scatters a share `1 − exp(−thickness / 3.2 cells)` of the
+   light as a faint milk and passes the rest: the analytic scene behind the
+   hit along the **refracted** ray (n = 1.41), tinted by the path length.
+   The gloss sits on top at full strength whether the body is clear or not.
+5. Rollers: analytic ray/cylinder intersection with end caps; polished
+   steel (F0 ≈ 0.6) whose reflection is sharp around the roll and smeared
+   along the axis (five environment taps), with the rotating brush / wear /
+   spiral pattern (angle = `rollerAngle`) modulating its reflectance so
+   rotation speed is visible; the rolls mirror the bench, each other and,
+   with `Renderer.reflections` (default on, `?reflections=0` in the
+   harness), the putty next to them (8 density samples along the reflected
+   ray + 3 colour samples). The end faces are turned steel with the bow-tie
+   glint of circular tool marks. Depth-composite against the volume hit.
+6. A wooden bench top with a brushed steel plate under the mill (soft roll
+   shadows and contact darkening as before), a shop floor below it;
+   clear end-guide plates at x = 0 and x = L; background: dark studio walls
+   with a pool of light at the horizon.
+7. Display: exposure, a hue-preserving tone curve (a shoulder on the largest
+   channel, so pigment mid-tones keep their hue and saturation; overshoot
+   bleaches to white), sRGB encode, half an 8-bit step of interleaved
+   gradient noise against banding. The canvas uses
+   `navigator.gpu.getPreferredCanvasFormat()`.
 
 Render at `min(devicePixelRatio, 2) * renderScale`, with a separate 0.5–1
 resolution control that preserves the simulation. `Renderer.setVolumes(volumes)`

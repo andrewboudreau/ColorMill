@@ -61,6 +61,8 @@ const BOX_GRID = 6;
 const BOX_LAST = 12;
 const BOX_FRAME = 18;
 const BOX_PREV = 24;
+/** G2P's diagnostic counters (common.wgsl BOX_DIAG): F resets, roller push-outs. */
+const BOX_DIAG = 44;
 /** Indirect dispatch arguments box.wgsl writes: the grid update's at word 0, the raster clear and pack's at word 4,
  *  the colour raster's at word 8. */
 const BOX_ARG_WORDS = 12;
@@ -640,7 +642,8 @@ export class GpuMpm implements GpuMpmSim {
     args.set(this.gridDispatch, 0);
     args.set(this.gridDispatch, 4);
     args.set(this.fineDispatch, BOX_ARG_FINE);
-    this.device.queue.writeBuffer(this.bufBox, 0, box);
+    // not the diagnostic counters past BOX_DIAG: they run on
+    this.device.queue.writeBuffer(this.bufBox, 0, box, 0, BOX_DIAG);
     this.device.queue.writeBuffer(this.bufBoxLast, 0, new Uint32Array([d.nx - 1, d.ny - 1, d.nz - 1, 0, 0, 0, 0, 0]));
     this.device.queue.writeBuffer(this.bufBoxArgs, 0, args);
   }
@@ -1179,6 +1182,18 @@ export class GpuMpm implements GpuMpmSim {
     };
     staging.unmap();
     return snap;
+  }
+
+  async readCounters(): Promise<{ resets: number; pushOuts: number }> {
+    const staging = this.device.createBuffer({ label: 'GpuMpm-counters-read', size: 8, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const enc = this.device.createCommandEncoder({ label: 'GpuMpm-counters-read' });
+    enc.copyBufferToBuffer(this.bufBox, 4 * BOX_DIAG, staging, 0, 8);
+    this.device.queue.submit([enc.finish()]);
+    await staging.mapAsync(GPUMapMode.READ);
+    const u = new Uint32Array(staging.getMappedRange().slice(0));
+    staging.unmap();
+    staging.destroy();
+    return { resets: u[0], pushOuts: u[1] };
   }
 
   async readColourBox(): Promise<{ origin: [number, number, number]; cell: number; eighths: number }> {

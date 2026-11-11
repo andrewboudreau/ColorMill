@@ -5,6 +5,7 @@
 import type { GridDims, MillConfig, MillParams, QualitySettings, RollStyle } from '../config/mill';
 import type { Drop } from '../drops';
 import type { MixingMetrics, PigmentInventory } from './metrics';
+import type { NipDiagnostics } from './diagnostics';
 
 /** A 7-float Mixbox latent. */
 export type Latent = readonly [number, number, number, number, number, number, number];
@@ -170,6 +171,8 @@ export interface GpuMpmSim {
   /** Read where the colour raster's box is (design §3.6; tests and diagnostics): the world position of its
    *  texel 0, its cell size, and that cell in eighths of the finest one (8 = particle resolution). */
   readColourBox(): Promise<{ origin: [number, number, number]; cell: number; eighths: number }>;
+  /** Diagnostic event counters since the simulator was built (wrapping u32): G2P's F resets and roller push-outs. */
+  readCounters(): Promise<{ resets: number; pushOuts: number }>;
   destroy(): void;
 }
 
@@ -192,6 +195,8 @@ export interface DebugApi {
   inventory(): Promise<PigmentInventory>;
   /** Mixing measures of the pigment load: Danckwerts' intensity of segregation at boxes of h, 2h and 4h, and the axial segregation. */
   mixing(): Promise<MixingMetrics>;
+  /** Step `frames` frames and measure the nip over them (src/sim/diagnostics.ts; tools/perf/nip.mjs prints the table). */
+  nipDiagnostics(frames: number): Promise<NipDiagnostics>;
   /** Inject a named pigment (key of PIGMENTS) at a random bank spot, as a UI tap would. */
   tapPigment(name: string, slot?: number, size?: number): void;
   /** Choose the drop slot (0-based, left to right) that taps land on. */

@@ -2,9 +2,11 @@
 // of latents (8 floats per pixel: the latent and an opacity) is mapped onto a
 // footprint seen from above; `probeTop` records per solver column (i, k) the
 // highest particle under the footprint, then `main` gives every particle
-// within `depth` of its column's top the pixel it lies under, blended by the
-// pixel's opacity times the strength, and a masterbatch pigment load (as the
-// inject kernel does). The column top is found fresh each stamp, so a stamp
+// within `depth` of its column's top the pixel it lies under: a share
+// a = the pixel's opacity times the strength of the particle becomes masterbatch
+// of the pixel's colour, blended by load as the inject kernel does (so an
+// antialiased edge is the ink's own colour, thinner, not a pastel of it and the
+// base's unweighted white). The column top is found fresh each stamp, so a stamp
 // lands on the flat seeded bank and on whatever the material has become.
 struct Stamp {
   // x0, z0, 1 / (x1 - x0), 1 / (z1 - z0)
@@ -62,12 +64,14 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   let base = 8u * (py * S.size.x + px);
   let a = clamp(img[base + 7u] * S.blend.y, 0.0, 1.0);
   if (a <= 0.0) { return; }
-  for (var c = 0u; c < 7u; c++) {
-    let z = lat[7u * p + c];
-    lat[7u * p + c] = z + a * (img[base + c] - z);
-  }
   let st = streak[p];
   streak[p] = vec4<f32>(st.xyz, st.w * (1.0 - a));
-  let w = pos[p].w;
-  pos[p].w = w + a * (PIGMENT_LOAD - w);
+  // blend by load: what the particle keeps of its own pigment against the masterbatch it gains
+  let kept = (1.0 - a) * max(pos[p].w, 0.0);
+  let gained = a * PIGMENT_LOAD;
+  let wNew = kept + gained;
+  for (var c = 0u; c < 7u; c++) {
+    lat[7u * p + c] = (kept * lat[7u * p + c] + gained * img[base + c]) / wNew;
+  }
+  pos[p].w = wNew;
 }

@@ -1,7 +1,12 @@
-// Inject (design §5): blend a pigment latent into particles inside a sphere,
-// z = mix(z, zPigment, strength * t): a solid core (t = 1 for |d| < 0.6 r)
-// with a linear falloff to the edge, so a tap reads as a dollop of
-// concentrated masterbatch rather than a faint tint.
+// Inject (design §5): work masterbatch into the particles inside a sphere. A share
+// a = strength * t of each particle becomes masterbatch (a solid core, t = 1 for
+// |d| < 0.6 r, with a linear falloff to the edge, so a tap reads as a dollop of
+// concentrated masterbatch rather than a faint tint): its load goes to
+// (1 - a) w + a PIGMENT_LOAD and its latent to the mix of the pigment it kept and
+// the pigment it gained, weighted by those two loads. The latent is never blended
+// by `a` alone: a clear particle has no colour of its own (its slot holds white at
+// zero weight), so at any strength it takes the pigment's colour outright, only
+// thinner. (Blending by `a` from that white made the soft rim an opaque pastel.)
 // mode 1 = set every particle (clearPigment / reset base colour).
 // mode 2 = "surface" injection: the sphere is centred just below the highest
 // particle found by `probe` in the column |x - cx| < r, |z - cz| < r, so a tap
@@ -55,17 +60,22 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
     let t = clamp((1.0 - d / I.center.w) / 0.4, 0.0, 1.0);
     a = clamp(I.lat1.w * t, 0.0, 1.0);
   }
-  for (var c = 0u; c < 7u; c++) {
-    let z = lat[7u * p + c];
-    lat[7u * p + c] = z + a * (zp[c] - z);
-  }
   let st = streak[p];
   streak[p] = vec4<f32>(st.xyz, st.w * (1.0 - a));
-  // pigment load: the clear base carries none (set-all mode); tinted particles move toward a chunk's load
   if (I.mode.x == 1u) {
+    // set-all: the clear base carries no pigment; its latent slot is set but has no weight
+    for (var c = 0u; c < 7u; c++) { lat[7u * p + c] = zp[c]; }
     pos[p].w = 0.0;
-  } else {
-    let w = pos[p].w;
-    pos[p].w = w + a * (PIGMENT_LOAD - w);
+    return;
   }
+  // blend by load: what the particle keeps of its own pigment against the masterbatch it gains
+  let kept = (1.0 - a) * max(pos[p].w, 0.0);
+  let gained = a * PIGMENT_LOAD;
+  let wNew = kept + gained;
+  if (wNew > 1e-9) {
+    for (var c = 0u; c < 7u; c++) {
+      lat[7u * p + c] = (kept * lat[7u * p + c] + gained * zp[c]) / wNew;
+    }
+  }
+  pos[p].w = wNew;
 }

@@ -220,6 +220,80 @@ Boundaries, applied in this order:
    force-feeds and drops material off the underside; releasing the band's
    normal constraint where it is overpacked drops material off the underside
    too.
+   **Friction ratio.** With `v = vr` on every node of the band the material
+   crossed the nip as a plug at the front roll's speed, whatever the back roll
+   did: at ratio 1.25 the particles' shear strain rate there (`C_yz + C_zy`,
+   which reads 0 for the band's rigid rotation) was 0.15–0.23 of
+   `(U_back − U_front) / gap`, at 1.6 it was 0.05–0.08. So in the channel
+   (`|y − axisY| < 0.06`, between the two axes) the band's velocity is
+
+   ```
+   s  = (d_front − R) / (d_front + d_back − 2R)      0 on the front roll, 1 on the back roll
+   v  = vr · (1 + (ratio − 1) · s · fade · R / d_front)
+   ```
+
+   the front roll's rotation plus the back roll's extra surface speed in
+   proportion to the node's place across the local gap: a Couette profile.
+   `fade` is 1 down to 0.03 below the axes' height and falls to 0 at the
+   channel's lower end, so the sheet leaves at the front roll's speed. `s` is
+   not clamped at the roll surfaces but carried on into the rolls' nodes as
+   far as `NIP_PROFILE_REACH` = 0.6 gaps (ghost nodes), so that what a
+   particle in the gap gathers is the line itself and not one flattened at the
+   walls. At ratio 1 the term is zero and the field is bit for bit the plug.
+   **This is a model, not a resolved flow**: a gap of 1.3 cells has one layer
+   of nodes in it, the profile is prescribed on them and the momentum the
+   grid solved for is overwritten as everywhere else in the band (the back
+   roll's contact is unchanged and gives no reaction). Only the drag part of
+   the lubrication profile is there; the pressure-driven (Poiseuille) part,
+   which in a real nip adds shear at the walls on the way in and takes it
+   away on the way out, is not.
+   Measured (`tools/perf/nip.mjs`, `low` / `medium` / `high`, shear in units of
+   the nominal `(U_back − U_front) / gap`, flux over `U_front·gap·ρ0·L`):
+
+   | ratio | shear before | shear now | flux before | flux now | sheet count before | now |
+   | --- | --- | --- | --- | --- | --- | --- |
+   | 1.0 | – | – | 1.12 / 1.12 / 1.19 | the same | 1.05 / 1.01 / 1.09 | the same |
+   | 1.25 | 0.15 / 0.16 / 0.23 | 0.91 / 0.92 / 0.96 | 1.14 / 1.13 / 1.22 | 1.22 / 1.16 / 1.23 | 1.06 / 1.03 / 1.13 | 1.09 / 1.07 / 1.21 |
+   | 1.6 | 0.08 / 0.05 / 0.07 | 0.91 / 0.95 / ~0.95 | 1.14 / 1.10 / 1.23 | 1.27 / 1.15 / 1.13 | 1.07 / 1.01 / 1.13 | 1.20 / 1.16 / 1.30 |
+
+   No `F` resets, nothing in the tray, both operator moves clean on every
+   preset at 1.25 and 1.6 (fastest particle 0.83–1.02 of twice the roll
+   speed). The flux follows the mean of the two speeds at `low` and only
+   part of the way at `medium` and `high` at 1.6 (0.88 of `gap × mean speed`):
+   the channel's density release gives the rest back to the bank.
+   Alternatives measured at 1.25: the same line clamped at the surfaces
+   (no ghost nodes) 0.60–0.67 of the nominal shear; a step (front half of the
+   gap at the front roll's speed, back half at the back roll's) 0.68–0.90,
+   uneven between presets; a blend of the two rolls' rotations, which is not
+   the plug at ratio 1, starved the nip at `low` (flux 0.89, bank's back half
+   0.39 of roll speed); prescribing the nodes deep in the back roll too
+   over-conveyed (count 1.2–1.39, the nip emptying in pulses); a reach of 1.2
+   gaps measured the same shear and threw the fastest particle of a cut &
+   fold at `high` to 1.22.
+   **What it does to mixing, measured, is not what a mill does.** Steady
+   milling (no moves) for 60 s, I(1/32) at 20 / 40 / 60 s: ratio 1.0, `low`
+   0.155 / 0.088 / 0.068, `high` 0.227 / 0.192 / 0.176; ratio 1.6, `low`
+   0.243 / 0.151 / 0.120, `high` 0.431 / 0.370 / 0.344 (with the plug, 1.6
+   read 0.136 / 0.078 / 0.062 and 0.239 / 0.201 / 0.185: no different from
+   1.0). The higher ratio mixes *slower*. Split by region, the lamina
+   thinning `d ln s/dt = n·L'·n` is mostly the bank's (at ratio 1, 0.17 of
+   0.21 /s at `low`, 0.20 of 0.29 at `high`); a striation reaches the nip
+   lying along the sheet, where simple shear across the gap does not thin
+   it (the nip's own share goes up 0–25%, and what the entry gains the exit
+   gives back as the profile fades). Meanwhile the faster channel carries a
+   thicker sheet, the bank is left with less of the batch (0.41 → 0.24 of
+   the particles at `low`) and a small bank rides through as a lump rather
+   than rolling (bank's contribution at 1.25 `low`: 0.013 /s). With the batch
+   raised to give the bank its share back (1.12 at `low`, 0.56 at `high`)
+   `high` at 1.6 is level with ratio 1 (0.248 / 0.198 / 0.174) and `low` is
+   still behind (0.245 / 0.127 / 0.086). With the operator's moves the
+   difference at the default ratio is small (0.139 / 0.018 / 0.008 at `low`,
+   0.268 / 0.035 / 0.019 at `high`, against 0.115 / 0.013 / 0.007 and
+   0.245 / 0.033 / 0.022). What a real nip adds, dispersive mixing from the
+   shear stress, this model has no measure for. One more thing the ratio
+   brings out: the gap in the sheet left by the start-up (the nip slice
+   empty for a moment each revolution, there at ratio 1 until about 2 s)
+   lasts to 8–10 s at `high` at 1.6.
 2. **Back roller**. In the wedge above the nip (`y > axisY + 0.06`,
    `z > backAxisZ`) it is the same tacky no-slip wall as the front roll:
    nodes inside its surface (`d ≤ R`) take `v = vr`, so the bank is drawn in
@@ -467,8 +541,13 @@ gap-thick sheet at rest density, the flux is over `U·gap·ρ0·L`):
 The sheet's thickness reads 0.84–1.03 gaps (90th percentile of the particles'
 depth off the roll, which reads 0.9 for a lattice sheet one gap thick), so
 the sheet is about one gap thick at 1.2 times rest density and the flux above
-1 is in the density: 1.125 of it is the mean of the two roll speeds over the
-front roll's (friction ratio 1.25), the rest packing. It does not swell after
+1 is in the density. (These columns were measured with the band a plug at the
+front roll's speed; the friction ratio then added almost nothing to the flux,
+1.14 against 1.12 at `low`. With the profile of §3.3 across the channel the
+default ratio 1.25 reads flux 1.22 / 1.16 / 1.23, count 1.09 / 1.07 / 1.21,
+sheet density 0.86 / 0.90 / 0.90, and `bank.mjs` at the default batches a
+bank share of 0.25 / 0.27 / 0.25, back half 0.81 / 0.75 / 0.76 of roll
+speed, half the chunks through in 3.8 / 3.3 / 3.2 s.) It does not swell after
 the nip as a calendered sheet does, because the tack band prescribes its
 normal velocity too (§3.3) and what leaves the nip stays as dense as it left.
 

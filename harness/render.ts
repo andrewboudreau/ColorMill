@@ -65,6 +65,9 @@ function laminaeCover(x: number, h: number): number {
   const upTo = (t: number): number => Math.floor(t / (2 * W)) * W + Math.min(t - Math.floor(t / (2 * W)) * 2 * W, W);
   return (upTo(x + 0.5 * h) - upTo(x - 0.5 * h)) / h;
 }
+/** ?clear=sheet|all: the sheet (or the sheet and the bank) is clear base with no pigment, for looking
+ *  at the translucency of the unpigmented putty */
+const clearWhat = query.get('clear') ?? '';
 const renderMode = query.get('render') === 'surface' ? 'surface' : 'depth';   // depth is the app's default too
 
 function toHalf(f: number): number {
@@ -169,7 +172,8 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
           // coverage: the pigment-carrying share of the node's mass (masterbatch or clear base, nothing
           // between), 0 in the skin and, with laminae, the node cell's share of the pigment bands;
           // the load is that share at masterbatch strength, as the raster would sum it
-          const share = inSkin ? 0 : onSheet ? laminaeCover(x, h) : 1;
+          const isClear = clearWhat === 'all' || (clearWhat === 'sheet' && onSheet);
+          const share = inSkin || isClear ? 0 : onSheet ? laminaeCover(x, h) : 1;
           cc[idx] = toHalf(dens * share * PIGMENT_LOAD);
           cov[idx / 4] = toHalf(dens * share);   // normalised like the mass
           a[idx] = toHalf(dens);
@@ -263,6 +267,7 @@ async function main(): Promise<void> {
   device.pushErrorScope('validation');
   const renderer = new RayMarchRenderer(ctx, canvas);
   renderer.mode = renderMode;
+  if (query.get('reflections') === '0') renderer.reflections = false;   // rolls do not mirror the putty
   const dims = gridDims(preset);
   const t0 = performance.now();
   const volumes = buildVolumes(device, dims);

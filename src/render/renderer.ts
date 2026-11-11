@@ -48,11 +48,11 @@ export function defaultLightRig(): LightRig {
     rimDir: [0.15, 0.55, -0.82],
     rimColor: [0.85, 0.9, 1.0],
     rimIntensity: 1.1,
-    exposure: 1.0
+    exposure: 0.68
   };
 }
 
-const UNIFORM_FLOATS = 18 * 4; // 18 vec4f, see Uniforms in raymarch.wgsl
+const UNIFORM_FLOATS = 19 * 4; // 19 vec4f, see Uniforms in raymarch.wgsl
 
 /** Edge length (in texels) of the blocks of the coarse max-density mip used for empty-space skipping. */
 export const MIP_BLOCK = 4;
@@ -83,6 +83,9 @@ export class RayMarchRenderer implements Renderer {
   readonly lights: LightRig = defaultLightRig();
   /** Draw the translucent end-guide plates at x = 0 and x = L (design §8, optional). */
   endGuides = true;
+  /** The rolls mirror the putty next to them: a short density march per roll pixel (up to 8 density
+   *  samples and 3 colour samples). Off, the rolls mirror the studio, the bench and each other only. */
+  reflections = true;
 
   private readonly device: GPUDevice;
   private readonly canvas: HTMLCanvasElement;
@@ -304,6 +307,7 @@ export class RayMarchRenderer implements Renderer {
     // the colour raster's grid (design §3.5): node counts and cell size
     const cg = vol ? vol.fineDims : undefined;
     set4(17, cg ? cg.nx : 1, cg ? cg.ny : 1, cg ? cg.nz : 1, cg ? cg.h : hCell);
+    set4(18, this.reflections ? 1 : 0, 0, 0, 0);
   }
 
   /** Rebuild the coarse max-density mip from the live volume (design §8: empty-space skipping). */

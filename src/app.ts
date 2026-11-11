@@ -724,6 +724,10 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     if (offscreen) renderer.setPresentation?.(false);
     const isoQuery = parseFloat(query.get('iso') ?? '');
     if (Number.isFinite(isoQuery) && isoQuery > 0.05 && isoQuery < 1) renderer.iso = isoQuery;   // debug: iso-surface threshold
+    const debugQuery = query.get('debug');   // debug: the putty's normal, or how firm it is, as a colour
+    if (debugQuery === 'normal' || debugQuery === 'firm') renderer.debugView = debugQuery === 'normal' ? 1 : 2;
+    const reachQuery = parseFloat(query.get('reach') ?? '');   // debug: reach of the normal's filter, texels
+    if (Number.isFinite(reachQuery) && reachQuery >= 0 && reachQuery <= 3) renderer.normalReachOverride = reachQuery;
     // colour mode (?render=depth|surface; the drawer's toggle changes it live)
     const renderQuery = query.get('render');
     if (renderQuery === 'depth' || renderQuery === 'surface') renderer.mode = renderQuery;

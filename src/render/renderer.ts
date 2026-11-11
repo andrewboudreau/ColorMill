@@ -18,7 +18,10 @@ import mixboxSrc from './shaders/mixbox.wgsl?raw';
 import raymarchSrc from './shaders/raymarch.wgsl?raw';
 
 /** Density threshold that defines the putty surface (design §8). */
-export const ISO_THRESHOLD = 0.32; // a gap-thick sheet is ~1.3 cells at `low`; 0.45 punched holes in it
+// On the smoothed density (csSmooth in raymarch.wgsl), where a gap-thick sheet (~1.3 cells) peaks at 0.56 of
+// rest density, 0.61 at `high` (0.85 as packed), and its thinnest spots at 0.31: 0.26 leaves no holes in the
+// sheet on the roll at either preset and puts the surface 0.3 cells further out than 0.32 on the packed density did.
+export const ISO_THRESHOLD = 0.26;
 /** Cap on the backing-store scale (design §8). */
 export const MAX_DPR = 2;
 const GUIDE_TOP = bankTopY(1) + 0.15;
@@ -64,6 +67,14 @@ export function mipDims(dims: { nx: number; ny: number; nz: number }): [number, 
   return [Math.ceil(dims.nx / MIP_BLOCK), Math.ceil(dims.ny / MIP_BLOCK), Math.ceil(dims.nz / MIP_BLOCK)];
 }
 
+/** Reach in texels of the filter the putty's normal is taken through (csSmoothWide in raymarch.wgsl) on a
+ *  grid of cell h: 1 at the low preset's cell and 1.5 at the high preset's, i.e. the finer the grid the more
+ *  cells, because the ripple it has to cover is set by the sheet's thickness and the particle spacing in
+ *  world units as much as in cells. Past 1.5 the eight taps leave the middle of the kernel empty. */
+export function normalReach(h: number): number {
+  return Math.min(1.5, Math.max(1, 0.5 + 1 / (64 * h)));
+}
+
 function normalize3(v: readonly [number, number, number]): [number, number, number] {
   const l = Math.hypot(v[0], v[1], v[2]) || 1;
   return [v[0] / l, v[1] / l, v[2] / l];
@@ -86,6 +97,10 @@ export class RayMarchRenderer implements Renderer {
   /** The rolls mirror the putty next to them: a short density march per roll pixel (up to 8 density
    *  samples and 3 colour samples). Off, the rolls mirror the studio, the bench and each other only. */
   reflections = true;
+  /** debug: 0 = the picture, 1 = the putty's surface normal as a colour, 2 = how firm the normal is (green = firm) */
+  debugView = 0;
+  /** debug: reach of the normal's filter in texels, instead of normalReach(h) */
+  normalReachOverride: number | undefined;
 
   private readonly device: GPUDevice;
   private readonly canvas: HTMLCanvasElement;
@@ -97,6 +112,14 @@ export class RayMarchRenderer implements Renderer {
   private readonly uniformBuffer: GPUBuffer;
   private mipBuffer: GPUBuffer;
   private mipBindGroup: GPUBindGroup;
+  private readonly smoothPipeline: GPUComputePipeline;
+  private readonly smoothWidePipeline: GPUComputePipeline;
+  /** [0] csSmooth's output (scratch), [1] csSmoothWide's: the density the surface (x) and its normal (y)
+   *  are found on, which is what the picture and the mip read; empty before setVolumes */
+  private smoothTex: GPUTexture[] = [];
+  private smoothBindGroups: GPUBindGroup[] = [];
+  /** reach of the normal's filter in texels (csSmoothWide), set per volume */
+  private normalReach = 1;
   private mipSize: [number, number, number] = [1, 1, 1];
   private readonly uniformData = new Float32Array(UNIFORM_FLOATS);
   private readonly fineBoxDefault: GPUBuffer;
@@ -148,6 +171,26 @@ export class RayMarchRenderer implements Renderer {
       label: 'raymarch-mip-pipeline',
       layout: this.device.createPipelineLayout({ bindGroupLayouts: [mipBgl] }),
       compute: { module: this.module, entryPoint: 'csMip' }
+    });
+
+    const smoothBgl = this.device.createBindGroupLayout({
+      label: 'raymarch-smooth-bgl',
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float', viewDimension: '3d' } },
+        { binding: 3, visibility: GPUShaderStage.COMPUTE, sampler: { type: 'filtering' } },
+        { binding: 11, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba16float', viewDimension: '3d' } }
+      ]
+    });
+    this.smoothPipeline = this.device.createComputePipeline({
+      label: 'raymarch-smooth-pipeline',
+      layout: this.device.createPipelineLayout({ bindGroupLayouts: [smoothBgl] }),
+      compute: { module: this.module, entryPoint: 'csSmooth' }
+    });
+    this.smoothWidePipeline = this.device.createComputePipeline({
+      label: 'raymarch-smooth-wide-pipeline',
+      layout: this.device.createPipelineLayout({ bindGroupLayouts: [smoothBgl] }),
+      compute: { module: this.module, entryPoint: 'csSmoothWide' }
     });
 
     this.pipeline = this.device.createRenderPipeline({
@@ -244,9 +287,37 @@ export class RayMarchRenderer implements Renderer {
       this.mipBuffer = this.makeMipBuffer(cells);
     }
     this.mipSize = m;
+    const d = volumes.dims;
+    const t0 = this.smoothTex[0];
+    if (!t0 || t0.width !== d.nx || t0.height !== d.ny || t0.depthOrArrayLayers !== d.nz) {
+      for (const t of this.smoothTex) t.destroy();
+      this.smoothTex = ['raymarch-smooth-scratch', 'raymarch-smooth-density'].map((label) => this.device.createTexture({
+        label,
+        size: { width: d.nx, height: d.ny, depthOrArrayLayers: d.nz },
+        dimension: '3d',
+        format: 'rgba16float',
+        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING
+      }));
+    }
+    const smoothBg = (label: string, pipeline: GPUComputePipeline, from: GPUTexture, to: GPUTexture): GPUBindGroup => this.device.createBindGroup({
+      label,
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.uniformBuffer } },
+        { binding: 1, resource: from.createView({ dimension: '3d' }) },
+        { binding: 3, resource: this.sampler },
+        { binding: 11, resource: to.createView({ dimension: '3d' }) }
+      ]
+    });
+    this.smoothBindGroups = [
+      smoothBg('raymarch-smooth-bg', this.smoothPipeline, volumes.volA, this.smoothTex[0]),
+      smoothBg('raymarch-smooth-wide-bg', this.smoothWidePipeline, this.smoothTex[0], this.smoothTex[1])
+    ];
+    this.normalReach = normalReach(d.h);
     if (!volumes.fineBox) this.device.queue.writeBuffer(this.fineBoxDefault, 0, new Float32Array([0, 0, 0, volumes.fineDims.h, 1, 8, 0, 0]));
-    this.bindGroup = this.makeBindGroup(volumes.volA, volumes.finA, volumes.finB, volumes.finC, volumes.fineBox ?? this.fineBoxDefault);
-    this.mipBindGroup = this.makeMipBindGroup(volumes.volA);
+    // the picture and the mip read the smoothed density, never the solver's own
+    this.bindGroup = this.makeBindGroup(this.smoothTex[1], volumes.finA, volumes.finB, volumes.finC, volumes.fineBox ?? this.fineBoxDefault);
+    this.mipBindGroup = this.makeMipBindGroup(this.smoothTex[1]);
   }
 
   resize(): boolean {
@@ -307,16 +378,24 @@ export class RayMarchRenderer implements Renderer {
     // the colour raster's grid (design §3.5): node counts and cell size
     const cg = vol ? vol.fineDims : undefined;
     set4(17, cg ? cg.nx : 1, cg ? cg.ny : 1, cg ? cg.nz : 1, cg ? cg.h : hCell);
-    set4(18, this.reflections ? 1 : 0, 0, 0, 0);
+    set4(18, this.reflections ? 1 : 0, this.debugView, this.normalReachOverride ?? this.normalReach, 0);
   }
 
-  /** Rebuild the coarse max-density mip from the live volume (design §8: empty-space skipping). */
+  /** Smooth the live density into the volume the surface is found on, then rebuild its coarse
+   *  max-density mip (design §8: empty-space skipping). Both only when the density changed. */
   private encodeMipPass(encoder: GPUCommandEncoder): void {
-    if (!this.volumes) return;
+    if (!this.volumes || this.smoothBindGroups.length < 2) return;
     const version = this.volumes.densityVersion;
     if (version !== undefined && version === this.mipDensityVersion) return;
     const m = this.mipSize;
+    const d = this.volumes.dims;
     const pass = encoder.beginComputePass({ label: 'raymarch-density-mip' });
+    pass.setPipeline(this.smoothPipeline);
+    pass.setBindGroup(0, this.smoothBindGroups[0]);
+    pass.dispatchWorkgroups(Math.ceil(d.nx / MIP_WG), Math.ceil(d.ny / MIP_WG), Math.ceil(d.nz / MIP_WG));
+    pass.setPipeline(this.smoothWidePipeline);
+    pass.setBindGroup(0, this.smoothBindGroups[1]);
+    pass.dispatchWorkgroups(Math.ceil(d.nx / MIP_WG), Math.ceil(d.ny / MIP_WG), Math.ceil(d.nz / MIP_WG));
     pass.setPipeline(this.mipPipeline);
     pass.setBindGroup(0, this.mipBindGroup);
     pass.dispatchWorkgroups(Math.ceil(m[0] / MIP_WG), Math.ceil(m[1] / MIP_WG), Math.ceil(m[2] / MIP_WG));
@@ -430,6 +509,8 @@ export class RayMarchRenderer implements Renderer {
     this.fineBoxDefault.destroy();
     this.mipBuffer.destroy();
     this.placeholder.destroy();
+    for (const t of this.smoothTex) t.destroy();
+    this.smoothTex = [];
     this.offscreen?.destroy();
     this.offscreen = null;
     this.volumes = null;

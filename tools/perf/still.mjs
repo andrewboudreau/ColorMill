@@ -1,5 +1,6 @@
 // A still of the real app on the real GPU after steady milling with pigment (and optionally the operator moves).
-// usage: node tools/perf/still.mjs <out-prefix> [low high ...] [--seconds=6] [--moves] [--query=&x=y]
+// usage: node tools/perf/still.mjs <out-prefix> [low high ...] [--seconds=6] [--moves] [--clear] [--query=&x=y]
+// --clear: no pigment chunks (the clear base only)
 // writes <out-prefix>-<preset>.png (and -fold / -roll stills with --moves)
 import { writeFileSync } from 'node:fs';
 import { launch, openApp } from './lib.mjs';
@@ -30,7 +31,7 @@ try {
       console.log(file);
     };
     await step(0.4);
-    await page.evaluate(() => window.__colormill.applyDrops([
+    if (!args.includes('--clear')) await page.evaluate(() => window.__colormill.applyDrops([
       { pigment: 'naphtholRed', slot: 1, size: 'm' }, { pigment: 'phthaloBlue', slot: 3, size: 'm' }, { pigment: 'hansaYellow', slot: 4, size: 'm' }]));
     await step(SECONDS);
     await shoot(preset);

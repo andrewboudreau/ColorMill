@@ -4,9 +4,12 @@
 // One triangle covers the screen. Per pixel: build a camera ray, intersect the
 // analytic scene (two capped roller cylinders, the bench and the shop floor), then march the
 // density volume between the domain-box entry and the nearest analytic hit.
+// The surface is not found on the solver's density as packed (volA) but on a smoothed copy of
+// it (csSmooth, once per frame): splatted particles are noisy at the cell scale, and a glossy
+// skin shows every degree of that noise in its normal.
 // Blocks of the coarse max-density mip (built by csMip each frame) that hold no
 // density above iso are skipped in one step. The first sample with density >= iso
-// is refined by bisection; the normal is a box-filtered density gradient; colour
+// is refined by bisection; the normal is the gradient of the smoothed density; colour
 // is the Mixbox latent decoded at the hit, with a thin-sheet transmittance term.
 // Light: three soft boxes in an analytic studio environment that every glossy surface
 // mirrors (dielectric putty skin, anisotropic steel rolls); the clear base refracts the
@@ -31,7 +34,7 @@ struct Uniforms {
   mip: vec4f,         // coarse max-density mip dims (cx, cy, cz), w = block edge in texels
   guides: vec4f,      // end-guide plates: bank top y, bank half depth (z), plate thickness, enabled
   fine: vec4f,        // colour raster (design §3.5): node counts of its textures (nxF, nyF, nzF), w = its finest cell
-  quality: vec4f,     // x = the rolls mirror the putty (a short density march per roll pixel), yzw spare
+  quality: vec4f,     // x = the rolls mirror the putty (a short density march per roll pixel), y = debug view (1 = normal, 2 = normal confidence), z = reach of the normal's filter (texels), w spare
 };
 
 // where the colour raster's box is this frame (design §3.6; written on the GPU by the solver)
@@ -41,8 +44,13 @@ struct FineBox {
 };
 
 @group(0) @binding(0) var<uniform> U: Uniforms;
+// The density volume. For the fragment stage and csMip this is the SMOOTHED volume (csSmoothWide's
+// output: x = the density the surface is found on, y = a wider filter of it, with the rolls
+// filled in, for the normal); for csSmooth it is the solver's density as packed, for csSmoothWide
+// csSmooth's output.
 @group(0) @binding(1) var volA: texture_3d<f32>;
 @group(0) @binding(3) var volSampler: sampler;
+@group(0) @binding(11) var smoothOut: texture_storage_3d<rgba16float, write>;
 // coarse mip: max density over each block of mip.w^3 texels (plus a one-texel halo, so a
 // trilinear sample anywhere inside the block is bounded by it); rebuilt by csMip every frame
 @group(0) @binding(4) var<storage, read> mipMax: array<f32>;
@@ -90,6 +98,11 @@ const CLEAR_BODY: vec3f = vec3f(0.60, 0.65, 0.67);
 const CLEAR_HAZE_CELLS: f32 = 3.2;
 // roughness of the putty's skin (glossy, not a mirror) and of the rolls around their circumference
 const PUTTY_ROUGH: f32 = 0.11;
+// density gradient at the surface, per cell (rest density = 1): below WEAK the normal is noise and the
+// skin is drawn rough, above FIRM it is a face and gets the full gloss
+const NORMAL_WIDE: f32 = 3.0;   // weight of the wide field's gradient against the surface density's
+const NORMAL_WEAK: f32 = 0.03;
+const NORMAL_FIRM: f32 = 0.10;
 const ROLL_ROUGH: f32 = 0.13;
 
 // pixel being shaded, for screen-space dithers
@@ -98,6 +111,61 @@ var<private> gPix: vec2f;
 const PI: f32 = 3.14159265358979;
 const INF: f32 = 1e30;
 const MAX_STEPS: i32 = 420;
+
+// ---------------------------------------------------------------- surface density (compute)
+
+// The density the surface is found on: the packed density under a [1 2 1]^3 / 64 binomial filter
+// (eight trilinear taps on the texel's corners, each the mean of the eight texels round it).
+// Why: the solver has eight particles a cell and the raster is a trilinear splat, so a full cell
+// reads 0.85 +- 0.15 and the iso-surface and its gradient carry that as cell-sized lumps.
+// The filter also spreads a sheet 1.3 cells thick over one more cell and lowers its peak by a
+// third, which is why the threshold (Renderer.iso) is lower than it would be on the packed
+// density. Pigment is not touched: colour comes from the colour raster.
+@compute @workgroup_size(4, 4, 4)
+fn csSmooth(@builtin(global_invocation_id) gid: vec3u) {
+  let dims = vec3u(U.dims.xyz);
+  if (any(gid >= dims)) { return; }
+  let c = vec3f(gid) + vec3f(0.5);
+  var s = 0.0;
+  for (var i = 0; i < 8; i++) {
+    let o = vec3f(select(-0.5, 0.5, (i & 1) != 0), select(-0.5, 0.5, (i & 2) != 0), select(-0.5, 0.5, (i & 4) != 0));
+    s += textureSampleLevel(volA, volSampler, (c + o) / vec3f(dims), 0.0).x;
+  }
+  // y: the same with the rolls counted as material (1 inside, a ramp one cell wide across the
+  // face), which csSmoothWide filters for the normal
+  let q = vec3f(gid) * U.camForward.w;
+  let sd = min(length(q.yz - U.rollerBack.xy) - U.rollerBack.z, length(q.yz - U.rollerFront.xy) - U.rollerFront.z);
+  let fill = saturate(0.5 - sd / U.camForward.w) * step(q.x, U.domain.w + 0.5 * U.camForward.w);
+  textureStore(smoothOut, vec3i(gid), vec4f(s / 8.0, max(s / 8.0, fill), 0.0, 0.0));
+}
+
+// Second pass, from csSmooth's output to the volume the picture reads: x = the surface density
+// (csSmooth's, copied), y = a wider filter for the normal: csSmooth's y (the density with the
+// rolls filled in) through eight taps U.quality.z texels out along the diagonals (at 1 that is
+// [1 0 1]^3 / 8, and with the first pass [1 2 2 2 1]^3 / 512).
+// Why a second field: what is left in the surface density after one pass is ripple a few cells
+// long, which moves the surface by a tenth of a cell (nothing to see) but tilts it by degrees
+// (a soft box's mirror image with a torn edge). The normal can take a wider filter than the
+// surface, because it only has to say which way a face points, not where it is.
+// Why the rolls are filled in: the sheet is a shell 1.3 cells thick, and a filter wider than that
+// sees both of its faces and leaves no gradient at either (measured: a tenth of the gradient,
+// normals pointing anywhere). With the roll under it counted as material the sheet is the face of
+// a solid, which is also what it looks like: a film lying on a roll is parallel to the roll. Bare
+// roll is never shaded with this normal (the march finds putty on x only); where the putty thins
+// out to nothing the normal turns into the roll's, a rounded edge.
+@compute @workgroup_size(4, 4, 4)
+fn csSmoothWide(@builtin(global_invocation_id) gid: vec3u) {
+  let dims = vec3u(U.dims.xyz);
+  if (any(gid >= dims)) { return; }
+  let c = vec3f(gid) + vec3f(0.5);
+  let r = U.quality.z;
+  var s = 0.0;
+  for (var i = 0; i < 8; i++) {
+    let o = vec3f(select(-r, r, (i & 1) != 0), select(-r, r, (i & 2) != 0), select(-r, r, (i & 4) != 0));
+    s += textureSampleLevel(volA, volSampler, (c + o) / vec3f(dims), 0.0).y;
+  }
+  textureStore(smoothOut, vec3i(gid), vec4f(textureLoad(volA, vec3i(gid), 0).x, s / 8.0, 0.0, 0.0));
+}
 
 // ---------------------------------------------------------------- density mip (compute)
 
@@ -375,40 +443,39 @@ fn density(p: vec3f) -> f32 {
   return textureSampleLevel(volA, volSampler, volUvw(p), 0.0).x;
 }
 
-// Density gradient. At low resolution the MPM density is noisy at the cell scale, so the
-// main term is the gradient of a 2x2x2 box-filtered density (the 8 cube-corner taps at
-// +-e), which smooths along the surface as well as across it; a tight 6-tap central
-// difference is blended in so the silhouette and thin sheets keep their shape.
+// x = the surface density, y = the wide field the normal is mostly taken from (csSmoothWide)
+fn densityBoth(p: vec3f) -> vec2f {
+  return textureSampleLevel(volA, volSampler, volUvw(p), 0.0).xy;
+}
+
+// Surface normal, by central differences one cell apart: the gradient of the wide field
+// (csSmoothWide), NORMAL_WIDE times over, plus that of the surface density itself. The wide
+// one is the smooth one and carries the normal wherever it has a gradient; on a film with air on
+// both sides (the flap of a cut, a strand) it has next to none, and the sum falls back to the
+// surface density's own. The stencil has to be narrower than the thinnest thing drawn: this used
+// to be a gradient over +-1.5 cells along every axis, to average the noise away, which on the
+// sheet (1.3 cells) reached through into empty space and measured its lumps instead of its face.
 struct SurfaceNormal {
   n: vec3f,
-  // 0 = the tight and the box-filtered gradients agree (smooth surface), 1 = cell-scale noise
+  // 0 = a firm gradient (a face), 1 = hardly any (a crumb, a film about to tear): the normal
+  // there is whatever the noise says
   rough: f32,
 };
 
 fn densityNormal(p: vec3f) -> SurfaceNormal {
   let h = U.camForward.w;
-  let e = 1.5 * h;
-  var g = vec3f(0.0);
-  for (var i = 0; i < 8; i++) {
-    let sgn = vec3f(select(-1.0, 1.0, (i & 1) != 0), select(-1.0, 1.0, (i & 2) != 0), select(-1.0, 1.0, (i & 4) != 0));
-    g += sgn * density(p + sgn * e);
-  }
-  g /= 8.0 * e;
-  let e2 = 0.8 * h;
-  let g2 = vec3f(
-    density(p + vec3f(e2, 0.0, 0.0)) - density(p - vec3f(e2, 0.0, 0.0)),
-    density(p + vec3f(0.0, e2, 0.0)) - density(p - vec3f(0.0, e2, 0.0)),
-    density(p + vec3f(0.0, 0.0, e2)) - density(p - vec3f(0.0, 0.0, e2))
-  ) / (2.0 * e2);
-  let grad = g * 0.75 + g2 * 0.25;
+  let dx = densityBoth(p + vec3f(h, 0.0, 0.0)) - densityBoth(p - vec3f(h, 0.0, 0.0));
+  let dy = densityBoth(p + vec3f(0.0, h, 0.0)) - densityBoth(p - vec3f(0.0, h, 0.0));
+  let dz = densityBoth(p + vec3f(0.0, 0.0, h)) - densityBoth(p - vec3f(0.0, 0.0, h));
+  // per cell, as a mean of the two fields' gradients
+  let grad = (vec3f(dx.x, dy.x, dz.x) + NORMAL_WIDE * vec3f(dx.y, dy.y, dz.y)) * (0.5 / (1.0 + NORMAL_WIDE));
   let len = length(grad);
   var out: SurfaceNormal;
   out.n = vec3f(0.0, 1.0, 0.0);
-  out.rough = 0.0;
+  out.rough = 1.0;
   if (len < 1e-6) { return out; }
   out.n = -grad / len;
-  let l2 = length(g2);
-  if (l2 > 1e-6) { out.rough = saturate((1.0 - dot(out.n, -g2 / l2)) * 45.0); }
+  out.rough = 1.0 - smoothstep(NORMAL_WEAK, NORMAL_FIRM, len);
   return out;
 }
 
@@ -673,8 +740,8 @@ struct PuttyShade {
 };
 
 // thickness: material thickness behind the hit (sheetThickness), in world units
-// rough: normal-noise estimate from densityNormal (roughens the skin, Toksvig-style, so
-// cell-scale density noise does not sparkle)
+// rough: how unsure the normal is (densityNormal): roughens the skin there, so a crumb or a
+// tearing film does not sparkle
 fn shadePutty(p: vec3f, n: vec3f, v: vec3f, albedo: vec3f, ao: f32, thickness: f32, rough: f32) -> PuttyShade {
   let key = U.keyDir.xyz;
   let h = U.camForward.w;
@@ -1084,6 +1151,8 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
       body = mix(behind * mix(path, albedo, pigment), shade.diffuse, opacity);
     }
     col = body + shade.spec;
+    if (U.quality.y > 1.5) { col = vec3f(sn.rough, 1.0 - sn.rough, 0.0) * 0.5; }
+    else if (U.quality.y > 0.5) { col = (n * 0.5 + vec3f(0.5)) * 0.6; }
   } else {
     col = shadeScene(ro, rd, scene, false);
   }

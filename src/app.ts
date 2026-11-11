@@ -760,8 +760,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     stats(): SimStats { return (sim as GpuMpmSim).stats; },
     async inventory(): Promise<PigmentInventory> { return pigmentInventory(await (sim as GpuMpmSim).readParticles()); },
     async mixing(): Promise<MixingMetrics> {
-      const s = sim as GpuMpmSim;
-      return mixingMetrics(await s.readParticles(), s.stats.grid.h);
+      return mixingMetrics(await (sim as GpuMpmSim).readParticles());
     },
     async nipDiagnostics(frames: number) {
       const s = sim as GpuMpmSim;

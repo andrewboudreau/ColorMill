@@ -20,8 +20,10 @@
 @group(0) @binding(6) var<storage, read_write> pcov : array<atomic<i32>>;
 // the material's box (box.wgsl): the colour raster's lattice (BOX_FINE)
 @group(0) @binding(7) var<storage, read> box : array<u32>;
-// the streak per particle: unit direction xyz, length w in particle spacings (streak.wgsl); only the colour raster reads it
-@group(0) @binding(8) var<storage, read> streak : array<vec4<f32>>;
+// the lamina state per particle (lamina.wgsl; lamina_common.wgsl is concatenated before this file):
+// normal xyz and q = ln(s / s0), then ln s0 and the exchange's reference; only the colour raster reads them
+@group(0) @binding(8) var<storage, read> lam : array<vec4<f32>>;
+@group(0) @binding(9) var<storage, read> mixs : array<vec2<f32>>;
 
 // A particle counts as covered (pigment) above this load. Dispersion relaxes every particle of a
 // milled few-percent batch toward load ~1, and that must still count as covered so a homogeneous
@@ -106,30 +108,38 @@ fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgro
   let invh = P.fineH.y * 8.0 / f32(box[BOX_FINE + 3u]);
   let x = pos[p].xyz;
 
-  // colour streaks (design §5): a pigment-carrying particle is drawn as a short line along its
-  // streak direction for its streak length, K taps of weight 1/K; K = 1 is the particle's own position
+  // laminae (design §5): a pigment-carrying particle is drawn as a thread lying in its laminae, K taps
+  // of weight 1/K; K = 1 is the particle's own position. A blob thinned from s0 to s has grown s0 / s
+  // times as long in the plane of the laminae, so that (less the 1 it started at) is the thread's
+  // length in particle spacings, up to the user's cap. The mill's flow is across the rolls' axis, so
+  // the stretch within a lamina runs along x cross n; a lamina stacked along the axis (n along x)
+  // has no direction to draw and stays a point.
   let cap = P.fineH.w;              // user's cap in particle spacings; 0 = off
   let spacing = 0.5 * P.hdt.x;      // particle spacing in world units
   var K = 1;
   var ink = 1.0;
   var span = vec3<f32>(0.0);
   if (cap > 0.0 && pos[p].w > STREAK_MIN_LOAD) {
-    let st = streak[p];
-    let len = min(st.w, cap);
-    let dl = length(st.xyz);
-    if (len > 1e-3 && dl > 1e-3 && !isBad3(st.xyz)) {
-      span = (st.xyz / dl) * len * spacing;
+    let st = lam[p];
+    let dir = vec3<f32>(0.0, -st.z, st.y);    // x cross n
+    let dl = length(dir);
+    let len = min(exp(-clamp(st.w, LAMINA_Q_MIN, 0.0)) - 1.0, cap) * dl;
+    if (len > 1e-3 && dl > 1e-3 && !isBad3(st.xyz) && !isBad(len)) {
+      span = (dir / dl) * len * spacing;
       let cell = 1.0 / invh;        // this frame's fine cell
       K = clamp(i32(ceil(len * spacing / (STREAK_TAP_CELLS * cell))), 1, STREAK_TAPS);
       // unequal ink: a smeared chunk is laminae of unequal thickness, not an even film. One particle
       // in four draws its pigment STREAK_INK_RICH times over and the rest STREAK_INK_LEAN (a mean of
       // one), so lines lying side by side differ and the smear reads as threads where it is thin.
       // It comes in as the particle smears: unsmeared pigment (a fresh dollop, a stamp) is even.
+      // And it goes out again as the laminae pass below what the picture can resolve: under the
+      // particle spacing the threads are s / spacing of their contrast, and the colour is the blend.
       var hsh = p * 747796405u + 2891336453u;
       hsh = ((hsh >> ((hsh >> 28u) + 4u)) ^ hsh) * 277803737u;
       hsh = (hsh >> 22u) ^ hsh;
       let uneven = select(STREAK_INK_LEAN, STREAK_INK_RICH, (hsh & 3u) == 0u);
-      ink = mix(1.0, uneven, clamp((len - 0.5) / 3.0, 0.0, 1.0));
+      let resolved = clamp(exp(st.w + mixs[p].x - lnSpacing()), 0.0, 1.0);
+      ink = mix(1.0, uneven, clamp((len - 0.5) / 3.0, 0.0, 1.0) * resolved);
     }
   }
   let lo = vec3<f32>(spacing);

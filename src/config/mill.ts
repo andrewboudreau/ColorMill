@@ -97,7 +97,9 @@ export interface MillParams {
   gap: number;
   /** gravity, sim units / s^2 */
   gravity: number;
-  /** shear-driven dispersion rate k (see design §5) */
+  /** lamellar mixing: the exponent k of the exchange closure (design §5, src/sim/lamina.ts exchangeFraction). A
+   *  particle whose pigment laminae are thinned to s below the particle spacing keeps (s / spacing)^k of its
+   *  difference from its neighbours. 1 is the geometric value; 0 switches the exchange off. */
   dispersion: number;
   /** back-roller Coulomb friction coefficient */
   backFriction: number;
@@ -110,7 +112,7 @@ export interface MillParams {
   /** cut & fold: how many passes one press makes (each a cut at the crown, the edge lifted, pulled back over
    *  the mill and dropped), 1 to 3 */
   foldPasses: number;
-  /** colour streaks: the longest line a pigment particle is drawn as, in particle spacings; 0 draws particles as points */
+  /** colour threads: the longest line a pigment particle's laminae are drawn as, in particle spacings; 0 draws particles as points */
   streak: number;
   /** pigment chunks: how long a medium chunk takes to feed into the bank, in seconds (it is held and sinks in,
    *  let go where it touches material; bigger chunks take longer in proportion); 0 lets a chunk go whole */
@@ -122,10 +124,10 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
   frictionRatio: 1.25,
   gap: 0.04,
   gravity: 2.0,
-  /* nearly off: colour should mill as distinct streaks that thin with folding,
-     not fade to a tint (measured: at 0.1 a black chunk is 77% grey after 3 s of
-     milling; at 0 it stays black and streaks around the roll) */
-  dispersion: 0.02,
+  /* not tuned: 1 is what the geometry gives (a parcel one spacing wide that samples stripes s thick differs
+     from the local mean in proportion to s / spacing). It is not a rate, so it does not depend on the nip's
+     strain rates or on the preset */
+  dispersion: 1,
   backFriction: 0.4,
   tackCells: 0,
   /* drop: lowering the log in released it a thin slice at a time, and the nip spread and
@@ -143,7 +145,7 @@ export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max:
   frictionRatio: { min: 1, max: 1.6, step: 0.01 },
   gap: { min: 0.02, max: 0.1, step: 0.002 },
   gravity: { min: 0, max: 6, step: 0.1 },
-  dispersion: { min: 0, max: 0.5, step: 0.005 },
+  dispersion: { min: 0, max: 2, step: 0.05 },
   backFriction: { min: 0, max: 1, step: 0.02 },
   tackCells: { min: 0, max: 6, step: 0.1 },
   logFeed: { min: 0, max: 0.6, step: 0.05 },

@@ -19,14 +19,19 @@ struct Inject {
   lat1 : vec4<f32>,
   // mode, pad
   mode : vec4<u32>,
+  // 0, 0, 0, the thickness the pigment is laid down with (0 = the dollop's own size, its diameter)
+  lamina : vec4<f32>,
 };
 @group(0) @binding(1) var<uniform> I : Inject;
 @group(0) @binding(2) var<storage, read_write> pos : array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read_write> lat : array<f32>;
 // probe[0] = float bits of the highest y in the column (0 = nothing found)
 @group(0) @binding(4) var<storage, read_write> probe : array<atomic<u32>>;
-// colour streaks (streak.wgsl): a fresh dollop is not pre-smeared
-@group(0) @binding(5) var<storage, read_write> streak : array<vec4<f32>>;
+// lamina state (lamina_common.wgsl, concatenated before this file). A dollop is one blob: its pigment is laid
+// down unthinned, as laminae as thick as the dollop is across, their normal along its radius (the way its load
+// falls off).
+@group(0) @binding(5) var<storage, read_write> lam : array<vec4<f32>>;
+@group(0) @binding(6) var<storage, read_write> mixs : array<vec2<f32>>;
 
 @compute @workgroup_size(128)
 fn probeColumn(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
@@ -48,6 +53,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   zp[0] = I.lat0.x; zp[1] = I.lat0.y; zp[2] = I.lat0.z; zp[3] = I.lat0.w;
   zp[4] = I.lat1.x; zp[5] = I.lat1.y; zp[6] = I.lat1.z;
   var a = 1.0;
+  var radial = vec3<f32>(0.0);
   if (I.mode.x != 1u) {
     var c = I.center.xyz;
     if (I.mode.x == 2u) {
@@ -57,12 +63,14 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
     let x = pos[p].xyz;
     let d = length(x - c);
     if (d >= I.center.w) { return; }
+    if (d > 1e-6) { radial = (x - c) / d; }
     let t = clamp((1.0 - d / I.center.w) / 0.4, 0.0, 1.0);
     a = clamp(I.lat1.w * t, 0.0, 1.0);
   }
-  let st = streak[p];
-  streak[p] = vec4<f32>(st.xyz, st.w * (1.0 - a));
   if (I.mode.x == 1u) {
+    // ... and no laminae: any normal, nothing thinned, nothing blended
+    lam[p] = vec4<f32>(seedDir(p), 0.0);
+    mixs[p] = vec2<f32>(0.0, 0.0);
     // set-all: the clear base carries no pigment; its latent slot is set but has no weight
     for (var c = 0u; c < 7u; c++) { lat[7u * p + c] = zp[c]; }
     pos[p].w = 0.0;
@@ -72,6 +80,10 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   let kept = (1.0 - a) * max(pos[p].w, 0.0);
   let gained = a * PIGMENT_LOAD;
   let wNew = kept + gained;
+  let lnS0 = log(select(2.0 * I.center.w, I.lamina.w, I.lamina.w > 0.0));
+  let blend = laminaTakeFresh(lam[p], mixs[p], kept, gained, radial, lnS0);
+  lam[p] = blend.lam;
+  mixs[p] = blend.mixs;
   if (wNew > 1e-9) {
     for (var c = 0u; c < 7u; c++) {
       lat[7u * p + c] = (kept * lat[7u * p + c] + gained * zp[c]) / wNew;

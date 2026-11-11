@@ -22,8 +22,10 @@ struct Stamp {
 // per column k * nx + i: float bits of the highest y seen (0 = nothing), zeroed on the CPU before each stamp
 @group(0) @binding(4) var<storage, read_write> top : array<atomic<u32>>;
 @group(0) @binding(5) var<storage, read> img : array<f32>;
-// colour streaks (streak.wgsl): a stamped picture is not pre-smeared
-@group(0) @binding(6) var<storage, read_write> streak : array<vec4<f32>>;
+// lamina state (lamina_common.wgsl, concatenated before this file). A stamp is a print layer on the surface:
+// one lamina as thick as the stamp is deep (at least a particle spacing), its normal up.
+@group(0) @binding(6) var<storage, read_write> lam : array<vec4<f32>>;
+@group(0) @binding(7) var<storage, read_write> mixs : array<vec2<f32>>;
 
 /// Picture coordinates of a particle: 0..1 across the footprint, outside it otherwise.
 fn stampUv(x : vec3<f32>) -> vec2<f32> {
@@ -64,12 +66,13 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   let base = 8u * (py * S.size.x + px);
   let a = clamp(img[base + 7u] * S.blend.y, 0.0, 1.0);
   if (a <= 0.0) { return; }
-  let st = streak[p];
-  streak[p] = vec4<f32>(st.xyz, st.w * (1.0 - a));
   // blend by load: what the particle keeps of its own pigment against the masterbatch it gains
   let kept = (1.0 - a) * max(pos[p].w, 0.0);
   let gained = a * PIGMENT_LOAD;
   let wNew = kept + gained;
+  let blend = laminaTakeFresh(lam[p], mixs[p], kept, gained, vec3<f32>(0.0, 1.0, 0.0), log(max(S.blend.x, 0.5 * P.hdt.x)));
+  lam[p] = blend.lam;
+  mixs[p] = blend.mixs;
   for (var c = 0u; c < 7u; c++) {
     lat[7u * p + c] = (kept * lat[7u * p + c] + gained * img[base + c]) / wNew;
   }

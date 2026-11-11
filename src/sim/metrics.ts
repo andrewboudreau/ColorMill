@@ -74,12 +74,16 @@ export interface MixingMetrics {
   readonly axialSlabs: number;
 }
 
+/** The smallest box the mixing index is observed at by default, world units: the coarsest preset's cell, so the
+ *  same boxes hold enough particles at every preset and the index means the same thing at each. */
+export const MIX_BOX = 1 / 32;
+
 export interface MixingOptions {
-  /** box edges in world units (default: h, 2h, 4h) */
+  /** box edges in world units (default: box, 2 box, 4 box) */
   readonly boxes?: readonly number[];
   /** the load that counts as concentration 1 (PIGMENT_LOAD: neat masterbatch) */
   readonly fullLoad?: number;
-  /** thickness of the axial slabs along x (default: h) */
+  /** thickness of the axial slabs along x (default: box) */
   readonly slab?: number;
 }
 
@@ -106,10 +110,11 @@ function binVariance(sums: Iterable<readonly [number, number]>, mean: number): {
  * boxes do not count. sigma0^2 = mean (1 - mean) is the variance before any mixing, when every
  * particle is either neat masterbatch or clear.
  *
- * `h` is the solver's cell (two particle spacings). The index depends on the box it is observed at,
- * hence the three sizes; a random mixture reads `floor`, not 0.
+ * `h` is the smallest box, in world units: a physical length (MIX_BOX), not the preset's cell, or the same
+ * batch would read differently at each preset. The index depends on the box it is observed at, hence the
+ * three sizes; a random mixture reads `floor`, not 0.
  */
-export function mixingMetrics(snap: PigmentSnapshot, h: number, options: MixingOptions = {}): MixingMetrics {
+export function mixingMetrics(snap: PigmentSnapshot, h: number = MIX_BOX, options: MixingOptions = {}): MixingMetrics {
   const boxes = options.boxes ?? [h, 2 * h, 4 * h];
   const full = options.fullLoad ?? 12;
   const slab = options.slab ?? h;

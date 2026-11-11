@@ -174,16 +174,18 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
           // the load is that share at masterbatch strength, as the raster would sum it
           const isClear = clearWhat === 'all' || (clearWhat === 'sheet' && onSheet);
           const share = inSkin || isClear ? 0 : onSheet ? laminaeCover(x, h) : 1;
-          cc[idx] = toHalf(dens * share * PIGMENT_LOAD);
+          const load = dens * share * PIGMENT_LOAD;
+          cc[idx] = toHalf(load);
           cov[idx / 4] = toHalf(dens * share);   // normalised like the mass
           a[idx] = toHalf(dens);
-          a[idx + 1] = toHalf(lat[0]);
-          a[idx + 2] = toHalf(lat[1]);
-          a[idx + 3] = toHalf(lat[2]);
-          bb[idx] = toHalf(lat[3]);
-          bb[idx + 1] = toHalf(lat[4]);
-          bb[idx + 2] = toHalf(lat[5]);
-          bb[idx + 3] = toHalf(lat[6]);
+          // the latent premultiplied by the load, as pack.wgsl stores it
+          a[idx + 1] = toHalf(load * lat[0]);
+          a[idx + 2] = toHalf(load * lat[1]);
+          a[idx + 3] = toHalf(load * lat[2]);
+          bb[idx] = toHalf(load * lat[3]);
+          bb[idx + 1] = toHalf(load * lat[4]);
+          bb[idx + 2] = toHalf(load * lat[5]);
+          bb[idx + 3] = toHalf(load * lat[6]);
         }
       }
     }
@@ -199,7 +201,7 @@ function buildVolumes(device: GPUDevice, dims: GridDims): RenderVolumes {
     device.queue.writeTexture({ texture: tex }, data, { bytesPerRow: nx * 8, rowsPerImage: ny }, { width: nx, height: ny, depthOrArrayLayers: nz });
     return tex;
   };
-  // the colour raster at the same resolution: finA = (load, lat0..2) is volA with the load in x,
+  // the colour raster at the same resolution: finA = (load, load·lat0..2) is volA with the load in x,
   // finB = volB, finC = (mass, coverage) is volA's density in x and the coverage in y
   const fa = new Uint16Array(a);
   const fc = new Uint16Array(nx * ny * nz * 4);

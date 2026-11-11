@@ -55,9 +55,10 @@ export interface RenderVolumes {
   /** Incremented when density changes. Omit to rebuild the density mip on every draw. */
   readonly densityVersion?: number;
   readonly dims: GridDims;
-  /** colour raster (design §3.5), in a box of fineDims nodes laid over the material: rgba16float (pigment load, lat0, lat1, lat2) */
+  /** colour raster (design §3.5), in a box of fineDims nodes laid over the material: rgba16float (pigment load, then the latent premultiplied by it: load·lat0, load·lat1, load·lat2) */
   readonly finA: GPUTexture;
-  /** rgba16float (lat3, lat4, lat5, lat6) on fineDims */
+  /** rgba16float (load·lat3, load·lat4, load·lat5, load·lat6) on fineDims; the reader divides by the sum of the four
+   *  concentration channels (load·lat0..3) after filtering */
   readonly finB: GPUTexture;
   /** rgba16float (mass, coverage, 0, 0) on fineDims, same normalisation as finA.x, so finA.x / finC.x is the load per unit mass
    *  and finC.y / finC.x the share of the mass that carries pigment (0..1) */

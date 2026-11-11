@@ -22,11 +22,19 @@ fn main(@builtin(global_invocation_id) lid : vec3<u32>) {
 }
 
 // The colour raster's textures (design §3.5 / §8), from the fine accumulators bound in place
-// of pmass / plat / pload: finA = (load, lat0, lat1, lat2), finB = (lat3, lat4, lat5, lat6),
-// finC = (mass, coverage, 0, 0), load, mass and coverage normalised by (h/hF)^3 / 8 so a packed
-// fine cell reads ~1, finA.x / finC.x is the load per unit mass and finC.y / finC.x
-// is the share of the cell's mass that carries pigment. Over BOX_FINE_RANGE (this frame's range
-// and the last one's), at this frame's cell hF = finest * FINE_K / 8.
+// of pmass / plat / pload: finA = (load, load·lat0, load·lat1, load·lat2),
+// finB = (load·lat3, load·lat4, load·lat5, load·lat6), finC = (mass, coverage, 0, 0), all
+// normalised by (h/hF)^3 / 8 so a packed fine cell reads ~1; finA.x / finC.x is the load per unit
+// mass and finC.y / finC.x is the share of the cell's mass that carries pigment.
+//
+// The latent is stored PREMULTIPLIED by the load (the accumulator as it is: sum of mass · load ·
+// latent), not divided by it. The renderer samples these textures trilinearly, and a filter is
+// only a pigment mix when it acts on amounts: filtering the normalised latent blended a pigment
+// texel with its clear neighbour's leftover latent by geometry, an opaque pastel fringe round every
+// streak. The renderer divides by the latent's concentration sum (lat0..lat3 sum to 1, so the sum
+// of the four premultiplied channels is the filtered load) after sampling (raymarch.wgsl).
+// Over BOX_FINE_RANGE (this frame's range and the last one's), at this frame's cell
+// hF = finest * FINE_K / 8.
 @compute @workgroup_size(4, 4, 4)
 fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>) {
   if (any(gid >= vec3<u32>(box[BOX_FINE_RANGE], box[BOX_FINE_RANGE + 1u], box[BOX_FINE_RANGE + 2u]))) { return; }
@@ -38,11 +46,7 @@ fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>) {
   let w = decodeFixed(pload[n], MASS_SCALE);
   let cov = decodeFixed(pcov[n], MASS_SCALE);
   var l : array<f32, 7>;
-  if (m > 1e-6 && w > 1e-6) {
-    for (var c = 0u; c < 7u; c++) { l[c] = decodeFixed(plat[7u * n + c], LAT_SCALE) / w; }
-  } else {
-    for (var c = 0u; c < 7u; c++) { l[c] = 0.0; }
-  }
+  for (var c = 0u; c < 7u; c++) { l[c] = decodeFixed(plat[7u * n + c], LAT_SCALE) * norm; }
   let coord = vec3<i32>(gid);
   textureStore(volA, coord, vec4<f32>(w * norm, l[0], l[1], l[2]));
   textureStore(volB, coord, vec4<f32>(l[3], l[4], l[5], l[6]));

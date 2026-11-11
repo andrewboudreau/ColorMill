@@ -91,7 +91,9 @@ jobs:
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
 
       - name: Install Chromium (Playwright)
-        run: npx playwright install --with-deps chromium
+        # --with-deps needs the Ubuntu package mirrors; when they are down the runner image usually has the
+        # libraries already, so fall back to the browser alone rather than fail before any spec runs
+        run: npx playwright install --with-deps chromium || npx playwright install chromium
 
       # Runs against the production bundle (`vite preview` on dist/). Locally
       # the same thing is `E2E_MODE=preview npm run test:e2e <names>`.

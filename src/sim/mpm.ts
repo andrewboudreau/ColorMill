@@ -293,6 +293,8 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufBox: GPUBuffer;
   /** indirect dispatch arguments written by box.wgsl: [0..2] the grid update, [4..6] the raster's clear and pack */
   private readonly bufBoxArgs: GPUBuffer;
+  /** the bounds G2P tests particles against (box.wgsl boxLast): min cell xyz, max cell xyz, a plain copy outside the atomic box buffer */
+  private readonly bufBoxLast: GPUBuffer;
   /** held pigment chunks (chunk.wgsl): which particles each chunk is, the level it feeds in at and its footprint */
   private readonly bufChunks: GPUBuffer;
   /** chunks in the table since the last reset */
@@ -417,6 +419,7 @@ export class GpuMpm implements GpuMpmSim {
     this.bufInjectAll = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bufProbe = device.createBuffer({ label: 'GpuMpm-probe', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
     this.bufBox = device.createBuffer({ label: 'GpuMpm-box', size: 4 * BOX_WORDS, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+    this.bufBoxLast = device.createBuffer({ label: 'GpuMpm-box-last', size: 4 * 8, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.bufFineBox = device.createBuffer({ label: 'GpuMpm-fine-box', size: 32, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
     this.bufChunks = device.createBuffer({ label: 'GpuMpm-chunks', size: 4 * (CHUNK_HEADER + CHUNK_WORDS * CHUNK_MAX), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
     this.bufBoxArgs = device.createBuffer({ label: 'GpuMpm-box-args', size: 4 * BOX_ARG_WORDS, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST });
@@ -538,7 +541,7 @@ export class GpuMpm implements GpuMpmSim {
     const chunkMod = mod('chunk', chunkSrc);
     const chunkRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufFlags), rw(this.bufChunks), ro(this.bufGVel)];
     const boxMod = mod('box', boxSrc);
-    const boxRes = [rw(this.bufBox), rw(this.bufBoxArgs), rw(this.bufFineBox)];
+    const boxRes = [rw(this.bufBox), rw(this.bufBoxArgs), rw(this.bufFineBox), rw(this.bufBoxLast)];
     const foldRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), rw(this.bufFlags), rw(this.bufFold),
       rw(this.bufFoldInfo), ro(this.bufPMass), rw(this.bufFoldTables)];
     const volAView = this.volA.createView({ dimension: '3d' });
@@ -562,7 +565,7 @@ export class GpuMpm implements GpuMpmSim {
       grid: this.makeKernel('grid', mod('grid', gridSrc), 'main', [rw(this.bufGMass), rw(this.bufGMom), rw(this.bufGVel), ro(this.bufPMass), ro(this.bufBox)]),
       g2p: this.makeKernel('g2p', mod('g2p', g2pSrc), 'main',
         [rw(this.bufPos), rw(this.bufVel), rw(this.bufC), rw(this.bufF), rw(this.bufAff), ro(this.bufFlags), ro(this.bufGVel),
-          rw(this.bufFoldInfo), ro(this.bufFold), rw(this.bufBox)]),
+          rw(this.bufFoldInfo), ro(this.bufFold), rw(this.bufBox), ro(this.bufBoxLast)]),
       raster: this.makeKernel('raster', rasterMod, 'main',
         [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad), rw(this.bufPCov), ro(this.bufBox), ro(this.bufStreak)]),
       disperse: this.makeKernel('disperse', mod('disperse', disperseSrc), 'main',
@@ -612,7 +615,9 @@ export class GpuMpm implements GpuMpmSim {
   /**
    * Make every box the whole grid (box.wgsl): called whenever particles are placed from the CPU
    * (seeding, reset, a pigment chunk), where no G2P has reduced their bounds. The next substep's G2P
-   * finds the real bounds; the frame after next the raster's box has shrunk to them too.
+   * finds the real bounds; the frame after next the raster's box has shrunk to them too. G2P only
+   * reports particles on or beyond a face of the last bounds, so those are written inverted here
+   * (min at the top cell, max at 0): every particle then reports, once.
    */
   private resetBox(): void {
     const d = this.dims;
@@ -630,6 +635,7 @@ export class GpuMpm implements GpuMpmSim {
     args.set(this.gridDispatch, 4);
     args.set(this.fineDispatch, BOX_ARG_FINE);
     this.device.queue.writeBuffer(this.bufBox, 0, box);
+    this.device.queue.writeBuffer(this.bufBoxLast, 0, new Uint32Array([d.nx - 1, d.ny - 1, d.nz - 1, 0, 0, 0, 0, 0]));
     this.device.queue.writeBuffer(this.bufBoxArgs, 0, args);
   }
 
@@ -1207,7 +1213,7 @@ export class GpuMpm implements GpuMpmSim {
     this.destroyed = true;
     for (const b of [this.bufPos, this.bufVel, this.bufC, this.bufF, this.bufAff, this.bufLat, this.bufFlags, this.bufStreak, this.bufFold, this.bufFoldInfo, this.bufFoldTables,
       this.bufGMass, this.bufGMom, this.bufGVel, this.bufPMass, this.bufPLat, this.bufParams, this.bufInject, this.bufInjectAll, this.bufProbe, this.bufPLoad,
-      this.bufStamp, this.bufStampTop, this.bufStampInfo, this.bufBox, this.bufBoxArgs, this.bufFineBox, this.bufChunks]) {
+      this.bufStamp, this.bufStampTop, this.bufStampInfo, this.bufBox, this.bufBoxArgs, this.bufBoxLast, this.bufFineBox, this.bufChunks]) {
       b.destroy();
     }
     this.readbackStaging?.destroy();

@@ -14,16 +14,21 @@
 // the material's box (box.wgsl): BOX_ACC is the min / max cell over every particle this substep
 @group(0) @binding(10) var<storage, read_write> box : array<atomic<u32>>;
 
-/// Grow the box to hold a particle at x. The load first: nearly every particle is inside the
-/// bounds already and writes nothing.
+// the bounds step_ settled on last substep, in a plain buffer of its own (min cell xyz, max cell xyz)
+@group(0) @binding(11) var<storage, read> boxLast : array<u32>;
+
+/// Report a particle at x to the box's reduction. Only a particle on or beyond a face of the last
+/// substep's bounds touches the shared atomics; step_ takes a face nothing reported on as having
+/// moved in by a cell (box.wgsl). Reading the bounds from the atomic words themselves had every
+/// particle contend for the same six words every substep, and was four fifths of this kernel's time.
 fn growBox(x : vec3<f32>) {
   let c = vec3<u32>(clamp(x * P.hdt.y, vec3<f32>(0.0), vec3<f32>(P.grid.xyz - vec3<u32>(1u))));
-  if (c.x < atomicLoad(&box[BOX_ACC])) { atomicMin(&box[BOX_ACC], c.x); }
-  if (c.y < atomicLoad(&box[BOX_ACC + 1u])) { atomicMin(&box[BOX_ACC + 1u], c.y); }
-  if (c.z < atomicLoad(&box[BOX_ACC + 2u])) { atomicMin(&box[BOX_ACC + 2u], c.z); }
-  if (c.x > atomicLoad(&box[BOX_ACC + 3u])) { atomicMax(&box[BOX_ACC + 3u], c.x); }
-  if (c.y > atomicLoad(&box[BOX_ACC + 4u])) { atomicMax(&box[BOX_ACC + 4u], c.y); }
-  if (c.z > atomicLoad(&box[BOX_ACC + 5u])) { atomicMax(&box[BOX_ACC + 5u], c.z); }
+  if (c.x <= boxLast[0]) { atomicMin(&box[BOX_ACC], c.x); }
+  if (c.y <= boxLast[1]) { atomicMin(&box[BOX_ACC + 1u], c.y); }
+  if (c.z <= boxLast[2]) { atomicMin(&box[BOX_ACC + 2u], c.z); }
+  if (c.x >= boxLast[3]) { atomicMax(&box[BOX_ACC + 3u], c.x); }
+  if (c.y >= boxLast[4]) { atomicMax(&box[BOX_ACC + 4u], c.y); }
+  if (c.z >= boxLast[5]) { atomicMax(&box[BOX_ACC + 5u], c.z); }
 }
 
 const FOLD_SETTLE : f32 = 0.5;   // s: material just let go of the log does not count as pile yet

@@ -14,7 +14,7 @@
  * xyz-interleaved ParticleSnapshot layout.
  */
 import {
-  DEFAULT_PARAMS, PIGMENT_CHUNK_RADIUS, PIGMENT_POOL_FRACTION,
+  DEFAULT_AGGLOMERATE, DEFAULT_PARAMS, agglomerateRateScale, PIGMENT_CHUNK_RADIUS, PIGMENT_POOL_FRACTION,
   GEOMETRY, bankTopY, bulkModulus, colourGridDims, gridDims, lameParameters, rollerPoses, seedBankPositions,
   type GridDims, type MillConfig, type MillParams, type QualitySettings, type RollStyle
 } from '../config/mill';
@@ -95,7 +95,7 @@ const BOX_ARG_FINE = 8;
 const BOX_ARG_GRID = 0;
 const BOX_ARG_FRAME = 4;
 /** Uniform ring stride (>= minUniformBufferOffsetAlignment). */
-const UNIFORM_STRIDE = 256;
+const UNIFORM_STRIDE = 512;
 /** Operator move (design §6): roll the material off the mill into a log (peel and wind,
  * then lift: rollSeconds(omega)), then put it back: dropped whole onto the nip
  * (params.logFeed = 0) or lowered in end-first at params.logFeed units/s. */
@@ -427,7 +427,7 @@ export class GpuMpm implements GpuMpmSim {
     this.bufLat = mk(7 * n);
     this.bufFlags = mk(n);
     this.bufLamina = mk(4 * n);
-    this.bufMix = mk(2 * n);
+    this.bufMix = mk(4 * n);
     this.bufFold = mk(4 * n);
     this.bufFoldInfo = mk(8 + 2 * FOLD_BINS + 2 * FOLD_BINS * FOLD_SLICES);
     this.bufFoldTables = mk(FOLD_TABLE_STRIDE * FOLD_BINS + 8 + 2 * FOLD_BINS * (FOLD_SLICES + 1));
@@ -440,10 +440,10 @@ export class GpuMpm implements GpuMpmSim {
     this.bufFMass = mk(fd.nodeCount);
     this.bufFLat = mk(7 * fd.nodeCount);
     this.bufFLoad = mk(fd.nodeCount);
-    this.bufFCov = mk(fd.nodeCount);
+    this.bufFCov = mk(2 * fd.nodeCount);
     this.bufPCov = mk(4);
     this.bufXCap = mk(d.nodeCount);
-    this.bufXQ = mk(2 * d.nodeCount);
+    this.bufXQ = mk(3 * d.nodeCount);
     this.bufXBeta = mk(d.nodeCount);
 
     this.uniformSlots = config.quality.substepsPerFrame + 1;
@@ -589,7 +589,7 @@ export class GpuMpm implements GpuMpmSim {
     const finCView = this.finC.createView({ dimension: '3d' });
     const rasterMod = mod('raster', rasterSrc, true);
     const laminaMod = mod('lamina', laminaSrc, true);
-    const laminaRes = [ro(this.bufMat), ro(this.bufFlags), rw(this.bufLamina)];
+    const laminaRes = [ro(this.bufMat), ro(this.bufFlags), rw(this.bufLamina), rw(this.bufMix)];
     const injectRes = (uniform: GPUBuffer): Resource[] => [{ kind: 'uniform', buffer: uniform }, rw(this.bufPos), rw(this.bufLat), rw(this.bufProbe), rw(this.bufLamina), rw(this.bufMix)];
     const packMod = mod('pack', packSrc);
 
@@ -774,6 +774,10 @@ export class GpuMpm implements GpuMpmSim {
     f.set([p.chunkFeed > 0 ? (2 * PIGMENT_CHUNK_RADIUS) / p.chunkFeed : 0, 2 * pMass, p.frictionRatio - 1, NIP_PROFILE_REACH], o + 56);
     // the putty's flow law (common.wgsl hbShear): 1 / n; the density tie and the volume bounds (g2p.wgsl)
     f.set([1 / Math.min(Math.max(mat.flowIndex, 0.05), 1), mat.densityTolerance, Math.log(mat.volumeMin) / 3, Math.log(mat.volumeMax) / 3], o + 60);
+    // pigment agglomerates (lamina.wgsl): cohesive stress, erosion rate, rupture stress, rupture rate
+    const ag = this.config.agglomerate ?? DEFAULT_AGGLOMERATE;
+    f.set([ag.cohesiveStress, ag.erosionRate, ag.ruptureStress, ag.ruptureRate], o + 64);
+    f.set([agglomerateRateScale(q), 0, 0, 0], o + 68);
   }
 
   // ---------------------------------------------------------------------------
@@ -1046,7 +1050,10 @@ export class GpuMpm implements GpuMpmSim {
     const mat = new Float32Array(MAT_FLOATS * m);
     // one blob: laminae as thick as the chunk is across, their normal along its radius, nothing thinned or blended
     const lam = new Float32Array(4 * m);
-    const mix = new Float32Array(2 * m).fill(Math.log(2 * r));
+    // ... and all of its pigment in agglomerates (mixs.z, the undispersed load)
+    const mix = new Float32Array(4 * m);
+    const lnBlob = Math.log(2 * r);
+    for (let i = 0; i < m; i++) mix.set([lnBlob, lnBlob, PIGMENT_LOAD, 0], 4 * i);
     for (let i = 0; i < m; i++) {
       const rx = pts[3 * i] - cx, ry = pts[3 * i + 1] - cy, rz = pts[3 * i + 2] - cz;
       const rl = Math.hypot(rx, ry, rz);
@@ -1079,7 +1086,7 @@ export class GpuMpm implements GpuMpmSim {
     }
     q.writeBuffer(this.bufFold, 16 * base, new Float32Array(4 * m));
     q.writeBuffer(this.bufLamina, 16 * base, lam);
-    q.writeBuffer(this.bufMix, 8 * base, mix);
+    q.writeBuffer(this.bufMix, 16 * base, mix);
     this.setCount(base + m);
     // refresh the uniform's particle count and the render volume right away
     this.writeParams(0, 0);
@@ -1195,7 +1202,7 @@ export class GpuMpm implements GpuMpmSim {
   async readParticles(): Promise<ParticleSnapshot> {
     const n = this.count;
     // positions / velocities are vec4 on the GPU; the snapshot is xyz-interleaved
-    const sizes = [4 * n, 4 * n, 7 * n, MAT_FLOATS * n, n, 4 * n, 2 * n].map((f) => f * 4);
+    const sizes = [4 * n, 4 * n, 7 * n, MAT_FLOATS * n, n, 4 * n, 4 * n].map((f) => f * 4);
     const total = sizes.reduce((a, b) => a + b, 0);
     if (!this.readbackStaging || this.readbackStaging.size < total) {
       this.readbackStaging?.destroy();
@@ -1234,6 +1241,16 @@ export class GpuMpm implements GpuMpmSim {
       const g = MAT_FLOATS * i + MAT_C;
       for (let c = 0; c < 9; c++) velocityGradient[9 * i + c] = mat[g + c];
     }
+    // the lamina kernels' vec4 per particle: (ln s0, mixed) and the undispersed load
+    const flagsRaw = new Uint32Array(take(sizes[4]));
+    const laminae = new Float32Array(take(sizes[5]));
+    const mixRaw = new Float32Array(take(sizes[6]));
+    const mixState = new Float32Array(2 * n);
+    const undispersed = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      mixState[2 * i] = mixRaw[4 * i]; mixState[2 * i + 1] = mixRaw[4 * i + 1];
+      undispersed[i] = mixRaw[4 * i + 2];
+    }
     const snap: ParticleSnapshot = {
       count: n,
       positions: strip(posRaw.buffer),
@@ -1242,9 +1259,10 @@ export class GpuMpm implements GpuMpmSim {
       latents,
       deformation,
       velocityGradient,
-      flags: new Uint32Array(take(sizes[4])),
-      laminae: new Float32Array(take(sizes[5])),
-      mixState: new Float32Array(take(sizes[6]))
+      flags: flagsRaw,
+      laminae,
+      mixState,
+      undispersed
     };
     staging.unmap();
     return snap;

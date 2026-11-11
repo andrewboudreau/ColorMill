@@ -95,6 +95,55 @@ export const DEFAULT_MATERIAL: MaterialConstants = {
   volumeMax: 1.4
 };
 
+/**
+ * Dispersive mixing (design §5, Agglomerates): fresh masterbatch is pigment in agglomerates, which only
+ * develop colour once shear stress over their cohesive strength has broken them down. Stresses are in the
+ * material's units (the flow curve's: yieldStress + consistency * rate^flowIndex).
+ */
+export interface AgglomerateConstants {
+  /** cohesive stress tau_e: below it agglomerates do not erode at all (0 turns the kinetics off) */
+  readonly cohesiveStress: number;
+  /** erosion: the undispersed fraction lost per unit of shear strain, per unit of excess stress tau / tau_e - 1 */
+  readonly erosionRate: number;
+  /** rupture stress tau_c (> tau_e): over it a second, faster loss sets in; 0 = no rupture */
+  readonly ruptureStress: number;
+  /** rupture: loss per unit of shear strain, per unit of tau / tau_c - 1 */
+  readonly ruptureRate: number;
+}
+
+/*
+ * The cohesive stress is set from the stress the simulation's particles flow at (tools/perf/stress.mjs; design
+ * §5 has the table). At `low`, by region, 10th / 50th / 90th / 99th percentile of the flow-curve stress:
+ *   bank, equal roll speeds     1.02 / 1.27 / 1.64 / 1.76      (friction ratio 1.6: 1.06 / 1.26 / 1.66 / 1.95)
+ *   wedge just over the nip     1.15 / 1.48 / 1.71 / 1.76      (friction ratio 1.6: 1.65 / 1.71 / 1.92 / 2.01)
+ *   nip                         0.96 / 1.12 / 1.28 / 1.40      (friction ratio 1.6: 1.68 / 1.70 / 1.71 / 1.74)
+ * 1.75 is the bank's 99th percentile at equal speeds: under it the bank and an even-speed nip do nothing, and
+ * what erodes is the layer dragged along the rolls into the wedge, which the friction ratio loads. The erosion
+ * rate is set so a batch at the default ratio is mostly developed within a minute of milling (0.84 at `low`).
+ * Both constants are this project's choice, not measured material data.
+ */
+export const DEFAULT_AGGLOMERATE: AgglomerateConstants = {
+  cohesiveStress: 1.75,
+  erosionRate: 1,
+  ruptureStress: 0,
+  ruptureRate: 0
+};
+
+/** The gap the agglomerate kinetics' shear rates are referred to: the `low` preset's. */
+export const AGGLOMERATE_REFERENCE_GAP = 0.04;
+
+/**
+ * The factor on a particle's shear rate before the agglomerate kinetics see it: the square root of the preset's
+ * nominal gap over the reference gap. The presets narrow the gap with the cell (1.28 cells at each), so the
+ * nip's strain rate doubles from `low` to `high` while the bank's hardly changes; that is numerics, and the same
+ * recipe should disperse alike at every preset. Dividing the gap out in full made `high` disperse at a third of
+ * `low`'s rate, not at all three times faster: the square root is the measured middle (design §5), not a
+ * derivation. The gap the user sets (MillParams.gap) is not divided out: a tighter nip does disperse more.
+ */
+export function agglomerateRateScale(quality: Pick<QualitySettings, 'gap'>): number {
+  return Math.sqrt(quality.gap / AGGLOMERATE_REFERENCE_GAP);
+}
+
 /** Lame parameters derived from E and nu. */
 export function lameParameters(m: Pick<MaterialConstants, 'E' | 'nu'>): { mu: number; lambda: number } {
   const mu = m.E / (2 * (1 + m.nu));
@@ -471,6 +520,8 @@ export function omegaToRpm(omega: number): number {
 export interface MillConfig {
   readonly quality: QualitySettings;
   readonly material: MaterialConstants;
+  /** pigment agglomerates (DEFAULT_AGGLOMERATE when absent) */
+  readonly agglomerate?: AgglomerateConstants;
   readonly params: MillParams;
   /** batch size: volume multiplier on the seeded bank (1 = GEOMETRY.bankVolume) */
   readonly batch?: number;

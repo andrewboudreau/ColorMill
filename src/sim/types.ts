@@ -48,6 +48,9 @@ export interface ParticleSnapshot {
   readonly laminae: Float32Array;
   /** 2 floats per particle: ln s0 (world units), then ln of the thickness the pigment is already blended down to */
   readonly mixState: Float32Array;
+  /** 1 float per particle: the undispersed load, the part of the pigment load still in agglomerates
+   *  (0 .. the load; src/sim/agglomerate.ts) */
+  readonly undispersed: Float32Array;
   /** 1 float per particle: pigment load (0 = clear base, PIGMENT_LOAD = pure masterbatch) */
   readonly loads: Float32Array;
 }

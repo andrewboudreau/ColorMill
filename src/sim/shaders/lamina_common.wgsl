@@ -4,8 +4,10 @@
 // Per particle:
 //   lam : vec4   n xyz, the unit normal of the pigment laminae in the particle, and
 //                q = ln(s / s0), the log of their thickness s over the thickness s0 they arrived with
-//   mixs : vec2  ln s0 (world units), and `mixed`: ln of the thickness the particle's pigment is already
-//                blended down to (the exchange's reference, disperse.wgsl)
+//   mixs : vec4  ln s0 (world units); `mixed`: ln of the thickness the particle's pigment is already
+//                blended down to (the exchange's reference, disperse.wgsl); the particle's UNDISPERSED
+//                load, the part of its pigment load (pos.w) still in agglomerates (0 .. pos.w; the
+//                undispersed fraction is this over the load; lamina.wgsl has the kinetics); spare
 // A clear particle carries n and q too (they follow the flow whatever the load), but they mean
 // nothing until it takes pigment: then it takes the pigment's q and ln s0 with it.
 const LAMINA_Q_MIN : f32 = -12.0;   // q is kept in this range: beyond 1e-5 of the blob's size nothing reads it
@@ -43,6 +45,13 @@ struct LaminaBlend {
   lam : vec4<f32>,
   mixs : vec2<f32>,
 };
+/// The undispersed load of a particle that keeps the share `keep` of its own pigment and gains `gained` of
+/// fresh masterbatch: what it kept stays as dispersed as it was, and fresh pigment is all agglomerates.
+fn undispersedTakeFresh(undispersed : f32, keep : f32, gained : f32, wNew : f32) -> f32 {
+  let u = keep * max(undispersed, 0.0) + gained;
+  if (isBad(u)) { return 0.0; }
+  return clamp(u, 0.0, max(wNew, 0.0));
+}
 fn laminaTakeFresh(lam : vec4<f32>, mixs : vec2<f32>, kept : f32, gained : f32, nNew : vec3<f32>, lnS0 : f32) -> LaminaBlend {
   var out : LaminaBlend;
   out.lam = lam;

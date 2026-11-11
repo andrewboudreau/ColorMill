@@ -52,6 +52,13 @@ struct Params {
   // material, continued: 1 / n (n the Herschel-Bulkley index), the density tie's tolerance (0 = off),
   // the bounds of ln J / 3
   mat2 : vec4<f32>,
+  // pigment agglomerates (lamina.wgsl, design §5): the cohesive stress erosion starts at, the erosion rate
+  // constant (per unit of shear strain and of excess stress over the cohesive stress), the stress rupture
+  // starts at (0 = no rupture) and its rate constant
+  agglo : vec4<f32>,
+  // ... and the scale its shear rates are read through (config agglomerateRateScale: the square root of the
+  // preset's nominal gap over the reference gap, design §5); three spare
+  agglo2 : vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> P : Params;

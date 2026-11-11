@@ -25,7 +25,7 @@ struct Stamp {
 // lamina state (lamina_common.wgsl, concatenated before this file). A stamp is a print layer on the surface:
 // one lamina as thick as the stamp is deep (at least a particle spacing), its normal up.
 @group(0) @binding(6) var<storage, read_write> lam : array<vec4<f32>>;
-@group(0) @binding(7) var<storage, read_write> mixs : array<vec2<f32>>;
+@group(0) @binding(7) var<storage, read_write> mixs : array<vec4<f32>>;
 
 /// Picture coordinates of a particle: 0..1 across the footprint, outside it otherwise.
 fn stampUv(x : vec3<f32>) -> vec2<f32> {
@@ -70,9 +70,11 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   let kept = (1.0 - a) * max(pos[p].w, 0.0);
   let gained = a * PIGMENT_LOAD;
   let wNew = kept + gained;
-  let blend = laminaTakeFresh(lam[p], mixs[p], kept, gained, vec3<f32>(0.0, 1.0, 0.0), log(max(S.blend.x, 0.5 * P.hdt.x)));
+  let mx = mixs[p];
+  let blend = laminaTakeFresh(lam[p], mx.xy, kept, gained, vec3<f32>(0.0, 1.0, 0.0), log(max(S.blend.x, 0.5 * P.hdt.x)));
   lam[p] = blend.lam;
-  mixs[p] = blend.mixs;
+  // stamped ink is fresh masterbatch too: undispersed until the nip works it
+  mixs[p] = vec4<f32>(blend.mixs, undispersedTakeFresh(mx.z, 1.0 - a, gained, wNew), 0.0);
   for (var c = 0u; c < 7u; c++) {
     lat[7u * p + c] = (kept * lat[7u * p + c] + gained * img[base + c]) / wNew;
   }

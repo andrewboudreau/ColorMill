@@ -5,6 +5,8 @@
  *   3. milling with no further drops keeps the total load and every load-weighted latent channel
  *      constant to float round-off (a chunk still held and feeding in, and a dollop of pigment laid down already
  *      thinner than the particle spacing, so the exchange between particles is at work from the first frames)
+ *   4. the undispersed part of the load (agglomerates, design §5) is all of a fresh drop, and with the stress
+ *      kinetics off (&erosionRate=0) the exchange carries it with the pigment and neither makes nor breaks any
  *
  * Runs at ?preset=low on SwiftShader; PIGMENT_FRAMES overrides the milling length.
  */
@@ -22,7 +24,7 @@ const GREEN = [0.3, 0.1, 0.5, 0.1, 0.02, 0.03, -0.01];
 
 export default async function run() {
   await withBrowser(async ({ page, baseUrl }) => {
-    await page.goto(`${baseUrl}?preset=low&paused=1`, { waitUntil: 'load', timeout: 60_000 });
+    await page.goto(`${baseUrl}?preset=low&paused=1&erosionRate=0`, { waitUntil: 'load', timeout: 60_000 });
     await page.waitForFunction(() => window.__colormill && window.__colormill.ready, null, { timeout: 180_000 });
     const step = async (n) => { for (let left = n; left > 0; left -= CHUNK) await page.evaluate((k) => window.__colormill.stepFrames(k), Math.min(CHUNK, left)); };
     const inventory = () => page.evaluate(() => window.__colormill.inventory());
@@ -48,6 +50,7 @@ export default async function run() {
     assert(dropped.particles === rest.particles + added[0] + added[1], 'the chunk particles are in the snapshot');
     assert(dropped.pigmented === added[0] + added[1], `only the chunks carry pigment (${dropped.pigmented})`);
     assert(close(dropped.totalLoad, expectTotal, 1e-7, expectTotal), `a drop adds its particles x ${PIGMENT_LOAD}: ${dropped.totalLoad} vs ${expectTotal}`);
+    assert(close(dropped.undispersedLoad, expectTotal, 1e-7, expectTotal), `a fresh drop is all agglomerates: ${dropped.undispersedLoad} undispersed of ${expectTotal}`);
     for (let c = 0; c < 7; c++) {
       const want = PIGMENT_LOAD * (added[0] * RED[c] + added[1] * BLUE[c]);
       assert(close(dropped.channels[c], want, 1e-6, expectTotal), `channel ${c} of the drop: ${dropped.channels[c]} vs ${want}`);
@@ -68,6 +71,7 @@ export default async function run() {
     }, GREEN);
     const start = await inventory();
     assert(start.totalLoad > dropped.totalLoad, `the dollop added pigment (${start.totalLoad} vs ${dropped.totalLoad})`);
+    assert(close(start.undispersedLoad, start.totalLoad, 1e-6, start.totalLoad), `the dollop is undispersed too: ${start.undispersedLoad} of ${start.totalLoad}`);
     let worst = 0;
     let last = start;
     for (let f = 0; f < FRAMES; f += CHUNK) {
@@ -77,7 +81,9 @@ export default async function run() {
       const dTotal = Math.abs(last.totalLoad - start.totalLoad) / start.totalLoad;
       let dColour = 0;
       for (let c = 0; c < 7; c++) dColour = Math.max(dColour, Math.abs(last.channels[c] - start.channels[c]) / start.totalLoad);
-      worst = Math.max(worst, dTotal, dColour);
+      const dUnd = Math.abs(last.undispersedLoad - start.undispersedLoad) / start.totalLoad;
+      worst = Math.max(worst, dTotal, dColour, dUnd);
+      assert(dUnd <= TOLERANCE, `the undispersed load drifted ${dUnd.toExponential(2)} after ${f + CHUNK} frames with the kinetics off (${last.undispersedLoad} vs ${start.undispersedLoad})`);
       assert(dTotal <= TOLERANCE, `total load drifted ${dTotal.toExponential(2)} after ${f + CHUNK} frames (${last.totalLoad} vs ${start.totalLoad})`);
       assert(dColour <= TOLERANCE, `load-weighted latent drifted ${dColour.toExponential(2)} after ${f + CHUNK} frames`);
       assert(last.minLoad >= 0 && last.maxLoad <= PIGMENT_LOAD * (1 + 1e-5), `loads stay in 0..${PIGMENT_LOAD} (${last.minLoad}..${last.maxLoad})`);

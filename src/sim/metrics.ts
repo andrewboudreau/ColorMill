@@ -5,10 +5,11 @@
  * Every particle has the same mass, so "mass-weighted" below is a plain count; the inventory
  * multiplies by the particle mass so its totals are in load x mass.
  */
+import { dispersionStats, type DispersionStats } from './agglomerate';
 import type { ParticleSnapshot } from './types';
 
-/** The part of a snapshot these measures read. */
-export type PigmentSnapshot = Pick<ParticleSnapshot, 'count' | 'positions' | 'loads' | 'latents'>;
+/** The part of a snapshot these measures read (without the undispersed load, all the pigment counts as dispersed). */
+export type PigmentSnapshot = Pick<ParticleSnapshot, 'count' | 'positions' | 'loads' | 'latents'> & Partial<Pick<ParticleSnapshot, 'undispersed'>>;
 
 export interface PigmentInventory {
   /** particles in the snapshot */
@@ -21,6 +22,9 @@ export interface PigmentInventory {
   readonly channels: readonly number[];
   /** channels / totalLoad: the batch's load-weighted mean latent (zeros when there is no pigment) */
   readonly meanLatent: readonly number[];
+  /** the part of totalLoad still in agglomerates (agglomerate.ts): the exchange conserves it like the load, only
+   *  the stress kinetics lower it */
+  readonly undispersedLoad: number;
   /** smallest and largest particle load */
   readonly minLoad: number;
   readonly maxLoad: number;
@@ -31,6 +35,7 @@ export function pigmentInventory(snap: PigmentSnapshot, particleMass = 1): Pigme
   const n = snap.count;
   const channels = [0, 0, 0, 0, 0, 0, 0];
   let total = 0;
+  let undispersed = 0;
   let pigmented = 0;
   let lo = n ? Infinity : 0;
   let hi = n ? -Infinity : 0;
@@ -41,12 +46,15 @@ export function pigmentInventory(snap: PigmentSnapshot, particleMass = 1): Pigme
     if (!(w !== 0)) continue;   // a clear particle's latent has no weight (and NaN never passes for pigment)
     if (w > 0) pigmented++;
     total += w;
+    const u = snap.undispersed ? snap.undispersed[p] : 0;
+    if (u > 0) undispersed += Math.min(u, Math.max(w, 0));
     for (let c = 0; c < 7; c++) channels[c] += w * snap.latents[7 * p + c];
   }
   total *= particleMass;
+  undispersed *= particleMass;
   for (let c = 0; c < 7; c++) channels[c] *= particleMass;
   const meanLatent = channels.map((v) => (total > 0 ? v / total : 0));
-  return { particles: n, pigmented, totalLoad: total, channels, meanLatent, minLoad: lo, maxLoad: hi };
+  return { particles: n, pigmented, totalLoad: total, undispersedLoad: undispersed, channels, meanLatent, minLoad: lo, maxLoad: hi };
 }
 
 export interface SegregationAtScale {
@@ -72,6 +80,9 @@ export interface MixingMetrics {
   readonly axial: number;
   /** slabs along x that hold material */
   readonly axialSlabs: number;
+  /** dispersive mixing: how much of the pigment the nip has broken out of its agglomerates, and how that is
+   *  spread over the pigment (agglomerate.ts) */
+  readonly dispersion: DispersionStats;
 }
 
 /** The smallest box the mixing index is observed at by default, world units: the coarsest preset's cell, so the
@@ -151,5 +162,5 @@ export function mixingMetrics(snap: PigmentSnapshot, h: number = MIX_BOX, option
     if (b) { b[0] += conc[p]; b[1]++; } else slabs.set(key, [conc[p], 1]);
   }
   const ax = binVariance(slabs.values(), mean);
-  return { mean, sigma0Sq, scales, axial: index(ax.variance), axialSlabs: ax.bins };
+  return { mean, sigma0Sq, scales, axial: index(ax.variance), axialSlabs: ax.bins, dispersion: dispersionStats(snap) };
 }

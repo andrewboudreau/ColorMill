@@ -1,7 +1,9 @@
 // Mixing against work on the real GPU: a fixed pigment recipe, a fixed sequence of operator moves (or none),
 // and at fixed sim times the intensity of segregation at three physical box sizes, the axial segregation, how
-// much of the material carries pigment, and the striation thickness. The preset-independence check of the
-// lamellar mixing model (design §5): the same table should come out at every preset.
+// much of the material carries pigment, the striation thickness, and how far the pigment is dispersed out of its
+// agglomerates (the batch's dispersed fraction and its load-weighted quantiles over the pigment). The
+// preset-independence check of the lamellar mixing model (design §5): the same table should come out at every
+// preset. The dispersed fraction is the friction ratio's check: --query=&frictionRatio=1.6 against 1.0.
 //
 // usage: node tools/perf/mixcurve.mjs [low medium high ...] [--seconds=60] [--every=5] [--moves=1] [--k=1] [--omega=3] [--query=&frictionRatio=1.6]
 //                                      [--shots=<dir>] [--shot-at=5,20,60] [--tag=new] [--json=<file>]
@@ -79,7 +81,27 @@ async function measure({ BOXES }) {
     const quant = (f) => { let acc = 0; for (const [s, w] of items) { acc += w; if (acc >= f * wsum) return s; } return NaN; };
     stri = { p10: quant(0.1), median: quant(0.5), p90: quant(0.9), below: wsum > 0 ? below / wsum : 0, meanLogThinning: wsum > 0 ? thin / wsum : 0 };
   }
-  return { t: api.stats().simTime, particles: n, load, pigmented: pigmented / n, tinted: tinted / n, I, axial, stri, spacing };
+  // dispersive mixing: the undispersed load (absent before the agglomerate state existed)
+  let disp = null;
+  if (snap.undispersed) {
+    const items = [];
+    let wsum = 0, und = 0, raw = 0, developed = 0;
+    for (let p = 0; p < n; p++) {
+      const w = snap.loads[p];
+      if (!(w > 0)) continue;
+      const u = Math.min(Math.max(snap.undispersed[p], 0), w);
+      const d = 1 - u / w;
+      items.push([d, w]);
+      wsum += w; und += u;
+      if (d < 0.1) raw += w;
+      if (d > 0.9) developed += w;
+    }
+    items.sort((a, b) => a[0] - b[0]);
+    const quant = (f) => { let acc = 0; for (const [d, w] of items) { acc += w; if (acc >= f * wsum) return d; } return 1; };
+    disp = { undispersed: und, dispersed: wsum > 0 ? 1 - und / wsum : 1, p10: quant(0.1), median: quant(0.5), p90: quant(0.9),
+      raw: wsum > 0 ? raw / wsum : 0, developed: wsum > 0 ? developed / wsum : 0 };
+  }
+  return { t: api.stats().simTime, particles: n, load, pigmented: pigmented / n, tinted: tinted / n, I, axial, stri, disp, spacing };
 }
 
 const ctx = await launch();
@@ -139,12 +161,13 @@ try {
     const f = (v, d = 3) => (Number.isFinite(v) ? v.toFixed(d) : '   -');
     const e = (v) => (Number.isFinite(v) ? v.toExponential(1) : '   -');
     console.log(`\n${TAG} ${preset}: ${MOVES ? 'with the operator moves' : 'steady milling, no moves'}; k=${info.k}; ${rows[0].particles} particles, spacing ${rows[0].spacing.toFixed(4)}; load ${rows[0].load.toFixed(1)}`);
-    console.log('   t(s)  revs  I(1/32) I(1/16)  I(1/8)   axial  pigmented tinted | s p10     median  p90     s<spacing  ln(s0/s) | load drift');
+    console.log('   t(s)  revs  I(1/32) I(1/16)  I(1/8)   axial  pigmented tinted | s p10     median  p90     s<spacing  ln(s0/s) | dispersed p10   median p90    raw    developed | load drift');
     for (const r of rows) {
       const t = r.t - t0;
       const s = r.stri;
       console.log(`  ${f(t, 1).padStart(5)} ${f(t * info.omega / (2 * Math.PI), 1).padStart(5)}  ${r.I.map((v) => f(v)).join('   ')}   ${f(r.axial)}   ${f(r.pigmented)}    ${f(r.tinted)} | ` +
         (s ? `${e(s.p10)} ${e(s.median)} ${e(s.p90)} ${f(s.below).padStart(7)}   ${f(s.meanLogThinning, 2).padStart(6)}` : '      -       -       -       -        -') +
+        (r.disp ? ` | ${f(r.disp.dispersed).padStart(8)}  ${f(r.disp.p10)}  ${f(r.disp.median)}  ${f(r.disp.p90)}  ${f(r.disp.raw)}  ${f(r.disp.developed).padStart(6)}   ` : ' |        -      -      -      -      -       -   ') +
         ` | ${((r.load - rows[0].load) / rows[0].load).toExponential(1)}`);
     }
     await page.close();

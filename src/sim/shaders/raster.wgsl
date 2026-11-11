@@ -1,7 +1,10 @@
 // Pigment raster (design §3.5): scatter particle mass, pigment load and load-weighted
-// latent to the node accumulators used by disperse and pack. Kinematic particles are
+// latent to the node accumulators pack reads. Kinematic particles are
 // included (they carry pigment and must be visible). The clear base has load 0 and
 // scatters mass only: its latent slot has no weight anywhere.
+// On the solver grid only the mass is scattered (the density the renderer, the grid update and the
+// fold read); that grid's load and latent accumulators are the dispersion exchange's pools
+// (disperse.wgsl). The pigment the picture shows is the colour raster's.
 // Uses the tight 8-node trilinear stencil (not the solver's 27-node quadratic
 // one): pigment streaks in a milled sheet are one or two cells thick, and the
 // wide kernel averaged them into the surrounding white before they were drawn.
@@ -66,16 +69,24 @@ fn scatterAt(p : u32, x : vec3<f32>, scale : f32, ink : f32, invh : f32, origin 
   }
 }
 
-fn scatter(p : u32, invh : f32, origin : vec3<i32>, dims : vec3<i32>, withCov : bool) {
-  scatterAt(p, pos[p].xyz, 1.0, 1.0, invh, origin, dims, withCov);
-}
-
-/// The solver-grid raster (read by disperse and pack).
+/// The solver-grid raster: mass only, with the same stencil as scatterAt.
 @compute @workgroup_size(128)
 fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
   let p = particleIndex(gid, nwg);
   if (p >= P.grid.w) { return; }
-  scatter(p, P.hdt.y, vec3<i32>(0), vec3<i32>(P.grid.xyz), false);
+  let gx = pos[p].xyz * P.hdt.y - 0.5;
+  let cell = vec3<i32>(floor(gx));
+  let f = gx - vec3<f32>(cell);
+  let nmax = vec3<i32>(P.grid.xyz) - vec3<i32>(1);
+  for (var k = 0; k < 2; k++) {
+    for (var j = 0; j < 2; j++) {
+      for (var i = 0; i < 2; i++) {
+        let o = vec3<i32>(i, j, k);
+        let w = select(vec3<f32>(1.0) - f, f, o == vec3<i32>(1));
+        atomicAdd(&pmass[nodeIndexI(clamp(cell + o, vec3<i32>(0), nmax))], encodeFixed(w.x * w.y * w.z * P.part.y, MASS_SCALE));
+      }
+    }
+  }
 }
 
 const STREAK_MIN_LOAD : f32 = 0.05;  // clear base is not streaked

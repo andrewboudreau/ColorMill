@@ -204,7 +204,7 @@ export const CATEGORY = {
   p2g: 'p2g', grid: 'grid', g2p: 'g2p', boxStep: 'box', boxFrame: 'box',
   clearRaster: 'rasterCoarse', raster: 'rasterCoarse', pack: 'pack(coarse)',
   clearFine: 'rasterFine.clear', rasterFine: 'rasterFine.scatter', packFine: 'rasterFine.pack',
-  disperse: 'disperse', streak: 'streak', chunkStep: 'chunk', chunkSettle: 'chunk', chunkDrop: 'chunk',
+  disperse: 'disperse', disperseGive: 'disperse', streak: 'streak', chunkStep: 'chunk', chunkSettle: 'chunk', chunkDrop: 'chunk',
   'raymarch-mip-pipeline': 'render.mip', render: 'render.raymarch', 'sim-whole': 'sim-whole'
 };
 

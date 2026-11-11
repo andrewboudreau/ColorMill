@@ -318,8 +318,10 @@ export class GpuMpm implements GpuMpmSim {
   private readonly bufFLoad: GPUBuffer;
   /** pigment coverage on the fine grid (the mass of particles that carry pigment) */
   private readonly bufFCov: GPUBuffer;
-  /** stands in for coverage in the solver-grid raster, which shares the scatter but never writes it */
+  /** stands in for coverage in the solver-grid raster, which shares the bindings but never writes it */
   private readonly bufPCov: GPUBuffer;
+  /** dispersion exchange (disperse.wgsl): each node's capacity; its pools are bufPLoad and bufPLat */
+  private readonly bufXCap: GPUBuffer;
   private readonly finA: GPUTexture;
   private readonly finB: GPUTexture;
   private readonly finC: GPUTexture;
@@ -410,6 +412,7 @@ export class GpuMpm implements GpuMpmSim {
     this.bufFLoad = mk(fd.nodeCount);
     this.bufFCov = mk(fd.nodeCount);
     this.bufPCov = mk(4);
+    this.bufXCap = mk(d.nodeCount);
 
     this.uniformSlots = config.quality.substepsPerFrame + 1;
     this.bufParams = device.createBuffer({ size: UNIFORM_STRIDE * this.uniformSlots, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -537,7 +540,10 @@ export class GpuMpm implements GpuMpmSim {
     const injectMod = mod('inject', injectSrc);
     const stampMod = mod('stamp', stampSrc);
     const stampRes: Resource[] = [{ kind: 'uniform', buffer: this.bufStampInfo }, rw(this.bufPos), rw(this.bufLat), rw(this.bufStampTop), ro(this.bufStamp), rw(this.bufStreak)];
-    const clearRes = [ro(this.bufBox), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad)];
+    const clearRes = [ro(this.bufBox), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad), rw(this.bufXCap)];
+    // dispersion: a conservative exchange through the solver grid's nodes, scatter then gather (disperse.wgsl)
+    const disperseMod = mod('disperse', disperseSrc);
+    const disperseRes = [rw(this.bufPos), ro(this.bufC), rw(this.bufLat), ro(this.bufFlags), rw(this.bufXCap), rw(this.bufPLoad), rw(this.bufPLat)];
     const chunkMod = mod('chunk', chunkSrc);
     const chunkRes = [rw(this.bufPos), rw(this.bufVel), rw(this.bufFlags), rw(this.bufChunks), ro(this.bufGVel)];
     const boxMod = mod('box', boxSrc);
@@ -568,8 +574,8 @@ export class GpuMpm implements GpuMpmSim {
           rw(this.bufFoldInfo), ro(this.bufFold), rw(this.bufBox), ro(this.bufBoxLast)]),
       raster: this.makeKernel('raster', rasterMod, 'main',
         [ro(this.bufPos), ro(this.bufLat), rw(this.bufPMass), rw(this.bufPLat), rw(this.bufPLoad), rw(this.bufPCov), ro(this.bufBox), ro(this.bufStreak)]),
-      disperse: this.makeKernel('disperse', mod('disperse', disperseSrc), 'main',
-        [rw(this.bufPos), ro(this.bufC), rw(this.bufLat), ro(this.bufPMass), ro(this.bufPLat), ro(this.bufFlags), ro(this.bufPLoad)]),
+      disperseGive: this.makeKernel('disperseGive', disperseMod, 'give_', disperseRes),
+      disperse: this.makeKernel('disperse', disperseMod, 'take_', disperseRes),
       streak: this.makeKernel('streak', mod('streak', streakSrc), 'main', [ro(this.bufC), ro(this.bufFlags), rw(this.bufStreak)]),
       pack: this.makeKernel('pack', packMod, 'main',
         [ro(this.bufBox), ro(this.bufPMass), ro(this.bufPLat), { kind: 'storageTexture', view: volAView }]),
@@ -767,7 +773,10 @@ export class GpuMpm implements GpuMpmSim {
     this.dispatchOne(pass, k.boxFrame, slot);
     this.dispatchBox(pass, k.clearRaster, slot, BOX_ARG_FRAME);
     this.dispatchParticles(pass, k.raster, slot);
-    if (disperse) this.dispatchParticles(pass, k.disperse, slot);
+    if (disperse) {
+      this.dispatchParticles(pass, k.disperseGive, slot);
+      this.dispatchParticles(pass, k.disperse, slot);
+    }
     this.dispatchBox(pass, k.pack, slot, BOX_ARG_FRAME);
     // the colour raster after disperse, so the picture carries this frame's mixing
     this.dispatchBox(pass, k.clearFine, slot, BOX_ARG_FINE);
@@ -1224,6 +1233,6 @@ export class GpuMpm implements GpuMpmSim {
     this.finA.destroy();
     this.finB.destroy();
     this.finC.destroy();
-    for (const b of [this.bufFMass, this.bufFLat, this.bufFLoad, this.bufFCov, this.bufPCov]) b.destroy();
+    for (const b of [this.bufFMass, this.bufFLat, this.bufFLoad, this.bufFCov, this.bufPCov, this.bufXCap]) b.destroy();
   }
 }

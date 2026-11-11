@@ -50,9 +50,9 @@ try {
     const rel = (v, v0) => (v0 !== 0 ? (v - v0) / v0 : v);
     console.log(`${preset}: dispersion k=${r.k}, ${r.added} chunk particles, expected load ${12 * r.added}, read ${base.total.toFixed(3)}`);
     for (const row of r.rows) {
-      const worst = Math.max(...row.channels.slice(0, 4).map((c, i) => Math.abs(c - base.channels[i]))) / Math.max(base.total, 1e-9);
-      console.log(`  ${row.label.padEnd(10)} n=${row.particles} pigmented=${row.pigmented} total=${row.total.toFixed(3)} drift=${(100 * rel(row.total, base.total)).toFixed(4)}% ` +
-        `colour drift=${(100 * worst).toFixed(4)}% load ${row.minLoad.toExponential(1)}..${row.maxLoad.toFixed(2)} I(h,2h,4h)=${row.I.join(', ')} axial=${row.axial}`);
+      const worst = Math.max(...row.channels.map((c, i) => Math.abs(c - base.channels[i]))) / Math.max(base.total, 1e-9);
+      console.log(`  ${row.label.padEnd(10)} n=${row.particles} pigmented=${row.pigmented} total=${row.total.toFixed(3)} drift=${rel(row.total, base.total).toExponential(2)} ` +
+        `colour drift=${worst.toExponential(2)} load ${row.minLoad.toExponential(1)}..${row.maxLoad.toFixed(2)} I(h,2h,4h)=${row.I.join(', ')} axial=${row.axial}`);
     }
     await page.close();
   }

@@ -187,6 +187,10 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups)
   mats[b + 2u] = vec4<f32>(ar[8], fr[0], fr[1], fr[2]);
   mats[b + 3u] = vec4<f32>(fr[3], fr[4], fr[5], fr[6]);
   mats[b + 4u] = vec4<f32>(fr[7], fr[8], cr[0], cr[1]);
-  mats[b + 5u] = vec4<f32>(cr[2], cr[3], cr[4], cr[5]);
-  mats[b + 6u] = vec4<f32>(cr[6], cr[7], cr[8], 0.0);
+  // C is read once a frame (lamina.wgsl), so only the frame's last substep stores the two vec4 that are
+  // all C; between substeps the stored C is stale but for c0 and c1, which share a vec4 with F
+  if (P.fine.w != 0u) {
+    mats[b + 5u] = vec4<f32>(cr[2], cr[3], cr[4], cr[5]);
+    mats[b + 6u] = vec4<f32>(cr[6], cr[7], cr[8], 0.0);
+  }
 }

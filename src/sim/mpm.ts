@@ -750,7 +750,9 @@ export class GpuMpm implements GpuMpmSim {
     // colour raster grid (design §3.5)
     const fd = this.fineDims;
     const ratio = h / fd.h;
-    u[o + 44] = fd.nx; u[o + 45] = fd.ny; u[o + 46] = fd.nz; u[o + 47] = 0;
+    u[o + 44] = fd.nx; u[o + 45] = fd.ny; u[o + 46] = fd.nz;
+    // G2P stores C on the frame's last substep only, unless the lamina kernel reads it every substep (g2p.wgsl)
+    u[o + 47] = LAMINA_PER_SUBSTEP || slot === q.substepsPerFrame - 1 ? 1 : 0;
     f.set([fd.h, 1 / fd.h, (ratio * ratio * ratio) / 8, p.streak], o + 48);
     // cut & roll: peel and wind, double, lift (a negative double time keeps the roll long: no fold in half);
     // cut & fold: the hand's pulling speed and how far back it pulls (fold.wgsl)

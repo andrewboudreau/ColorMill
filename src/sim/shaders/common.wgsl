@@ -36,7 +36,8 @@ struct Params {
   // fold slab: bank half depth (z window for the live bank-top estimate), slab clearance above the bank,
   // arc -> z scale (0.6), max y any folded particle may reach (domain.y - 3h)
   fold3 : vec4<f32>,
-  // colour raster (design §3.5): the node counts of its box nxF, nyF, nzF, 0
+  // colour raster (design §3.5): the node counts of its box nxF, nyF, nzF; then 1 on the substeps whose G2P
+  // stores C (the frame's last, g2p.wgsl), else 0
   fine : vec4<u32>,
   // colour raster at its finest cell: hF, 1/hF, normalisation (h/hF)^3 / 8 so a packed fine cell reads ~1,
   // the longest colour thread in particle spacings (0 = points)

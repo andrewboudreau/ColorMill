@@ -21,8 +21,8 @@ import { nipDiagnostics } from './sim/diagnostics';
 import { clampParam, formatMillQuery, isDefaultParam, parseExperimental, parseInk, parseMillParams, parseRollStyle } from './config/link';
 import { fitStamp, parseStampText, rgbaToStamp, stampDims } from './stamp';
 import {
-  BATCH_LIMITS, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres, soundSpeed,
-  type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
+  BATCH_LIMITS, DEFAULT_AGGLOMERATE, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres, soundSpeed,
+  type AgglomerateConstants, type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
 import type { CameraState, Renderer } from './render/types';
@@ -642,6 +642,13 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     if (Number.isFinite(v) && v >= 0 && (v > 0 || k === 'densityTolerance')) materialOverride[k] = v;
   }
   const material: MaterialConstants = materialOverride;
+  // ... and the agglomerate kinetics (?cohesiveStress=1.4&erosionRate=0.2; erosionRate=0 turns them off)
+  const agglomerateOverride: { -readonly [K in keyof AgglomerateConstants]: number } = { ...DEFAULT_AGGLOMERATE };
+  for (const k of ['cohesiveStress', 'erosionRate', 'ruptureStress', 'ruptureRate'] as const) {
+    const v = parseFloat(query.get(k) ?? '');
+    if (Number.isFinite(v) && v >= 0) agglomerateOverride[k] = v;
+  }
+  const agglomerate: AgglomerateConstants = agglomerateOverride;
   const tackQuery = parseFloat(query.get('tack') ?? '');
   const tackCells = Number.isFinite(tackQuery) && tackQuery > 0 ? tackQuery : undefined;
   // experiment: the colour raster's resolution in cells per unit (?colour=32 puts it on the
@@ -651,6 +658,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   const buildConfig = (p: QualityPreset, params: MillParams, b: number = batch): MillConfig => ({
     quality: colourCells !== undefined ? { ...QUALITY_PRESETS[p], colourCellsPerUnit: colourCells } : QUALITY_PRESETS[p],
     material,
+    agglomerate,
     params: { ...params, ...(tackCells !== undefined ? { tackCells } : {}) },
     batch: b
   });

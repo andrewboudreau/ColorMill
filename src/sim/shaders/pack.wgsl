@@ -6,7 +6,7 @@
 @group(0) @binding(4) var volA : texture_storage_3d<rgba16float, write>;
 @group(0) @binding(5) var volB : texture_storage_3d<rgba16float, write>;
 @group(0) @binding(7) var finC : texture_storage_3d<rgba16float, write>;
-@group(0) @binding(8) var<storage, read> pcov : array<i32>;   // colour raster only (see raster.wgsl)
+@group(0) @binding(8) var<storage, read> pcov : array<i32>;   // colour raster only: coverage, undispersed load and specks, 3 per node (raster.wgsl)
 
 /// Over BOX_FRAME (this frame's box united with the last one's): texels the material left are
 /// written empty, so the density texture is zero everywhere outside the current box.
@@ -23,9 +23,11 @@ fn main(@builtin(global_invocation_id) lid : vec3<u32>) {
 
 // The colour raster's textures (design §3.5 / §8), from the fine accumulators bound in place
 // of pmass / plat / pload: finA = (load, load·lat0, load·lat1, load·lat2),
-// finB = (load·lat3, load·lat4, load·lat5, load·lat6), finC = (mass, coverage, 0, 0), all
+// finB = (load·lat3, load·lat4, load·lat5, load·lat6), finC = (mass, coverage, undispersed load, 0), all
 // normalised by (h/hF)^3 / 8 so a packed fine cell reads ~1; finA.x / finC.x is the load per unit
-// mass and finC.y / finC.x is the share of the cell's mass that carries pigment.
+// mass, finC.y / finC.x is the share of the cell's mass that carries pigment, and finC.z / finA.x is the
+// share of the cell's pigment still in agglomerates (design §5): an amount like the load, so the
+// renderer's filter mixes it as it mixes the load, and the latent is not touched.
 //
 // The latent is stored PREMULTIPLIED by the load (the accumulator as it is: sum of mass · load ·
 // latent), not divided by it. The renderer samples these textures trilinearly, and a filter is
@@ -44,7 +46,9 @@ fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>) {
   let norm = P.fineH.z * ks * ks * ks;
   let m = decodeFixed(pmass[n], MASS_SCALE);
   let w = decodeFixed(pload[n], MASS_SCALE);
-  let cov = decodeFixed(pcov[n], MASS_SCALE);
+  let cov = decodeFixed(pcov[3u * n], MASS_SCALE);
+  let und = min(decodeFixed(pcov[3u * n + 1u], MASS_SCALE), w);
+  let speck = f32(pcov[3u * n + 2u]);   // the cell's speck code (raster.wgsl scatterSpeck), an integer below 4096
   var l : array<f32, 7>;
   if (w > 0.0) {
     for (var c = 0u; c < 7u; c++) { l[c] = decodeFixed(plat[7u * n + c], LAT_SCALE) * norm; }
@@ -55,5 +59,5 @@ fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>) {
   let coord = vec3<i32>(gid);
   textureStore(volA, coord, vec4<f32>(w * norm, l[0], l[1], l[2]));
   textureStore(volB, coord, vec4<f32>(l[3], l[4], l[5], l[6]));
-  textureStore(finC, coord, vec4<f32>(m * norm, cov * norm, 0.0, 0.0));
+  textureStore(finC, coord, vec4<f32>(m * norm, cov * norm, max(und, 0.0) * norm, speck));
 }

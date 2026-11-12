@@ -715,7 +715,8 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   than a particle. Every particle carries the unit normal `n` of its
   pigment's laminae and `q = ln(s/s0)`, the log of their thickness over the
   thickness they arrived with (one `vec4`), plus `ln s0` and the exchange's
-  reference `mixed` (one `vec2`). Both follow the flow exactly: a material
+  reference `mixed` (two floats of a second `vec4`, `mixs`, whose third is
+  the undispersed load, see Agglomerates below). Both follow the flow exactly: a material
   surface element's direction is `m = F⁻ᵀ n0`, `dm/dt = −Lᵀ m`, so
   `dn/dt = −(I − n nᵀ) Lᵀ n` and `d(ln s)/dt = nᵀ L n`, with `L` the velocity
   gradient (the APIC `C`) less its trace (volume change is not mixing). The
@@ -761,7 +762,8 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   load adds to neither of the last two (there is no floor: a floor gave the
   clear base's white latent a weight in every thin edge). The fine raster's
   pack writes `finA/finB` = load and the latent **premultiplied by the load**
-  (same normalisation as the load), and `finC` = mass and coverage. Thus
+  (same normalisation as the load), and `finC` = mass, coverage and the
+  undispersed load (Agglomerates below). Thus
   `finA.x / finC.x` is the load per unit mass, and the renderer divides the
   filtered latent by the sum of its four concentration channels (which sum
   to 1 per pigment, so the sum is the filtered load) to get the mix of the
@@ -816,8 +818,8 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   particles (a held chunk, material in the operator's hand) are skipped.
   The pools are the solver-grid raster's load and latent accumulators, which
   that raster does not fill (it scatters mass only), plus the capacity, the
-  two lamina pools and the mark. Ten storage bindings, the software
-  adapter's limit.
+  two lamina pools (and, in the same buffer, the undispersed load's) and the
+  mark. Ten storage bindings, the software adapter's limit.
   Before this the rate was `α = k·γ·frameDt` from the particle's own shear
   rate: mixing wherever there was shear, at a rate that depended on the
   nip's strain rates and on `k`, whatever the laminae were doing.
@@ -825,6 +827,102 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   of segregation at boxes of 1/32, 1/16 and 1/8 of a sim unit, axial
   segregation, striation thickness) for a fixed recipe with or without the
   operator's moves.
+- **Agglomerates: dispersive mixing** (`lamina.wgsl`, `agglomerate.ts` the
+  CPU mirror with the tests, `AgglomerateConstants` in the config). The
+  laminae and the exchange above are distributive mixing: they say where the
+  pigment is. Fresh masterbatch is pigment in agglomerates, which tint
+  weakly until stress breaks them down, and that is what the nip and the
+  friction ratio are for. Each particle carries its **undispersed load** `u`
+  (`mixs.z`, `0 ≤ u ≤ w`): the part of its load still in agglomerates. It is
+  an amount, like the load, so it needs no new buffer and no new rule:
+  a chunk, an inject and a stamp set `u` to the load they add; the exchange
+  pools `N·α·u` beside `N·α·w` (a third slot per node in the lamina pool
+  buffer, still ten bindings) and shares it out by the same integer shares,
+  so agglomerates travel with the pigment that holds them and the exchange
+  neither makes nor breaks any (e2e `pigment.spec.mjs` with the kinetics
+  off: the batch's undispersed total holds to the load's own round-off);
+  the fine raster accumulates it beside the coverage and `pack` writes it to
+  `finC.z`.
+  **Kinetics**, once a frame in the lamina kernel, from the same `C`:
+  `γ̇ = √(2 D':D')`, `τ = τ_y + k γ̇ⁿ` (the flow curve of §4, not the stored
+  elastic stress: measured, the two agree in the nip and the wedge to 0.05,
+  and the flow curve needs no eigen-decomposition), and
+  `du/dt = −u γ̇ [k_e (τ/τ_e − 1)₊ + k_r (τ/τ_c − 1)₊]`: nothing below the
+  cohesive stress `τ_e`, above it a loss per unit of shear strain that grows
+  with the excess stress (erosion), and an optional second term over a
+  higher `τ_c` (rupture; off by default, `τ_c = 0`). First order in `u`, so
+  the step is the exact decay `exp(−loss·dt)`. Kinematic particles are
+  skipped. **What is sourced:** that agglomerates break by erosion and by
+  rupture, that erosion is gradual, sets in at the lower stress and is first
+  order, and that the applied shear stress over the cohesive strength
+  governs it (Rwei, Manas-Zloczower & Feke, Polym. Eng. Sci. 1990 and 1991,
+  read at the level of the abstracts). **What is not:** the rate expression
+  (linear in the strain rate and in the excess stress) and every constant.
+  **Where the threshold sits** (`tools/perf/stress.mjs`: flow-curve stress
+  by region on the settled flow, 10th / 50th / 90th / 99th percentile; the
+  "bank" is everything between the roll axes more than 0.06 over the nip):
+
+  | `low` | ratio 1.0 | ratio 1.25 | ratio 1.6 |
+  |---|---|---|---|
+  | bank (25% of the particles) | 1.02 / 1.27 / 1.64 / 1.76 | 1.06 / 1.28 / 1.62 / 1.84 | 1.06 / 1.26 / 1.66 / 1.95 |
+  | wedge over the nip (1.6%) | 1.15 / 1.48 / 1.71 / 1.76 | 1.39 / 1.57 / 1.80 / 1.87 | 1.65 / 1.71 / 1.92 / 2.01 |
+  | nip (1.5%) | 0.96 / 1.12 / 1.28 / 1.40 | 1.38 / 1.41 / 1.48 / 1.55 | 1.68 / 1.70 / 1.71 / 1.74 |
+  | sheet (70%) | 0.58 / 0.59 / 0.81 / 1.06 | 0.58 / 0.59 / 0.95 / 1.38 | 0.58 / 0.59 / 1.01 / 1.58 |
+
+  The premise "the bank shears at about 1 /s, the nip far above" is not what
+  the simulation does. The bulk of the bank is slow (median 3 /s), but the
+  one or two cells of it that the rolls drag down into the wedge shear at 10
+  to 30 /s, as fast as the nip, and there is ten times more of that layer
+  than of nip: at any threshold the batch's erosion is mostly there, and the
+  nip proper at the default ratio (1.41) is below the bank's 90th
+  percentile. So no threshold separates "bank" from "nip". `τ_e = 1.75` is
+  the bank's 99th percentile at equal roll speeds: the bulk of the bank and
+  an even-speed nip do nothing, and what erodes is the dragged layer and the
+  wedge, which the friction ratio loads (wedge median 1.48 → 1.57 → 1.71).
+  `k_e = 1` puts a batch at the default ratio at 0.84 dispersed after a
+  minute at `low`. **Presets.** The presets narrow the gap with the cell, so
+  the nip's strain rate doubles from `low` to `high` while the bank's hardly
+  changes. With the rates as they are `high` dispersed three times faster
+  (0.92 after 20 s at ratio 1.0 with `τ_e` = 1.65); with every rate scaled by
+  the gap ratio it dispersed at a third of `low`'s rate. The kinetics read
+  the rate times `√(preset gap / 0.04)` (`agglomerateRateScale`), the
+  measured middle and no more than that. The gap the user sets is not
+  divided out.
+  **Measured** (`mixcurve.mjs`, the batch's dispersed fraction `1 − Σu/Σw`
+  after 20 / 40 / 60 s, three chunks, steady milling; with the operator's
+  moves in brackets at 60 s):
+
+  | ratio | `low` | `high` |
+  |---|---|---|
+  | 1.0 | 0.29 / 0.44 / 0.54 (0.55) | 0.54 / 0.79 / 0.90 (0.89) |
+  | 1.25 | 0.69 / 0.78 / 0.84 (0.88) | 0.57 / 0.81 / 0.92 (0.94) |
+  | 1.6 | 0.76 / 0.89 / 0.94 (0.96) | 0.60 / 0.72 / 0.77 (0.99) |
+
+  At `low` the friction ratio does what it should. At `high` it barely
+  matters between 1.0 and 1.25: there an even-speed bank is sheared against
+  the rolls harder than at `low` (bank 90th percentile 14 /s against 10 /s at
+  ratio 1.25), and that, not the nip, is what disperses. At `high` and ratio
+  1.6 a fifth of the pigment falls off the front roll onto the tray within
+  10 s and stays raw there (the median over the pigment is 0.97); that is
+  the flow at that ratio, not the kinetics, and the operator's moves bring
+  it back (0.99). Elsewhere the moves change little: they redistribute,
+  they do not stress. Not preset-independent, then, and the constants are a
+  game's, not a material's.
+  **Appearance** (`raymarch.wgsl`). The load that tints is
+  `w − (1 − 0.12) u`: agglomerates count for an eighth of their strength
+  (`AGGLO_WEAK`), in the primary hit's opacity (both colour modes) and in
+  the reflections' `puttyTint`. And they show: a cell half a colour-raster
+  cell across is drawn as an opaque speck of the pigment's masstone
+  (`albedo^1.5`) with a chance of 0.3 × the undispersed share of the pigment
+  there, less where there is only a trace of it; a hash of the world cell,
+  like the coverage dither. The latent is not touched, so nothing blurs: an
+  under-milled batch is paler and speckled, a milled one clean. Neat
+  masterbatch looks the same either way (its opacity saturates at an eighth
+  of its load too). The specks are fixed in space, not carried by the
+  material: on a turning roll they flicker rather than ride.
+  `mixing()` reports the batch's dispersed fraction, its load-weighted
+  10th / 50th / 90th percentile over the pigment, a histogram and the raw
+  (< 0.1) and developed (> 0.9) shares; `inventory()` the undispersed total.
 
 **Reference check.** Footage of a real two-roll mill (silicone, three bands
 of about equal width across the front roll: red, yellow, teal) milled to a

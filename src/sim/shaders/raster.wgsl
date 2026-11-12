@@ -15,15 +15,18 @@
 @group(0) @binding(5) var<storage, read_write> pload : array<atomic<i32>>;
 // Pigment coverage (colour raster only): the mass of pigment-carrying particles per node, so the
 // renderer can tell a cell that is one-eighth masterbatch (a lamina edge) from one that is evenly
-// tinted, which the load ratio alone cannot. The solver-grid kernel binds a small dummy here and
-// never writes it (nothing reads coverage on the solver grid).
+// tinted, which the load ratio alone cannot; and, in the same buffer (3 per node: coverage, then this,
+// then the cell's speck, a code: scatterSpeck),
+// the UNDISPERSED load, the part of the node's pigment load still in agglomerates (design §5), which
+// the renderer draws at a fraction of its tinting strength and as specks. The solver-grid kernel
+// binds a small dummy here and never writes it (nothing reads either on the solver grid).
 @group(0) @binding(6) var<storage, read_write> pcov : array<atomic<i32>>;
 // the material's box (box.wgsl): the colour raster's lattice (BOX_FINE)
 @group(0) @binding(7) var<storage, read> box : array<u32>;
 // the lamina state per particle (lamina.wgsl; lamina_common.wgsl is concatenated before this file):
 // normal xyz and q = ln(s / s0), then ln s0 and the exchange's reference; only the colour raster reads them
 @group(0) @binding(8) var<storage, read> lam : array<vec4<f32>>;
-@group(0) @binding(9) var<storage, read> mixs : array<vec2<f32>>;
+@group(0) @binding(9) var<storage, read> mixs : array<vec4<f32>>;
 
 // A particle counts as covered (pigment) above this load. Dispersion relaxes every particle of a
 // milled few-percent batch toward load ~1, and that must still count as covered so a homogeneous
@@ -41,6 +44,9 @@ fn scatterAt(p : u32, x : vec3<f32>, scale : f32, ink : f32, invh : f32, origin 
   // real weight: it whitened thin pigment and, through disperse, tinted clear material from nothing.)
   let load = max(pos[p].w, 0.0) * ink;
   let inked = load > 0.0;
+  // the undispersed part of that load, drawn with the same ink (so a tap carries the particle's own fraction)
+  var und = clamp(mixs[p].z, 0.0, max(pos[p].w, 0.0)) * ink;
+  if (isBad(und)) { und = 0.0; }
   let covered = withCov && pos[p].w > COVERAGE_MIN_LOAD;
   var z : array<f32, 7>;
   for (var c = 0u; c < 7u; c++) { z[c] = lat[7u * p + c]; }
@@ -59,9 +65,10 @@ fn scatterAt(p : u32, x : vec3<f32>, scale : f32, ink : f32, invh : f32, origin 
         let c = clamp(base + o, vec3<i32>(0), nmax);
         let n = (u32(c.z) * u32(dims.y) + u32(c.y)) * u32(dims.x) + u32(c.x);
         atomicAdd(&pmass[n], encodeFixed(wgt, MASS_SCALE));
-        if (covered) { atomicAdd(&pcov[n], encodeFixed(wgt, MASS_SCALE)); }
+        if (covered) { atomicAdd(&pcov[3u * n], encodeFixed(wgt, MASS_SCALE)); }
         if (inked) {
           atomicAdd(&pload[n], encodeFixed(wgt * load, MASS_SCALE));
+          if (withCov && und > 0.0) { atomicAdd(&pcov[3u * n + 1u], encodeFixed(wgt * und, MASS_SCALE)); }
           for (var cc = 0u; cc < 7u; cc++) {
             atomicAdd(&plat[7u * n + cc], encodeFixed(wgt * load * z[cc], LAT_SCALE));
           }
@@ -69,6 +76,38 @@ fn scatterAt(p : u32, x : vec3<f32>, scale : f32, ink : f32, invh : f32, origin 
       }
     }
   }
+}
+
+// Specks (design §5, Agglomerates): the agglomerates the eye can pick out are few. One particle in
+// SPECK_ONE_IN stands for them and is drawn as a speck: a small sphere at the particle's own position,
+// its radius growing with the cube root of the particle's undispersed load. The speck is the particle's,
+// so it rides the material, and it shrinks and goes out as the particle's agglomerates erode.
+// A colour cell holds one speck, its largest (atomicMax of the code below): size level 1..3 in bits 9..10,
+// then the particle's place in the cell in eighths, 3 bits an axis. 11 bits, so pack can store it in a
+// half float exactly.
+const SPECK_ONE_IN : u32 = 48u;
+const SPECK_FULL_LOAD : f32 = 12.0;   // undispersed load of the largest speck (pure masterbatch)
+const SPECK_MIN_LOAD : f32 = 0.4;     // less than this is below what the eye picks out
+
+fn isSpeck(p : u32) -> bool {
+  var hsh = p * 2654435761u + 40503u;
+  hsh = ((hsh >> ((hsh >> 28u) + 4u)) ^ hsh) * 277803737u;
+  hsh = (hsh >> 22u) ^ hsh;
+  return hsh % SPECK_ONE_IN == 0u;
+}
+
+fn scatterSpeck(p : u32, x : vec3<f32>, invh : f32, origin : vec3<i32>, dims : vec3<i32>) {
+  let und = clamp(mixs[p].z, 0.0, max(pos[p].w, 0.0));
+  if (isBad(und)) { return; }
+  if (und < SPECK_MIN_LOAD) { return; }
+  let level = clamp(i32(round(3.0 * pow(und / SPECK_FULL_LOAD, 1.0 / 3.0))), 1, 3);
+  let gx = x * invh;
+  let cell = vec3<i32>(floor(gx));
+  let c = cell - origin;
+  if (any(c < vec3<i32>(0)) || any(c >= dims)) { return; }
+  let e = vec3<i32>(clamp(floor((gx - vec3<f32>(cell)) * 8.0), vec3<f32>(0.0), vec3<f32>(7.0)));
+  let n = (u32(c.z) * u32(dims.y) + u32(c.y)) * u32(dims.x) + u32(c.x);
+  atomicMax(&pcov[3u * n + 2u], (level << 9u) | (e.x << 6u) | (e.y << 3u) | e.z);
 }
 
 /// The solver-grid raster: mass only, with the same stencil as scatterAt.
@@ -149,4 +188,5 @@ fn mainFine(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgro
     if (K > 1) { xi = clamp(x + span * ((f32(i) + 0.5) / f32(K) - 0.5), lo, hi); }
     scatterAt(p, xi, 1.0 / f32(K), ink, invh, origin, vec3<i32>(P.fine.xyz), true);
   }
+  if (isSpeck(p)) { scatterSpeck(p, x, invh, origin, vec3<i32>(P.fine.xyz)); }
 }

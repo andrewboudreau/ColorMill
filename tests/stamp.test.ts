@@ -33,6 +33,15 @@ describe('fitStamp', () => {
     expect(square.x1 - square.x0).toBeCloseTo(square.z1 - square.z0);
     expect(0.5 * (square.x0 + square.x1)).toBeCloseTo(GEOMETRY.length / 2);
   });
+  it('fits between the side guides when they are in from the ends of the rolls', () => {
+    const n = bankFootprint(0.6);
+    expect(n.x1 - n.x0).toBeCloseTo(0.6 * GEOMETRY.length - 2 * GEOMETRY.bankEndMargin);
+    expect(0.5 * (n.x0 + n.x1)).toBeCloseTo(GEOMETRY.length / 2);
+    expect(bankFootprint(1)).toEqual(b);
+    const wide = fitStamp(1000, 100, 1, 0.6);
+    expect(wide.x0).toBeCloseTo(n.x0);
+    expect(wide.x1).toBeCloseTo(n.x1);
+  });
   it('scales down inside the fit and never below a tenth', () => {
     const half = fitStamp(64, 64, 0.5);
     expect(half.x1 - half.x0).toBeCloseTo(0.5 * (b.z1 - b.z0));

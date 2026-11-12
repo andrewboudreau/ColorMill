@@ -15,7 +15,7 @@
  */
 import {
   DEFAULT_AGGLOMERATE, DEFAULT_PARAMS, agglomerateRateScale, PIGMENT_CHUNK_RADIUS, PIGMENT_POOL_FRACTION,
-  GEOMETRY, bankTopY, bulkModulus, colourGridDims, gridDims, lameParameters, rollerPoses, seedBankPositions,
+  GEOMETRY, GUIDE_SPEED, bankTopY, bulkModulus, colourGridDims, gridDims, guideOpen, guideSpan, guideTopY, lameParameters, rollerPoses, seedBankPositions,
   type GridDims, type MillConfig, type MillParams, type QualitySettings, type RollStyle
 } from '../config/mill';
 import type {
@@ -266,6 +266,8 @@ interface MutableStats {
   lastStepGpuMs: number;
   rollerAngleFront: number;
   rollerAngleBack: number;
+  guideOpen: number;
+  guideSeeded: number;
 }
 
 export class GpuMpm implements GpuMpmSim {
@@ -285,6 +287,11 @@ export class GpuMpm implements GpuMpmSim {
   private readonly seedCount: number;
   private readonly capacity: number;
   private readonly seeds: Float32Array;
+  /** side guides: the open width the bank was seeded at, where the plates stand now (both fractions of the roll
+   *  length; the plates slide toward params.guideWidth at GUIDE_SPEED), and the speed they are closing at */
+  private readonly guideSeeded: number;
+  private guide: number;
+  private guideClosing = 0;
   private readonly statsData: MutableStats;
 
   // particle SoA
@@ -411,6 +418,8 @@ export class GpuMpm implements GpuMpmSim {
     this.fineDims = fd;
 
     this.batch = config.batch ?? 1;
+    this.guideSeeded = guideOpen(config.params.guideWidth);
+    this.guide = this.guideSeeded;
     this.seeds = seedBankPositions(config.quality, config.params, 1234, this.batch);
     this.clampSeeds();
     this.seedCount = this.seeds.length / 3;
@@ -488,7 +497,9 @@ export class GpuMpm implements GpuMpmSim {
       simSecondsPerFrame: config.quality.dt * config.quality.substepsPerFrame,
       lastStepGpuMs: NaN,
       rollerAngleFront: 0,
-      rollerAngleBack: 0
+      rollerAngleBack: 0,
+      guideOpen: this.guide,
+      guideSeeded: this.guideSeeded
     };
 
     if (device.features.has('timestamp-query')) {
@@ -778,7 +789,16 @@ export class GpuMpm implements GpuMpmSim {
     // pigment agglomerates (lamina.wgsl): cohesive stress, erosion rate, rupture stress, rupture rate
     const ag = this.config.agglomerate ?? DEFAULT_AGGLOMERATE;
     f.set([ag.cohesiveStress, ag.erosionRate, ag.ruptureStress, ag.ruptureRate], o + 64);
-    f.set([agglomerateRateScale(q), 0, 0, 0], o + 68);
+    // ... its rate scale; the side guides (grid.wgsl): half the open width, the plates' closing speed, their top
+    f.set([agglomerateRateScale(q), 0.5 * this.guide * GEOMETRY.length, this.guideClosing, guideTopY(this.guide)], o + 68);
+  }
+
+  /** Slide the side guides toward the operator's setting for one substep (each plate at GUIDE_SPEED). */
+  private advanceGuide(dt: number): void {
+    const step = ((2 * GUIDE_SPEED) / GEOMETRY.length) * dt;
+    const next = this.guide + Math.min(Math.max(guideOpen(this.params.guideWidth) - this.guide, -step), step);
+    this.guideClosing = next < this.guide ? GUIDE_SPEED : 0;
+    this.guide = next;
   }
 
   // ---------------------------------------------------------------------------
@@ -864,6 +884,7 @@ export class GpuMpm implements GpuMpmSim {
     const duration = this.foldMode === 1 ? this.foldTotalSeconds : this.hand.pass;
     const finishAt: number[] = [];
     for (let s = 0; s < substeps; s++) {
+      this.advanceGuide(q.dt);
       this.writeParams(s, foldT, foldActive);
       if (foldActive) {
         foldT += q.dt;
@@ -942,6 +963,7 @@ export class GpuMpm implements GpuMpmSim {
     st.simTime += q.dt * substeps;
     st.rollerAngleFront += front.omegaX * q.dt * substeps;
     st.rollerAngleBack += back.omegaX * q.dt * substeps;
+    st.guideOpen = this.guide;
     st.simSecondsPerFrame = q.dt * q.substepsPerFrame;
   }
 
@@ -973,6 +995,11 @@ export class GpuMpm implements GpuMpmSim {
     this.statsData.simTime = 0;
     this.statsData.rollerAngleFront = 0;
     this.statsData.rollerAngleBack = 0;
+    // the batch goes back as it was seeded, the plates with it; they slide to the setting from there
+    // (the app rebuilds the simulator instead when the setting has changed, so the new batch fits it)
+    this.guide = this.guideSeeded;
+    this.guideClosing = 0;
+    this.statsData.guideOpen = this.guide;
     this.setCount(this.seedCount);
     this.chunkCount = 0;
     this.chunksHeld = false;
@@ -1010,7 +1037,9 @@ export class GpuMpm implements GpuMpmSim {
     const per = GEOMETRY.seedPerAxis;
     const dom = GEOMETRY.domain;
     const r = Math.max(radius, 2 * h);
-    const cx = Math.min(Math.max(x, 1.5 * h + r), dom[0] - 1.5 * h - r);
+    // between the side guides, where they stand now
+    const [gx0, gx1] = guideSpan(this.guide);
+    const cx = Math.min(Math.max(x, gx0 + 1.5 * h + r), Math.max(gx1 - 1.5 * h - r, gx0 + 1.5 * h + r));
     const cz = Math.min(Math.max(z, 1.5 * h + r), dom[2] - 1.5 * h - r);
     // set the chunk down touching whatever is in that column (the bank, the nip
     // floor, an earlier chunk), as an operator does, instead of dropping it from

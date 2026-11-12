@@ -26,6 +26,10 @@ export interface SimStats {
   /** front roller angle (rad) accumulated for rendering the rotation */
   readonly rollerAngleFront: number;
   readonly rollerAngleBack: number;
+  /** side guides: the open width between the plates where they stand now, as a fraction of the roll length
+   *  (they slide toward params.guideWidth), and the width the batch was seeded at */
+  readonly guideOpen: number;
+  readonly guideSeeded: number;
 }
 
 /** CPU readback of particle state (for tests / diagnostics). */

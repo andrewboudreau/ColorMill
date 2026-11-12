@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { agglomerateLossRate, agglomerateStep, dispersionStats, effectiveLoad, flowStress, shearRate } from '../src/sim/agglomerate';
-import { DEFAULT_AGGLOMERATE, DEFAULT_MATERIAL, QUALITY_PRESETS, agglomerateRateScale, type AgglomerateConstants } from '../src/config/mill';
+import { DEFAULT_AGGLOMERATE, DEFAULT_MATERIAL, DEFAULT_PARAMS, QUALITY_PRESETS, agglomerateRateScale, type AgglomerateConstants } from '../src/config/mill';
 
 const M = DEFAULT_MATERIAL;
 const A: AgglomerateConstants = { cohesiveStress: 1.5, erosionRate: 0.4, ruptureStress: 0, ruptureRate: 0 };
@@ -94,10 +94,12 @@ describe('agglomerate kinetics', () => {
   it('the default threshold sits over what the bank reaches and under what the wedge over a fast nip does (design §5)', () => {
     // the bank's median shear rate is about 3 /s and its 99th percentile at equal roll speeds 16 /s (1.76); the
     // wedge over the nip at a friction ratio of 1.6 runs at 14 to 27 /s
-    expect(agglomerateLossRate(3.5, M, DEFAULT_AGGLOMERATE)).toBe(0);
-    expect(agglomerateLossRate(12, M, DEFAULT_AGGLOMERATE)).toBe(0);
-    expect(agglomerateLossRate(20, M, DEFAULT_AGGLOMERATE)).toBeGreaterThan(0);
-    expect(agglomerateLossRate(27, M, DEFAULT_AGGLOMERATE)).toBeGreaterThan(agglomerateLossRate(20, M, DEFAULT_AGGLOMERATE));
+    // at the default putty stiffness, which multiplies the flow curve (and the threshold was set with)
+    const S = { ...M, yieldStress: M.yieldStress * DEFAULT_PARAMS.stiffness, consistency: M.consistency * DEFAULT_PARAMS.stiffness };
+    expect(agglomerateLossRate(3.5, S, DEFAULT_AGGLOMERATE)).toBe(0);
+    expect(agglomerateLossRate(12, S, DEFAULT_AGGLOMERATE)).toBe(0);
+    expect(agglomerateLossRate(20, S, DEFAULT_AGGLOMERATE)).toBeGreaterThan(0);
+    expect(agglomerateLossRate(27, S, DEFAULT_AGGLOMERATE)).toBeGreaterThan(agglomerateLossRate(20, S, DEFAULT_AGGLOMERATE));
   });
 });
 

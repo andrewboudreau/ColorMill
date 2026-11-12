@@ -35,6 +35,7 @@ gap — we exaggerate the gap so it is resolvable on the grid).
 | front roller axis | (y=yc, z = zNip + (R + gap/2)) | nearer the viewer |
 | `omega` | 0–6 rad/s, default 3.0 | Angular speed of the **front** roller |
 | `frictionRatio` | 1.0–1.6, default 1.25 | back roller speed / front roller speed |
+| `guideWidth` | 0.4–1.0, default 1.0 | open width between the side guides, as a fraction of `L` |
 
 **Rotation sense.** Both roller surfaces move **downward through the nip**.
 With angular velocity vectors along x: back roller `ω_b = (+omega·frictionRatio, 0, 0)`,
@@ -42,9 +43,43 @@ front roller `ω_f = (−omega, 0, 0)`. Surface velocity at a point `p` is
 `v = ω × (p − axisPoint)`. (Check: top of the back roller moves +z, top of the
 front roller moves −z, so both move toward the nip and then down.)
 
-**End guides.** The bank is confined along x by the domain walls at x=0 and
-x=L (they model the mill's guide cheeks). Walls are *separating* (no
-penetration, free tangential slip).
+**Side guides.** The bank is confined along x by two plates (the mill's
+guide cheeks), symmetric about the middle of the rolls and `guideWidth · L`
+apart: at `x = L/2 ± guideWidth · L/2`. At the default 1 they stand at the
+ends of the rolls, where they are the domain walls at x=0 and x=L. Walls
+are *separating* (no penetration, free tangential slip). The operator slides
+the plates together to work a narrower strip of the rolls
+(`MillParams.guideWidth`, a drawer slider and `?guideWidth=`):
+
+- A plate spans the wedge between the rolls: in y from the channel's lower
+  end (`yc − 0.06`) to its top, in z from 0.06 behind the back roll's axis to
+  0.06 in front of the front roll's. Inside that extent a grid node within
+  the wall margin (`2h`) of a plate's face may not move outward (§3.3 step
+  3). The sheet round the front and underside of the front roll is outside
+  it and is not confined: nothing pushes it along the roll.
+- A moved plate slides at `GUIDE_SPEED` = 0.15 (the simulator holds where
+  the plates stand, `SimStats.guideOpen`, and moves it toward the setting
+  every substep). While a plate closes, the nodes at its face move inward at
+  least at its speed, so it ploughs the bank in front of it. Nodes inside a
+  plate's body are moved inward at 0.3: that is for the edge of the sheet,
+  which the roll brings round from outside the plates into the wedge for a
+  turn or two after they have closed.
+- Narrowing does not remove putty: the same batch in a narrower strip is a
+  bigger bank. From the full roll to 0.6 on a running mill the share of the
+  batch in the wedge between the rolls goes from about a third to over half
+  (0.35 to 0.59 at `low`, 0.34 to 0.55 at `high`), and no particle is left
+  outside the plates 10 s later (`tools/perf/guides.mjs`, `low` and `high`;
+  at 0.4 the heap stands over the plates). The plates' top is
+  `guideTopY(width)`: 0.15 above the seeded default batch at the ends, and
+  higher the further in they stand.
+- What is laid out along the roll fits between the plates: a new batch is
+  seeded between them to the same height (`bankBounds`; the batch size is a
+  charge for the whole roll length, so a strip 0.6 wide gets about 0.6 of
+  the putty and the bank and sheet are the same in section), and the drop
+  slots and a stamped picture are spaced between them. Reset rebuilds the
+  simulator when the plates have moved since it was built.
+- The operator's moves (§6) are unchanged: they work about the middle of the
+  rolls and take the sheet's width from the particles.
 
 **Tray.** The floor y=0 is a separating wall with Coulomb friction.
 
@@ -303,7 +338,12 @@ Boundaries, applied in this order:
    if `vn < 0`: `vt = vrel − vn·n`; `vt *= max(0, 1 − mu·(−vn)/|vt|)` with
    `mu = 0.4`; `v = vr + vt` (normal component removed). If `vn ≥ 0` leave v
    unchanged.
-3. **Domain walls**. For x, z faces and the ceiling: if inside a `2h` margin
+3. **Side guides and domain walls**. Inside the guides' extent (§1), a node
+   within `2h` of a plate's face: its x velocity toward the middle of the
+   rolls is raised to the plate's closing speed (0 when the plate is at
+   rest, which is the separating wall), or to 0.3 if the node is inside the
+   plate's body. With the plates at the ends this is the domain wall's
+   condition on the same nodes. For x, z faces and the ceiling: if inside a `2h` margin
    and moving outward, zero that component. Floor (y < 2h): if `v.y < 0`
    then `v.y = 0` and scale the tangential part by `max(0, 1 − 0.6)` once
    (simple stick-slip; the tray should not be a skating rink).
@@ -1247,7 +1287,8 @@ Single fullscreen ray-march pass (`src/render/shaders/raymarch.wgsl`):
    glint of circular tool marks. Depth-composite against the volume hit.
 6. A wooden bench top with a brushed steel plate under the mill (soft roll
    shadows and contact darkening as before), a shop floor below it;
-   clear end-guide plates at x = 0 and x = L; background: dark studio walls
+   clear side-guide plates where the simulator's plates stand (at x = 0 and
+   x = L by default; slid in, they reach down between the rolls to the nip); background: dark studio walls
    with a pool of light at the horizon.
 7. Display: exposure, a hue-preserving tone curve (a shoulder on the largest
    channel, so pigment mid-tones keep their hue and saturation; overshoot
@@ -1268,7 +1309,7 @@ putty skips shading the analytic scene behind it; translucent shading is unchang
 
 - Bottom bar: a drop-slot strip (`DROP_SLOTS` = 6 fixed x positions along
   the roll, evenly spaced between margins that keep a whole chunk clear of
-  the end guides; the operator picks one, `?slot=` presets it), a chunk-size
+  the side guides; the operator picks one, `?slot=` presets it), a chunk-size
   picker (`PIGMENT_CHUNK_SIZES`: small / medium / large, radius 0.06 / 0.1 /
   0.14; `?chunk=s|m|l`), the pigment palette (large round swatches; tap = a
   masterbatch chunk of the chosen radius set down on top of whatever is over

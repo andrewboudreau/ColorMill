@@ -121,9 +121,13 @@ export interface AgglomerateConstants {
  * what erodes is the layer dragged along the rolls into the wedge, which the friction ratio loads. The erosion
  * rate is set so a batch at the default ratio is mostly developed within a minute of milling (0.84 at `low`).
  * Both constants are this project's choice, not measured material data.
+ * Those stresses are at putty stiffness 1 (MillParams.stiffness, which multiplies the whole flow curve). The default
+ * stiffness is 1.25, so the cohesive stress is 1.25 * 1.75: the same place in the bank's distribution, and the
+ * same dispersion at the defaults as the table was measured with. The stiffness slider then moves the putty's
+ * stress against it: softer putty disperses less, stiffer more.
  */
 export const DEFAULT_AGGLOMERATE: AgglomerateConstants = {
-  cohesiveStress: 1.75,
+  cohesiveStress: 2.19,
   erosionRate: 1,
   ruptureStress: 0,
   ruptureRate: 0
@@ -181,6 +185,11 @@ export interface MillParams {
   gap: number;
   /** gravity, sim units / s^2 */
   gravity: number;
+  /** how stiff the putty is: multiplies its strength in flow (the yield stress and the Herschel-Bulkley consistency,
+   *  DEFAULT_MATERIAL's), not its elastic moduli, so the sound speed and with it the time step's margin are the
+   *  same at every setting. The agglomerates' cohesive stress is the pigment's and does not move with it: a
+   *  stiffer putty loads them harder and disperses them sooner. */
+  stiffness: number;
   /** lamellar mixing: the exponent k of the exchange closure (design §5, src/sim/lamina.ts exchangeFraction). A
    *  particle whose pigment laminae are thinned to s below the particle spacing keeps (s / spacing)^k of its
    *  difference from its neighbours. 1 is the geometric value; 0 switches the exchange off. */
@@ -201,6 +210,10 @@ export interface MillParams {
   /** pigment chunks: how long a medium chunk takes to feed into the bank, in seconds (it is held and sinks in,
    *  let go where it touches material; bigger chunks take longer in proportion); 0 lets a chunk go whole */
   chunkFeed: number;
+  /** side guides: the open width between the two plates as a fraction of the roll length (1 = the plates stand
+   *  at the ends of the rolls). The plates are symmetric about the middle of the rolls and slide at GUIDE_SPEED
+   *  toward where this puts them (guideSpan, grid.wgsl). */
+  guideWidth: number;
 }
 
 export const DEFAULT_PARAMS: Readonly<MillParams> = {
@@ -208,6 +221,9 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
   frictionRatio: 1.25,
   gap: 0.04,
   gravity: 2.0,
+  /* a quarter stiffer than the flow curve design §4 chose: the owner's choice. The bank and the sheet measure the same there
+     (tools/perf/bank.mjs: `low` slows its bank from 1.5 up, `high` is unmoved to 2) */
+  stiffness: 1.25,
   /* not tuned: 1 is what the geometry gives (a parcel one spacing wide that samples stripes s thick differs
      from the local mean in proportion to s / spacing). It is not a rate, so it does not depend on the nip's
      strain rates or on the preset */
@@ -221,7 +237,9 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
   streak: 12,
   /* about three revolutions of the front roll at the default speed: let go whole, a chunk went round as one
      patch a third to a half of the circumference long and stayed one for many revolutions */
-  chunkFeed: 6
+  chunkFeed: 6,
+  /* the whole roll: the plates are the end guides */
+  guideWidth: 1
 };
 
 export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max: number; step: number }>> = {
@@ -229,13 +247,16 @@ export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max:
   frictionRatio: { min: 1, max: 1.6, step: 0.01 },
   gap: { min: 0.02, max: 0.1, step: 0.002 },
   gravity: { min: 0, max: 6, step: 0.1 },
+  stiffness: { min: 0.5, max: 2, step: 0.05 },
   dispersion: { min: 0, max: 2, step: 0.05 },
   backFriction: { min: 0, max: 1, step: 0.02 },
   tackCells: { min: 0, max: 6, step: 0.1 },
   logFeed: { min: 0, max: 0.6, step: 0.05 },
   foldPasses: { min: 1, max: 3, step: 1 },
   streak: { min: 0, max: 12, step: 1 },
-  chunkFeed: { min: 0, max: 15, step: 0.5 }
+  chunkFeed: { min: 0, max: 15, step: 0.5 },
+  /* 0.4 leaves a strip two medium chunks wide between the drop margins */
+  guideWidth: { min: 0.4, max: 1, step: 0.02 }
 };
 
 /** Fixed geometry (sim units). */
@@ -260,11 +281,46 @@ export const GEOMETRY = {
       about 1.2 L at UNIT_METRES; a gap-thick sheet around the front roll
       (2πR·gap per unit length) takes ~0.11 units³, leaving a modest bank. */
   bankVolume: 0.15,
-  /** x margin the bank keeps from the end guides at seeding */
+  /** x margin the bank keeps from the side guides at seeding */
   bankEndMargin: 0.05,
   /** particles per axis per cell at seeding (8 per cell) */
   seedPerAxis: 2
 } as const;
+
+/** How fast a side guide slides along the rolls when the operator moves it (sim units / s per plate): a sixth of
+    the roll's surface speed at the default setting, so the plate ploughs the bank in front of it and the putty
+    has time to flow (the full travel from the roll's end to the narrowest setting takes three seconds). */
+export const GUIDE_SPEED = 0.15;
+
+/** The open width between the side guides as a fraction of the roll length, from a setting: within the slider's
+    range whatever was asked for (there is no roll past its ends). */
+export function guideOpen(width: number | undefined): number {
+  const l = PARAM_LIMITS.guideWidth;
+  return width !== undefined && Number.isFinite(width) ? Math.min(Math.max(width, l.min), l.max) : 1;
+}
+
+/** x of the two side guides' inner faces for an open width (fraction of the roll length), symmetric about the
+    middle of the rolls; [0, length] at 1. */
+export function guideSpan(width?: number): [number, number] {
+  const half = 0.5 * guideOpen(width) * GEOMETRY.length;
+  return [0.5 * GEOMETRY.length - half, 0.5 * GEOMETRY.length + half];
+}
+
+/** Top of the side guides (y): a little above the settled bank of the default batch when they stand at the
+    ends, and higher the further in they are, since a batch pushed into a narrower strip stands higher (the top
+    of the default batch seeded 1 / width as deep, which is more than the bank holds once the sheet has taken its
+    share). Above this the plates do not hold the putty. */
+export function guideTopY(width?: number): number {
+  // by the hundredth of the width: the solver asks every substep while a plate slides
+  const key = Math.round(guideOpen(width) * 100);
+  let top = guideTopCache.get(key);
+  if (top === undefined) {
+    top = solveBankTop(100 / key, DEFAULT_PARAMS) + 0.15;
+    guideTopCache.set(key, top);
+  }
+  return top;
+}
+const guideTopCache = new Map<number, number>();
 
 export interface RollerPose {
   /** axis point (any point on the axis); axis direction is +x */
@@ -361,7 +417,7 @@ export function millTopSurfaceY(z: number, params: Pick<MillParams, 'gap' | 'ome
   return y;
 }
 
-type BankParams = Pick<MillParams, 'gap' | 'omega' | 'frictionRatio'>;
+type BankParams = Pick<MillParams, 'gap' | 'omega' | 'frictionRatio'> & Partial<Pick<MillParams, 'guideWidth'>>;
 
 /**
  * Volume (sim units³) of the bank slab between the mill top surface and y = top,
@@ -393,6 +449,13 @@ export function bankTopY(batch: number, params: BankParams = DEFAULT_PARAMS): nu
   const key = `${batch}:${params.gap}`;
   const cached = bankTopCache.get(key);
   if (cached !== undefined) return cached;
+  const top = solveBankTop(batch, params);
+  if (bankTopCache.size >= 32) bankTopCache.delete(bankTopCache.keys().next().value!);
+  bankTopCache.set(key, top);
+  return top;
+}
+
+function solveBankTop(batch: number, params: BankParams): number {
   const target = GEOMETRY.bankVolume * Math.max(batch, 0);
   let lo: number = GEOMETRY.axisY;
   let hi: number = GEOMETRY.domain[1];
@@ -400,10 +463,7 @@ export function bankTopY(batch: number, params: BankParams = DEFAULT_PARAMS): nu
     const mid = 0.5 * (lo + hi);
     if (bankVolumeBelow(mid, params) < target) lo = mid; else hi = mid;
   }
-  const top = 0.5 * (lo + hi);
-  if (bankTopCache.size >= 32) bankTopCache.delete(bankTopCache.keys().next().value!);
-  bankTopCache.set(key, top);
-  return top;
+  return 0.5 * (lo + hi);
 }
 
 /** Litres of putty in a batch (HUD/panel readout). */
@@ -411,15 +471,18 @@ export function batchLitres(batch: number): number {
   return GEOMETRY.bankVolume * batch * UNIT_METRES ** 3 * 1000;
 }
 
-/** Axis-aligned bounds of the initial bank (x, y, z ranges). */
+/** Axis-aligned bounds of the initial bank (x, y, z ranges): between the side guides along the roll. The batch
+    is a charge for the whole roll length (bankTopY), so a narrower strip is seeded to the same height with
+    proportionally less putty: the bank and the sheet are the same in section at any guide width. */
 export function bankBounds(params: BankParams, batch = 1): {
   x: [number, number];
   y: [number, number];
   z: [number, number];
 } {
   const top = bankTopY(batch, params);
+  const [x0, x1] = guideSpan(params.guideWidth);
   return {
-    x: [GEOMETRY.bankEndMargin, GEOMETRY.length - GEOMETRY.bankEndMargin],
+    x: [x0 + GEOMETRY.bankEndMargin, x1 - GEOMETRY.bankEndMargin],
     y: [GEOMETRY.axisY, top],
     z: [GEOMETRY.nipZ - GEOMETRY.bankHalfDepth, GEOMETRY.nipZ + GEOMETRY.bankHalfDepth]
   };
@@ -499,11 +562,13 @@ export const DEFAULT_CHUNK_SIZE = 1;
 export const DROP_SLOTS = 6;
 
 /** x of drop slot `slot` (0-based, clamped): the slots are evenly spaced
-    between margins that keep a whole chunk clear of the end guides. */
-export function dropSlotX(slot: number, slots = DROP_SLOTS): number {
+    between margins that keep a whole chunk clear of the side guides, which
+    stand `guideWidth` of the roll length apart (the ends of the rolls at 1). */
+export function dropSlotX(slot: number, slots = DROP_SLOTS, guideWidth = 1): number {
   const margin = PIGMENT_CHUNK_RADIUS + 0.05;
   const i = Math.min(slots - 1, Math.max(0, Math.round(slot)));
-  return margin + ((i + 0.5) * (GEOMETRY.length - 2 * margin)) / slots;
+  const [x0, x1] = guideSpan(guideWidth);
+  return x0 + margin + ((i + 0.5) * (x1 - x0 - 2 * margin)) / slots;
 }
 
 /** Estimated particle count for a preset (batch volume / (h^3/8)), for UI/preset selection. */

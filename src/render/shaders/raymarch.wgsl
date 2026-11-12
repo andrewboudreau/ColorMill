@@ -32,7 +32,7 @@ struct Uniforms {
   rimColor: vec4f,
   misc: vec4f,        // resolution.xy, exposure, flags (bit0 = volumes bound, bit1 = target is sRGB-encoded already, bit2 = surface colour mode)
   mip: vec4f,         // coarse max-density mip dims (cx, cy, cz), w = block edge in texels
-  guides: vec4f,      // end-guide plates: bank top y, bank half depth (z), plate thickness, enabled
+  guides: vec4f,      // side-guide plates: top y, half the open width between them (x), plate thickness, enabled
   fine: vec4f,        // colour raster (design §3.5): node counts of its textures (nxF, nyF, nzF), w = its finest cell
   quality: vec4f,     // x = the rolls mirror the putty (a short density march per roll pixel), y = debug view (1 = normal, 2 = normal confidence), z = reach of the normal's filter (texels), w spare
 };
@@ -107,8 +107,10 @@ const COV_DITHER: f32 = 0.08;
 const CLEAR_BODY: vec3f = vec3f(0.60, 0.65, 0.67);
 // the clear base turns hazy over this many solver cells of thickness (1/e of the light passes)
 const CLEAR_HAZE_CELLS: f32 = 3.2;
-// roughness of the putty's skin (a satin sheen: at 0.11 it read as wet and too shiny) and of the rolls around their circumference
-const PUTTY_ROUGH: f32 = 0.30;
+// roughness of the putty's skin (matte, like kneaded silicone: 0.11 read as wet, 0.30 still as glossy) and of the rolls around
+// their circumference; PUTTY_GLOSS scales what the skin mirrors (a soft skin scatters much of it)
+const PUTTY_ROUGH: f32 = 0.55;
+const PUTTY_GLOSS: f32 = 0.5;
 // density gradient at the surface, per cell (rest density = 1): below WEAK the normal is noise and the
 // skin is drawn rough, above FIRM it is a face and gets the full gloss
 const NORMAL_WIDE: f32 = 3.0;   // weight of the wide field's gradient against the surface density's
@@ -781,8 +783,8 @@ fn shadePutty(p: vec3f, n: vec3f, v: vec3f, albedo: vec3f, ao: f32, thickness: f
   col += tint * through * trans * graze * 0.55 * ao;
 
   // gloss: a dielectric skin (F0 = 0.04) mirroring the studio, the rolls and the bench
-  let sr = mix(PUTTY_ROUGH, 0.5, rough);
-  let f = fresnel(nv, vec3f(0.04), sr).x;
+  let sr = max(PUTTY_ROUGH, mix(PUTTY_ROUGH, 0.5, rough));
+  let f = fresnel(nv, vec3f(0.04), sr).x * PUTTY_GLOSS;
   let r = reflect(-v, n);
   var out: PuttyShade;
   out.spec = reflectScene(p + n * (0.5 * h), r, sr) * (f * specOcclusion(nv, ao, sr));
@@ -995,13 +997,18 @@ fn shadeScene(ro: vec3f, rd: vec3f, s: SceneHit, lite: bool) -> vec3f {
   return backdrop(rd);
 }
 
-// ---------------------------------------------------------------- end-guide plates
+// ---------------------------------------------------------------- side-guide plates
 
-// The translucent end guide at x = x0 (thickness U.guides.z toward the outside), spanning the
+// The translucent side guide at x = x0 (thickness U.guides.z toward the outside), spanning the
 // bank in y and z; composited over the scene colour `behind` when it is in front of tHit.
+// At the end of the rolls the plate stops short of the roll caps. Slid in along the rolls it
+// reaches down between them to the nip, as far as the solver holds the putty (grid.wgsl); the
+// rolls are in front of whatever part of it is inside them.
 fn compositeGuide(col: vec3f, ro: vec3f, rd: vec3f, tHit: f32, x0: f32, outward: f32) -> vec3f {
   let tk = U.guides.z;
-  let lo = vec3f(select(x0 - tk, x0, outward > 0.0), U.rollerBack.x + U.rollerBack.z * 0.55, U.rollerBack.y - 0.06);
+  let atEnd = U.guides.y > 0.5 * U.domain.w - 1e-4;
+  let bottom = U.rollerBack.x + select(-0.06, U.rollerBack.z * 0.55, atEnd);
+  let lo = vec3f(select(x0 - tk, x0, outward > 0.0), bottom, U.rollerBack.y - 0.06);
   let hi = vec3f(select(x0, x0 + tk, outward > 0.0), U.guides.x, U.rollerFront.y + 0.06);
   let ph = hitAabb(ro, rd, lo, hi);
   if (ph.t >= tHit) { return col; }
@@ -1195,13 +1202,13 @@ fn fsMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
     col = shadeScene(ro, rd, scene, false);
   }
 
-  // end-guide plates at both ends of the rolls (far one first)
+  // side-guide plates, U.guides.y either side of the middle of the rolls (far one first)
   if (U.guides.w > 0.5) {
-    let L = U.domain.w;
-    let nearX = select(0.0, L, ro.x > L * 0.5);
-    let farX = L - nearX;
-    col = compositeGuide(col, ro, rd, tHit, farX, select(-1.0, 1.0, farX > 0.0));
-    col = compositeGuide(col, ro, rd, tHit, nearX, select(-1.0, 1.0, nearX > 0.0));
+    let mid = 0.5 * U.domain.w;
+    let nearX = mid + select(-U.guides.y, U.guides.y, ro.x > mid);
+    let farX = 2.0 * mid - nearX;
+    col = compositeGuide(col, ro, rd, tHit, farX, select(-1.0, 1.0, farX > mid));
+    col = compositeGuide(col, ro, rd, tHit, nearX, select(-1.0, 1.0, nearX > mid));
   }
 
   // distance haze into the backdrop

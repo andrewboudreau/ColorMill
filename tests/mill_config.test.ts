@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_CHUNK_SIZE, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_RADIUS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, bankTopY, bankVolumeBelow, colourGridDims, defaultConfig, dropSlotX, gridDims,
-  lameParameters, millTopSurfaceY, rollerAxisDistance, rollerPoses, rollerSurfaceVelocity, seedBankPositions
+  lameParameters, millTopSurfaceY, rollerAxisDistance, rollerPoses, rollerSurfaceVelocity, seedBankPositions,
+  bankBounds, guideOpen, guideSpan, guideTopY
 } from '../src/config/mill';
 
 describe('mill geometry', () => {
@@ -115,6 +116,65 @@ describe('pigment drop slots', () => {
   it('clamps out-of-range slots to the ends', () => {
     expect(dropSlotX(-3)).toBe(dropSlotX(0));
     expect(dropSlotX(99)).toBe(dropSlotX(DROP_SLOTS - 1));
+  });
+});
+
+describe('side guides', () => {
+  it('stand at the ends of the rolls by default, and nothing laid out along the roll moves', () => {
+    expect(DEFAULT_PARAMS.guideWidth).toBe(1);
+    expect(guideSpan(1)).toEqual([0, GEOMETRY.length]);
+    expect(guideSpan()).toEqual([0, GEOMETRY.length]);
+    expect(bankBounds(DEFAULT_PARAMS).x).toEqual([GEOMETRY.bankEndMargin, GEOMETRY.length - GEOMETRY.bankEndMargin]);
+    expect(guideTopY(1)).toBe(bankTopY(1) + 0.15);
+    const margin = PIGMENT_CHUNK_RADIUS + 0.05;
+    for (let i = 0; i < DROP_SLOTS; i++) {
+      expect(dropSlotX(i, DROP_SLOTS, 1)).toBe(dropSlotX(i));
+      expect(dropSlotX(i)).toBe(margin + ((i + 0.5) * (GEOMETRY.length - 2 * margin)) / DROP_SLOTS);
+    }
+    // a parameter set written before the guides existed seeds the same bank
+    const { guideWidth: _, ...old } = DEFAULT_PARAMS;
+    expect(seedBankPositions(QUALITY_PRESETS.low, old as typeof DEFAULT_PARAMS)).toEqual(seedBankPositions(QUALITY_PRESETS.low, DEFAULT_PARAMS));
+  });
+
+  it('are symmetric about the middle of the rolls and never wider than the rolls or narrower than the slider', () => {
+    const [x0, x1] = guideSpan(0.6);
+    expect(x1 - x0).toBeCloseTo(0.6 * GEOMETRY.length, 9);
+    expect(x0 + x1).toBeCloseTo(GEOMETRY.length, 9);
+    expect(guideOpen(4)).toBe(1);
+    expect(guideOpen(0)).toBe(PARAM_LIMITS.guideWidth.min);
+    expect(guideOpen(NaN)).toBe(1);
+    expect(guideTopY(0.6)).toBeGreaterThan(guideTopY(1));
+    expect(guideTopY(0.4)).toBeLessThan(GEOMETRY.domain[1]);
+  });
+
+  it('seed the bank between them: the same height, the putty in proportion to the strip', () => {
+    const q = QUALITY_PRESETS.low;
+    const narrow = { ...DEFAULT_PARAMS, guideWidth: 0.6 };
+    const [x0, x1] = guideSpan(0.6);
+    const full = seedBankPositions(q, DEFAULT_PARAMS);
+    const pos = seedBankPositions(q, narrow);
+    let top = -Infinity, topFull = -Infinity;
+    for (let i = 0; i < pos.length; i += 3) {
+      expect(pos[i]).toBeGreaterThan(x0 + GEOMETRY.bankEndMargin - 1e-6);
+      expect(pos[i]).toBeLessThan(x1 - GEOMETRY.bankEndMargin + 1e-6);
+      top = Math.max(top, pos[i + 1]);
+    }
+    for (let i = 0; i < full.length; i += 3) topFull = Math.max(topFull, full[i + 1]);
+    expect(top).toBeCloseTo(topFull, 2);
+    const strip = (x1 - x0 - 2 * GEOMETRY.bankEndMargin) / (GEOMETRY.length - 2 * GEOMETRY.bankEndMargin);
+    expect(pos.length / full.length).toBeGreaterThan(strip * 0.97);
+    expect(pos.length / full.length).toBeLessThan(strip * 1.03);
+  });
+
+  it('lay the drop slots out between them, a chunk clear of each plate', () => {
+    for (const w of [0.4, 0.6, 0.8]) {
+      const [x0, x1] = guideSpan(w);
+      const xs = Array.from({ length: DROP_SLOTS }, (_, i) => dropSlotX(i, DROP_SLOTS, w));
+      expect(xs[0] - PIGMENT_CHUNK_RADIUS).toBeGreaterThan(x0);
+      expect(xs[xs.length - 1] + PIGMENT_CHUNK_RADIUS).toBeLessThan(x1);
+      for (let i = 1; i < xs.length; i++) expect(xs[i]).toBeGreaterThan(xs[i - 1]);
+      for (let i = 0; i < xs.length; i++) expect(xs[i] + xs[xs.length - 1 - i]).toBeCloseTo(GEOMETRY.length, 9);
+    }
   });
 });
 

@@ -25,7 +25,7 @@ import {
 
 /** Mill parameters that a link may carry, in the order they are written (and shown in the drawer). */
 export const LINK_PARAM_KEYS: readonly (keyof MillParams)[] = [
-  'omega', 'frictionRatio', 'gap', 'dispersion', 'gravity', 'backFriction', 'logFeed', 'foldPasses', 'streak', 'chunkFeed'
+  'omega', 'frictionRatio', 'gap', 'guideWidth', 'stiffness', 'dispersion', 'gravity', 'backFriction', 'logFeed', 'foldPasses', 'streak', 'chunkFeed'
 ];
 
 /** Label and readout for each linkable parameter (the drawer and the mixer's mill settings share these). */
@@ -35,11 +35,13 @@ export const PARAM_LABELS: Readonly<Record<keyof MillParams, { label: string; fo
   gap: { label: 'Nip gap', format: (v) => v.toFixed(3) },
   dispersion: { label: 'Dispersion', format: (v) => v.toFixed(2) },
   gravity: { label: 'Gravity', format: (v) => v.toFixed(1) },
+  stiffness: { label: 'Putty stiffness', format: (v) => `${v.toFixed(2)}×` },
   backFriction: { label: 'Back-roll friction', format: (v) => v.toFixed(2) },
   logFeed: { label: 'Log feed', format: (v) => (v > 0 ? `lower in ${v.toFixed(2)}/s` : 'drop') },
   foldPasses: { label: 'Cut & fold passes', format: (v) => `${Math.round(v)} × lift, pull, drop` },
   streak: { label: 'Colour streaks', format: (v) => (v > 0 ? `${Math.round(v)} spacings` : 'off') },
   chunkFeed: { label: 'Chunk feed', format: (v) => (v > 0 ? `over ${v.toFixed(1)} s` : 'dropped whole') },
+  guideWidth: { label: 'Side guides', format: (v) => (v < 1 ? `${Math.round(v * 100)}% of the roll` : 'at the roll ends') },
   tackCells: { label: 'Tack band', format: (v) => (v > 0 ? `${v.toFixed(1)} cells` : 'auto') }
 };
 
@@ -73,10 +75,14 @@ export function isPreset(v: unknown): v is QualityPreset {
   return typeof v === 'string' && v in QUALITY_PRESETS;
 }
 
+/** Parameters whose top is geometry, not caution: experimental mode does not lift it (the side guides cannot
+    stand wider apart than the rolls are long). */
+const HARD_CAPPED: ReadonlySet<keyof MillParams> = new Set<keyof MillParams>(['guideWidth']);
+
 /** The slider's top: the normal cap, or EXPERIMENTAL_SCALE times it with the caps lifted. */
 export function paramMax(key: keyof MillParams, experimental = false): number {
   const l = PARAM_LIMITS[key];
-  return experimental ? parseFloat((l.max * EXPERIMENTAL_SCALE).toFixed(6)) : l.max;
+  return experimental && !HARD_CAPPED.has(key) ? parseFloat((l.max * EXPERIMENTAL_SCALE).toFixed(6)) : l.max;
 }
 
 /**
@@ -87,7 +93,7 @@ export function clampParam(key: keyof MillParams, v: number, experimental = fals
   const l = PARAM_LIMITS[key];
   const snapped = Math.round(v / l.step) * l.step;
   const floored = Math.max(l.min, parseFloat(snapped.toFixed(6)));
-  return experimental ? floored : Math.min(l.max, floored);
+  return experimental && !HARD_CAPPED.has(key) ? floored : Math.min(l.max, floored);
 }
 
 /** `?experimental=1` (or `x=1`). */

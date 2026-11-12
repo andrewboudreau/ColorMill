@@ -10,7 +10,7 @@
  * and packs pixels into latents. The app (src/app.ts) draws files and text
  * onto a canvas to get the pixels.
  */
-import { GEOMETRY } from './config/mill';
+import { GEOMETRY, guideSpan } from './config/mill';
 import type { Latent, StampImage, StampPlacement } from './sim/types';
 
 /** Longest side of a stamp raster in pixels: finer than the colour raster can show, small enough to convert in a blink. */
@@ -41,11 +41,13 @@ export function stampDims(width: number, height: number, maxSide = STAMP_MAX_SID
   return { width: Math.max(1, Math.round(w * k)), height: Math.max(1, Math.round(h * k)) };
 }
 
-/** The bank's footprint seen from above: between the end margins along the roll, the bank's depth across the nip. */
-export function bankFootprint(): StampPlacement {
+/** The bank's footprint seen from above: between the end margins along the roll (inside the side guides, which
+    stand `guideWidth` of the roll length apart), the bank's depth across the nip. */
+export function bankFootprint(guideWidth = 1): StampPlacement {
+  const [x0, x1] = guideSpan(guideWidth);
   return {
-    x0: GEOMETRY.bankEndMargin,
-    x1: GEOMETRY.length - GEOMETRY.bankEndMargin,
+    x0: x0 + GEOMETRY.bankEndMargin,
+    x1: x1 - GEOMETRY.bankEndMargin,
     z0: GEOMETRY.nipZ - GEOMETRY.bankHalfDepth,
     z1: GEOMETRY.nipZ + GEOMETRY.bankHalfDepth
   };
@@ -56,8 +58,8 @@ export function bankFootprint(): StampPlacement {
  * footprint, scaled by `scale` (0.1..1 of the fit) and centred. The top row of
  * the picture goes to the back of the bank (z0), so it reads right from the front.
  */
-export function fitStamp(width: number, height: number, scale = 1): StampPlacement {
-  const b = bankFootprint();
+export function fitStamp(width: number, height: number, scale = 1, guideWidth = 1): StampPlacement {
+  const b = bankFootprint(guideWidth);
   const bw = b.x1 - b.x0;
   const bd = b.z1 - b.z0;
   const aspect = Math.max(width, 1) / Math.max(height, 1);

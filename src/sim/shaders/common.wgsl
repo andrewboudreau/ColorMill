@@ -57,7 +57,9 @@ struct Params {
   // starts at (0 = no rupture) and its rate constant
   agglo : vec4<f32>,
   // ... and the scale its shear rates are read through (config agglomerateRateScale: the square root of the
-  // preset's nominal gap over the reference gap, design §5); three spare
+  // preset's nominal gap over the reference gap, design §5); then the side guides (grid.wgsl): half the open
+  // width between the plates (they stand this far either side of the middle of the rolls), the speed the plates
+  // are closing at this substep (0 at rest and while they open), and the plates' top y
   agglo2 : vec4<f32>,
 };
 

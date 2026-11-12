@@ -15,7 +15,7 @@
  *                              <= 6, >= 20 distinct z cells) and be released cleanly
  */
 import { assert, withBrowser } from './lib.mjs';
-import { DEFAULT_PARAMS, GEOMETRY, QUALITY_PRESETS, gridDims, rollerPoses } from '../../src/config/mill.ts';
+import { DEFAULT_PARAMS, GEOMETRY, GUIDE_SPEED, QUALITY_PRESETS, gridDims, guideSpan, rollerPoses } from '../../src/config/mill.ts';
 
 // Mixbox endpoint latents (src/sim/mixbox.c)
 const BLUE = [0.86413725, 0.00441961, 0.02987264, 0.10157050, -0.05379499, -0.01226009, 0.00350272];
@@ -406,6 +406,51 @@ export default async function run() {
     assert(flop.meanX1 > 0.3 && flop.meanX1 < 1.2, `the first edge stays on the roll (mean x ${flop.meanX0.toFixed(3)} -> ${flop.meanX1.toFixed(3)})`);
     assert(flop.meanZ1 > 0.1 && flop.meanZ1 < 1.6 && flop.meanY1 > 0.2 && flop.meanY1 < 1.6, `the first edge, dropped, is somewhere on the mill (mean y ${flop.meanY1.toFixed(3)}, z ${flop.meanZ1.toFixed(3)})`);
     assert(aFlop.bad === 0 && aFlop.outside === 0 && aFlop.inRoller === 0 && aFlop.n === chunk.count, 'state sane after cut & fold');
+
+    // --- side guides: slid in on the running mill, the plates plough the bank inward ----------
+    // everything above ran with the plates at the ends of the rolls (the default), where they are the domain's
+    // own walls; here they come in to GUIDE_WIDTH and the bank between the rolls must end up between them
+    {
+      const GUIDE_WIDTH = 0.86;
+      const [gx0, gx1] = guideSpan(GUIDE_WIDTH);
+      const travel = gx0 / GUIDE_SPEED;
+      const guideFrames = framesFor(travel + 0.25);
+      const g = await page.evaluate(async ([width, n, x0, x1, ay, zB, zF]) => {
+        const sim = window.__solver.sim;
+        // the bank: the wedge between the rolls over the channel, clear of the sheet coming over the front roll's crown
+        const bank = (s) => {
+          let n = 0, out = 0, lo = Infinity, hi = -Infinity;
+          for (let p = 0; p < s.count; p++) {
+            const x = s.positions[3 * p], y = s.positions[3 * p + 1], z = s.positions[3 * p + 2];
+            if (!(y > ay + 0.06 && z > zB && z < zF)) continue;
+            n++;
+            if (x < x0 || x > x1) out++;
+            lo = Math.min(lo, x);
+            hi = Math.max(hi, x);
+          }
+          return { n, out, lo, hi };
+        };
+        const open0 = sim.stats.guideOpen;
+        const before = bank(await window.__solver.snapshot());
+        sim.params.guideWidth = width;
+        await window.__solver.stepFrames(n);
+        const s = await window.__solver.snapshot();
+        const after = bank(s);
+        const open1 = sim.stats.guideOpen;
+        return { open0, open1, before, after, count: s.count, positions: Array.from(s.positions), velocities: Array.from(s.velocities), latents: Array.from(s.latents), deformation: Array.from(s.deformation), flags: Array.from(s.flags), error: window.__solver.error };
+      }, [GUIDE_WIDTH, guideFrames, gx0, gx1, GEOMETRY.axisY, GEOMETRY.nipZ - 0.2, GEOMETRY.nipZ + 0.1]);
+      const aG = analyse(g, dims);
+      console.log(`  side guides ${g.open0} -> ${g.open1.toFixed(3)} in ${guideFrames} frames (plates at x = ${gx0.toFixed(3)} and ${gx1.toFixed(3)}): bank x ${g.before.lo.toFixed(3)} .. ${g.before.hi.toFixed(3)} (${g.before.out} of ${g.before.n} outside) -> ${g.after.lo.toFixed(3)} .. ${g.after.hi.toFixed(3)} (${g.after.out} of ${g.after.n} outside)`);
+      assert(!g.error, 'no WebGPU errors while the side guides slide: ' + g.error);
+      assert(g.open0 === 1, `the side guides start at the ends of the rolls (${g.open0})`);
+      assert(Math.abs(g.open1 - GUIDE_WIDTH) < 1e-6, `the side guides have reached their setting (${g.open1})`);
+      assert(g.before.out > 100, `the bank reached past where the plates now stand (${g.before.out} particles)`);
+      // (a few particles' allowance: the roll brings the sheet's edge round from outside the plates for a turn or two)
+      assert(g.after.out <= 0.002 * g.after.n, `the plates ploughed the bank in between them (${g.after.out} of ${g.after.n} particles outside)`);
+      assert(aG.bad === 0 && aG.outside === 0 && aG.inRoller === 0 && aG.n === chunk.count, `state sane after the side guides slid in (${JSON.stringify({ bad: aG.bad, outside: aG.outside, inRoller: aG.inRoller })})`);
+      // back to the ends for the moves below
+      await page.evaluate(() => { window.__solver.sim.params.guideWidth = 1; });
+    }
 
     // --- optional: cut & roll ---------------------------------------------
     if (doFold) {

@@ -22,6 +22,13 @@ const PEEL_ARC : f32 = 0.7;
 const NIP_HALF : f32 = 0.06;   // the channel's half height (the same 0.06 as below)
 const NIP_EXIT : f32 = 0.03;
 
+// The side guides (design §1, "Side guides"): two plates across the wedge between the rolls, from the channel's
+// lower end up to their top and GUIDE_REACH past the roll axes in front and behind (the plate the renderer draws).
+// Material found inside a plate's body (the sheet the roll brings round from outside the plates, or the bank when
+// the simulator is reset to a wider batch than the plates now allow) is moved inward at GUIDE_PUSH.
+const GUIDE_REACH : f32 = 0.06;
+const GUIDE_PUSH : f32 = 0.3;
+
 @compute @workgroup_size(4, 4, 4)
 fn main(@builtin(global_invocation_id) lid : vec3<u32>) {
   let gid = lid + vec3<u32>(box[BOX_GRID], box[BOX_GRID + 1u], box[BOX_GRID + 2u]);
@@ -135,9 +142,23 @@ fn main(@builtin(global_invocation_id) lid : vec3<u32>) {
     }
   }
 
-  // 3. domain walls (separating), ceiling, floor with stick-slip
+  // 3. side guides, domain walls (separating), ceiling, floor with stick-slip
   let margin = P.bands.z;
   let dom = P.domain.xyz;
+  // The guides are separating walls like the domain's: a node within the wall margin of a plate's face may not
+  // move outward. A plate that is sliding in is a wall that moves: those nodes go inward at least at its speed,
+  // so it ploughs the bank in front of it, and the putty gives way upward and into the nip as it would for a
+  // real plate; nothing is trapped behind it or set down somewhere else. With the plates at the ends of the
+  // rolls this is the domain wall's own condition (below) on the same nodes, and no node is inside a plate.
+  // Outside the plates' extent nothing is confined: the sheet round the front of the roll has no force along
+  // the roll on it and keeps its width.
+  let off = p.x - 0.5 * dom.x;
+  if (abs(off) > P.agglo2.y - margin && p.y > P.front.x - NIP_HALF && p.y < P.agglo2.w
+      && p.z > P.back.y - GUIDE_REACH && p.z < P.front.y + GUIDE_REACH) {
+    let inward = select(1.0, -1.0, off > 0.0);
+    let least = select(P.agglo2.z, GUIDE_PUSH, abs(off) > P.agglo2.y);
+    if (v.x * inward < least) { v.x = least * inward; }
+  }
   if (p.x < margin && v.x < 0.0) { v.x = 0.0; }
   if (p.x > dom.x - margin && v.x > 0.0) { v.x = 0.0; }
   if (p.z < margin && v.z < 0.0) { v.z = 0.0; }

@@ -93,6 +93,15 @@ describe('experimental mode', () => {
     expect(clampParam('omega', -3, true)).toBe(0);
   });
 
+  it('does not lift the side guides past the ends of the rolls', () => {
+    expect(paramMax('guideWidth', true)).toBe(1);
+    expect(clampParam('guideWidth', 3, true)).toBe(1);
+    expect(parseMillParams(new URLSearchParams('experimental=1&guideWidth=2'))).toEqual({});
+    expect(parseMillParams(new URLSearchParams('guideWidth=0.6'))).toEqual({ guideWidth: 0.6 });
+    expect(parseMillParams(new URLSearchParams('guideWidth=0.1'))).toEqual({ guideWidth: PARAM_LIMITS.guideWidth.min });
+    expect(formatMillQuery({ params: { guideWidth: 0.6 } })).toBe('guideWidth=0.6');
+  });
+
   it('stretches the sliders and writes the flag first in a link', () => {
     expect(paramMax('omega')).toBe(PARAM_LIMITS.omega.max);
     expect(paramMax('omega', true)).toBeCloseTo(PARAM_LIMITS.omega.max * EXPERIMENTAL_SCALE, 9);

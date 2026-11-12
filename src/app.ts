@@ -21,7 +21,7 @@ import { nipDiagnostics } from './sim/diagnostics';
 import { clampParam, formatMillQuery, isDefaultParam, parseExperimental, parseInk, parseMillParams, parseRollStyle } from './config/link';
 import { fitStamp, parseStampText, rgbaToStamp, stampDims } from './stamp';
 import {
-  BATCH_LIMITS, DEFAULT_AGGLOMERATE, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, estimateParticleCount, gridDims, materialLitres, soundSpeed,
+  BATCH_LIMITS, DEFAULT_AGGLOMERATE, DEFAULT_CHUNK_SIZE, DEFAULT_MATERIAL, DEFAULT_PARAMS, DROP_SLOTS, GEOMETRY, PARAM_LIMITS, PIGMENT_CHUNK_SIZES, QUALITY_PRESETS, SILICONE_KG_PER_LITRE, dropSlotX, guideOpen, estimateParticleCount, gridDims, materialLitres, soundSpeed,
   type AgglomerateConstants, type MaterialConstants, type MillConfig, type MillParams, type QualityPreset
 } from './config/mill';
 import { WebGpuUnavailableError, createGpuContext, type GpuCapabilities, type GpuContext } from './gpu/device';
@@ -282,7 +282,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     if (!sim) return Promise.resolve(0);
     const slotIndex = clampSlot(slot, dropSlot);
     const sizeIndex = clampSize(size, chunkSize);
-    const x = dropSlotX(slotIndex);
+    const x = dropSlotX(slotIndex, DROP_SLOTS, sim.params.guideWidth);
     const radius = PIGMENT_CHUNK_SIZES[sizeIndex].radius;
     // a dollop on top of whatever material is over the nip at this x (the GPU
     // finds the surface, so chunks stack on each other and it works after the
@@ -356,7 +356,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   };
   // --- stamping a picture on the bank ----------------------------------------------
   /** Stamp a raster of latents on the bank (fitted to its footprint unless `place` says where). */
-  const stampImage = (image: StampImage, place = fitStamp(image.width, image.height)): void => {
+  const stampImage = (image: StampImage, place = fitStamp(image.width, image.height, 1, sim?.params.guideWidth)): void => {
     if (!sim) return;
     sim.stampImage(image, place);
   };
@@ -480,9 +480,21 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     },
     onCutFold: () => withSim('cutAndFold failed', (s) => s.cutAndFold()),
     onClear: () => withSim('clearPigment failed', (s) => s.clearPigment()),
-    onReset: () => withSim('reset failed', (s) => { s.reset(); dropLog.length = 0; stampedText = ''; stampedInk = undefined; hud.setError(null); }),
+    onReset: () => { resetBatch(); hud.setError(null); },
     onTogglePause: togglePause
   }, undefined, dropSlot, chunkSize);
+
+  /** Reset: a fresh batch. It is seeded between the side guides, so when they have been moved since this
+      simulator was built the simulator is rebuilt (the particle buffers are sized by the seeded batch). */
+  function resetBatch(): void {
+    if (sim && guideOpen(sim.params.guideWidth) !== sim.stats.guideSeeded) {
+      stampedText = '';
+      stampedInk = undefined;
+      void rebuildSim(preset, batch, true);
+      return;
+    }
+    withSim('reset failed', (s) => { s.reset(); dropLog.length = 0; stampedText = ''; stampedInk = undefined; });
+  }
 
   const nudge = (key: 'omega' | 'gap', dir: 1 | -1): void => {
     if (!sim) return;
@@ -493,7 +505,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
   };
   const removeKeys = installKeyboard(window, {
     togglePause,
-    reset: () => withSim('reset failed', (s) => { s.reset(); dropLog.length = 0; stampedText = ''; stampedInk = undefined; }),
+    reset: () => resetBatch(),
     cutFold: () => withSim('cutAndFold failed', (s) => s.cutAndFold()),
     cutFlop,
     pigment: (i) => { const key = palette.order[i]; if (key) tapPigment(key); },
@@ -576,6 +588,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
         params: sim.params,
         rollerAngleFront: st.rollerAngleFront,
         rollerAngleBack: st.rollerAngleBack,
+        guideOpen: st.guideOpen,
         timeSeconds: (performance.now() - startTime) / 1000
       });
       if (drew === false && !stepped) return;
@@ -663,9 +676,10 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
     batch: b
   });
 
-  /** Rebuild the sim at a preset and batch size (both re-seed the bank). */
-  async function rebuildSim(p: QualityPreset, b: number): Promise<void> {
-    if (!sim || !renderer || rebuilding || (p === preset && b === batch)) { panel.setQuality(preset); panel.setBatch(batch); return; }
+  /** Rebuild the sim at a preset and batch size (both re-seed the bank); `force` rebuilds at the same ones
+      (a reset after the side guides were moved). */
+  async function rebuildSim(p: QualityPreset, b: number, force = false): Promise<void> {
+    if (!sim || !renderer || rebuilding || (p === preset && b === batch && !force)) { panel.setQuality(preset); panel.setBatch(batch); return; }
     rebuilding = true;
     panel.setQualityEnabled(false);
     const old = sim;
@@ -810,6 +824,7 @@ export async function bootApp(opts: BootOptions): Promise<AppHandle> {
         params: (sim as GpuMpmSim).params,
         rollerAngleFront: st.rollerAngleFront,
         rollerAngleBack: st.rollerAngleBack,
+        guideOpen: st.guideOpen,
         timeSeconds: (performance.now() - startTime) / 1000
       });
     },

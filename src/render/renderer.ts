@@ -10,7 +10,7 @@
  */
 import type { GpuContext } from '../gpu/device';
 import { configureCanvas } from '../gpu/device';
-import { GEOMETRY, bankTopY, rollerPoses } from '../config/mill';
+import { GEOMETRY, guideOpen, guideTopY, rollerPoses } from '../config/mill';
 import type { RenderVolumes } from '../sim/types';
 import { assignCamera, cameraBasis, defaultCamera } from './camera';
 import type { RenderMode, CameraState, RenderFrameInfo, Renderer } from './types';
@@ -24,7 +24,6 @@ import raymarchSrc from './shaders/raymarch.wgsl?raw';
 export const ISO_THRESHOLD = 0.26;
 /** Cap on the backing-store scale (design §8). */
 export const MAX_DPR = 2;
-const GUIDE_TOP = bankTopY(1) + 0.15;
 
 /** Light rig; directions point toward the light, colours are linear. */
 export interface LightRig {
@@ -373,8 +372,9 @@ export class RayMarchRenderer implements Renderer {
     set4(14, w, hgt, L.exposure, flags);
     const m = this.mipSize;
     set4(15, m[0], m[1], m[2], MIP_BLOCK);
-    // end-guide plates: plate top (a little above the settled bank), half depth in z, thickness, enabled
-    set4(16, GUIDE_TOP, GEOMETRY.bankHalfDepth, 0.012, this.endGuides ? 1 : 0);
+    // side-guide plates: plate top (a little above the settled bank), half the open width between them, thickness, enabled
+    const open = guideOpen(info.guideOpen ?? info.params.guideWidth);
+    set4(16, guideTopY(open), 0.5 * open * GEOMETRY.length, 0.012, this.endGuides ? 1 : 0);
     // the colour raster's grid (design §3.5): node counts and cell size
     const cg = vol ? vol.fineDims : undefined;
     set4(17, cg ? cg.nx : 1, cg ? cg.ny : 1, cg ? cg.nz : 1, cg ? cg.h : hCell);

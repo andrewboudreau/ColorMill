@@ -21,6 +21,8 @@ export interface RenderFrameInfo {
   readonly params: MillParams;
   readonly rollerAngleFront: number;
   readonly rollerAngleBack: number;
+  /** side guides: the open width where the plates stand now (SimStats.guideOpen); params.guideWidth when absent */
+  readonly guideOpen?: number;
   /** seconds since start, for subtle animation */
   readonly timeSeconds: number;
 }

@@ -181,6 +181,11 @@ export interface MillParams {
   gap: number;
   /** gravity, sim units / s^2 */
   gravity: number;
+  /** how stiff the putty is: multiplies its strength in flow (the yield stress and the Herschel-Bulkley consistency,
+   *  DEFAULT_MATERIAL's), not its elastic moduli, so the sound speed and with it the time step's margin are the
+   *  same at every setting. The agglomerates' cohesive stress is the pigment's and does not move with it: a
+   *  stiffer putty loads them harder and disperses them sooner. */
+  stiffness: number;
   /** lamellar mixing: the exponent k of the exchange closure (design §5, src/sim/lamina.ts exchangeFraction). A
    *  particle whose pigment laminae are thinned to s below the particle spacing keeps (s / spacing)^k of its
    *  difference from its neighbours. 1 is the geometric value; 0 switches the exchange off. */
@@ -208,6 +213,9 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
   frictionRatio: 1.25,
   gap: 0.04,
   gravity: 2.0,
+  /* a quarter stiffer than the flow curve design §4 chose: the owner's choice. The bank and the sheet measure the same there
+     (tools/perf/bank.mjs: `low` slows its bank from 1.5 up, `high` is unmoved to 2) */
+  stiffness: 1.25,
   /* not tuned: 1 is what the geometry gives (a parcel one spacing wide that samples stripes s thick differs
      from the local mean in proportion to s / spacing). It is not a rate, so it does not depend on the nip's
      strain rates or on the preset */
@@ -229,6 +237,7 @@ export const PARAM_LIMITS: Readonly<Record<keyof MillParams, { min: number; max:
   frictionRatio: { min: 1, max: 1.6, step: 0.01 },
   gap: { min: 0.02, max: 0.1, step: 0.002 },
   gravity: { min: 0, max: 6, step: 0.1 },
+  stiffness: { min: 0.5, max: 2, step: 0.05 },
   dispersion: { min: 0, max: 2, step: 0.05 },
   backFriction: { min: 0, max: 1, step: 0.02 },
   tackCells: { min: 0, max: 6, step: 0.1 },

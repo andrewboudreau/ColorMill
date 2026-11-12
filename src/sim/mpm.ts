@@ -741,7 +741,8 @@ export class GpuMpm implements GpuMpmSim {
     f.set([GEOMETRY.domain[0], GEOMETRY.domain[1], GEOMETRY.domain[2], q.dt * q.substepsPerFrame], o + 8);
     f.set([back.axisY, back.axisZ, back.omegaX, p.backFriction], o + 12);
     f.set([front.axisY, front.axisZ, front.omegaX, GEOMETRY.radius], o + 16);
-    f.set([mu, bulkModulus(mat), mat.yieldStress, mat.consistency], o + 20);
+    const stiff = Math.max(p.stiffness, 0);   // the putty's strength in flow (MillParams.stiffness)
+    f.set([mu, bulkModulus(mat), mat.yieldStress * stiff, mat.consistency * stiff], o + 20);
     f.set([pVol, pMass, pMass / (pVol * MATERIAL_DENSITY), p.dispersion], o + 24);
     if (this.foldMode === 1) f.set([foldActive ? 1 : 0, foldT, this.foldRollSeconds, this.foldFeed], o + 28);
     else f.set([foldActive ? this.foldMode : 0, foldT, this.hand.lift, 0], o + 28);

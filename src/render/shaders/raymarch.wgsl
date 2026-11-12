@@ -107,8 +107,10 @@ const COV_DITHER: f32 = 0.08;
 const CLEAR_BODY: vec3f = vec3f(0.60, 0.65, 0.67);
 // the clear base turns hazy over this many solver cells of thickness (1/e of the light passes)
 const CLEAR_HAZE_CELLS: f32 = 3.2;
-// roughness of the putty's skin (a satin sheen: at 0.11 it read as wet and too shiny) and of the rolls around their circumference
-const PUTTY_ROUGH: f32 = 0.30;
+// roughness of the putty's skin (matte, like kneaded silicone: 0.11 read as wet, 0.30 still as glossy) and of the rolls around
+// their circumference; PUTTY_GLOSS scales what the skin mirrors (a soft skin scatters much of it)
+const PUTTY_ROUGH: f32 = 0.55;
+const PUTTY_GLOSS: f32 = 0.5;
 // density gradient at the surface, per cell (rest density = 1): below WEAK the normal is noise and the
 // skin is drawn rough, above FIRM it is a face and gets the full gloss
 const NORMAL_WIDE: f32 = 3.0;   // weight of the wide field's gradient against the surface density's
@@ -781,8 +783,8 @@ fn shadePutty(p: vec3f, n: vec3f, v: vec3f, albedo: vec3f, ao: f32, thickness: f
   col += tint * through * trans * graze * 0.55 * ao;
 
   // gloss: a dielectric skin (F0 = 0.04) mirroring the studio, the rolls and the bench
-  let sr = mix(PUTTY_ROUGH, 0.5, rough);
-  let f = fresnel(nv, vec3f(0.04), sr).x;
+  let sr = max(PUTTY_ROUGH, mix(PUTTY_ROUGH, 0.5, rough));
+  let f = fresnel(nv, vec3f(0.04), sr).x * PUTTY_GLOSS;
   let r = reflect(-v, n);
   var out: PuttyShade;
   out.spec = reflectScene(p + n * (0.5 * h), r, sr) * (f * specOcclusion(nv, ao, sr));

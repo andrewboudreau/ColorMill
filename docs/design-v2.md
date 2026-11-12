@@ -694,9 +694,9 @@ Each particle carries a 7-float **Mixbox latent** `z` (Sochorová & Jamriška
   and the lump sinks at the feed speed through a level, the top of the
   material it was set down on; a particle is let go as it crosses the
   level, with the lump's velocity. The feed is even and lasts
-  `2r / speed`: `chunkFeed` seconds for a medium chunk (default 6, about
-  three revolutions; a drawer slider and a link key; 0 lets chunks go
-  whole). The same pigment is then laid around the whole circumference as
+  `2r / speed`: `chunkFeed` seconds for a medium chunk (6 is about
+  three revolutions; a drawer slider and a link key; the default, 0, lets
+  chunks go whole). The same pigment is then laid around the whole circumference as
   a layer several times thinner, which is where the streak lines and the
   unequal ink show. The level is per chunk, in a small table (first
   particle, count, level, footprint; 32 chunks, beyond that a chunk is let

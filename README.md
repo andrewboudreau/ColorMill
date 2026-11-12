@@ -177,7 +177,7 @@ lays the same three bands on the bank.
 | Drop-slot strip (bottom bar) | Pick which of the 6 spots along the roll the next tap lands on (also `[` / `]`, or `?slot=3`) |
 | Chunk-size dots (bottom bar) | Small, medium or large chunk for the next tap (also `-` / `=`, or `?chunk=s`, `m`, `l`) |
 | Tap a swatch (bottom bar) | Set a chunk of that pigment down on the bank at the chosen spot (chunks stack). It feeds in from the bottom over a few seconds |
-| **Chunk feed** slider | How long a medium chunk takes to feed in, in seconds (default 6; bigger chunks take longer in proportion). `?chunkFeed=0` drops chunks whole, as before |
+| **Chunk feed** slider | Off by default: a chunk is dropped whole. Above 0 it is held and fed in, over that many seconds for a medium chunk (bigger chunks take longer in proportion), e.g. `?chunkFeed=6` |
 | Colour picker swatch | Inject a custom colour (converted to a Mixbox latent at runtime) |
 | **Stamp picture** | Press an image file onto the bank's surface (or drop an image on the mill); `?stamp=Hello&ink=red` stamps a line of text at the start |
 | **Cut & fold** / `C` | Cut the sheet across at the crown, lift the cut edge and flop it back onto the front roll; the sheet follows and the rolls pull the fold in. One to three passes a press ("Cut & fold passes" in the drawer; ends alternate) |

@@ -235,9 +235,10 @@ export const DEFAULT_PARAMS: Readonly<MillParams> = {
   logFeed: 0,
   foldPasses: 2,
   streak: 12,
-  /* about three revolutions of the front roll at the default speed: let go whole, a chunk went round as one
-     patch a third to a half of the circumference long and stayed one for many revolutions */
-  chunkFeed: 6,
+  /* off: a chunk is let go whole when it is set down. Fed over about 6 s (three revolutions of the front roll
+     at the default speed) the same pigment is laid round the roll as a thin layer; let go whole it goes round
+     as one patch a third to a half of the circumference long and stays one for many revolutions */
+  chunkFeed: 0,
   /* the whole roll: the plates are the end guides */
   guideWidth: 1
 };

@@ -314,6 +314,7 @@ export default async function run() {
     // --- pigment chunk: new coloured material from the reserved pool -------------
     const chunk = await page.evaluate(async (red) => {
       const n0 = window.__solver.stats().particleCount;
+      window.__solver.sim.params.chunkFeed = 6; // off by default: turn the held feed on for the checks below
       const added = await window.__solver.sim.addPigmentChunk(0.4, 0.75, 0.12, red);
       await window.__solver.stepFrames(3);
       const s = await window.__solver.snapshot();
